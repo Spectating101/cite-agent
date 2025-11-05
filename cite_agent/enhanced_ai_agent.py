@@ -4016,49 +4016,116 @@ class EnhancedNocturnalAgent:
     async def _analyze_request_type(self, question: str) -> Dict[str, Any]:
         """Analyze what type of request this is and what APIs to use"""
         
-        # Financial indicators - COMPREHENSIVE list to ensure FinSight is used
+        # Financial indicators - COMPREHENSIVE & NATURAL list to ensure FinSight is used
         financial_keywords = [
             # Core metrics
-            'financial', 'revenue', 'sales', 'income', 'profit', 'earnings', 'loss',
+            'financial', 'revenue', 'revenues', 'sales', 'income', 'profit', 'profits', 'earnings', 'loss', 'losses',
             'net income', 'operating income', 'gross profit', 'ebitda', 'ebit',
-            
+
             # Margins & Ratios
-            'margin', 'gross margin', 'profit margin', 'operating margin', 'net margin', 'ebitda margin',
-            'ratio', 'current ratio', 'quick ratio', 'debt ratio', 'pe ratio', 'p/e',
-            'roe', 'roa', 'roic', 'roce', 'eps',
-            
+            'margin', 'margins', 'gross margin', 'profit margin', 'operating margin', 'net margin', 'ebitda margin',
+            'ratio', 'ratios', 'current ratio', 'quick ratio', 'debt ratio', 'pe ratio', 'p/e',
+            'roe', 'roa', 'roic', 'roce', 'eps', 'earnings per share',
+            'profitability', 'profitable', 'liquidity', 'solvency',
+
             # Balance Sheet
             'assets', 'liabilities', 'equity', 'debt', 'cash', 'capital',
             'balance sheet', 'total assets', 'current assets', 'fixed assets',
             'shareholders equity', 'stockholders equity', 'retained earnings',
-            
+            'book value', 'tangible assets', 'intangible assets',
+
             # Cash Flow
-            'cash flow', 'fcf', 'free cash flow', 'operating cash flow',
-            'cfo', 'cfi', 'cff', 'capex', 'capital expenditure',
-            
+            'cash flow', 'cashflow', 'fcf', 'free cash flow', 'operating cash flow',
+            'cfo', 'cfi', 'cff', 'capex', 'capital expenditure', 'capital expenditures',
+            'burn rate', 'runway',
+
             # Market Metrics
-            'stock', 'market cap', 'market capitalization', 'enterprise value',
-            'valuation', 'price', 'share price', 'stock price', 'quote',
-            'volume', 'trading volume', 'shares outstanding',
-            
+            'stock', 'stocks', 'shares', 'share', 'market cap', 'market capitalization', 'enterprise value',
+            'valuation', 'price', 'share price', 'stock price', 'quote', 'quotes',
+            'volume', 'trading volume', 'shares outstanding', 'float',
+            'market value', 'fair value',
+
             # Financial Statements
-            'income statement', '10-k', '10-q', '8-k', 'filing', 'sec filing',
-            'quarterly', 'annual report', 'earnings report', 'financial statement',
-            
-            # Company Info
-            'ticker', 'company', 'corporation', 'ceo', 'earnings call',
-            'dividend', 'dividend yield', 'payout ratio',
-            
+            'income statement', '10-k', '10-q', '8-k', 'filing', 'filings', 'sec filing',
+            'quarterly', 'quarterly results', 'annual report', 'earnings report', 'financial statement', 'financial statements',
+            'disclosure', 'disclosures',
+
+            # Company Info & Analysis
+            'ticker', 'tickers', 'company', 'companies', 'corporation', 'corp', 'inc',
+            'ceo', 'cfo', 'executive', 'management', 'board',
+            'earnings call', 'investor', 'investors', 'shareholder', 'shareholders',
+            'dividend', 'dividends', 'dividend yield', 'payout ratio', 'buyback', 'buybacks',
+
+            # Natural language triggers for financial analysis
+            'how is ... doing', 'doing financially', 'financial health', 'financial performance',
+            'financially sound', 'financially stable', 'in debt', 'profitable',
+            'compare ... financially', 'better investment', 'which stock',
+            'analyze ...', 'financial analysis', 'investment analysis',
+            'should i invest', 'worth investing', 'good investment',
+
             # Growth & Performance
-            'growth', 'yoy', 'year over year', 'qoq', 'quarter over quarter',
-            'cagr', 'trend', 'performance', 'returns'
+            'growth', 'growing', 'grew', 'decline', 'declining', 'declined',
+            'yoy', 'year over year', 'year-over-year', 'qoq', 'quarter over quarter', 'quarter-over-quarter',
+            'cagr', 'compound annual', 'trend', 'trending', 'performance', 'performing',
+            'returns', 'return on', 'outperform', 'underperform',
+            'beat estimates', 'miss estimates', 'guidance', 'forecast',
+
+            # Industry & Sector
+            'sector', 'industry', 'market', 'competitive', 'competitor', 'competitors',
+            'peer', 'peers', 'benchmark', 'versus', 'vs',
+
+            # Common ticker symbols (for immediate detection)
+            'aapl', 'msft', 'googl', 'amzn', 'meta', 'tsla', 'nvda',
+            'nflx', 'dis', 'ba', 'jpm', 'gs', 'wmt', 'v', 'ma'
         ]
         
-        # Research indicators (quantitative)
+        # Research indicators - COMPREHENSIVE & NATURAL
         research_keywords = [
-            'research', 'paper', 'study', 'academic', 'literature', 'journal',
-            'synthesis', 'findings', 'methodology', 'abstract', 'citation',
-            'author', 'publication', 'peer review', 'scientific'
+            # Explicit academic keywords
+            'research', 'paper', 'papers', 'study', 'studies', 'academic', 'literature', 'journal',
+            'synthesis', 'findings', 'methodology', 'abstract', 'citation', 'citations',
+            'author', 'authors', 'publication', 'publications', 'peer review', 'scientific',
+            'article', 'articles', 'conference', 'proceedings', 'arxiv', 'doi',
+
+            # Knowledge/explanation queries (natural triggers)
+            'explain', 'what is', 'what are', 'how does', 'how do', 'why does', 'why do',
+            'tell me about', 'describe', 'overview of', 'introduction to', 'basics of',
+            'differences between', 'comparison of', 'compare', 'contrast',
+            'history of', 'evolution of', 'development of', 'progress in',
+            'state of the art', 'sota', 'current research', 'recent advances',
+            'latest', 'recent', 'newest', 'cutting edge', 'frontier',
+
+            # Domain-specific triggers (AI/ML)
+            'transformer', 'transformers', 'attention', 'bert', 'gpt', 'llm', 'language model',
+            'neural network', 'deep learning', 'machine learning', 'reinforcement learning',
+            'computer vision', 'nlp', 'natural language', 'embedding', 'embeddings',
+            'training', 'fine-tuning', 'pre-training', 'architecture', 'model',
+
+            # Domain-specific triggers (Science)
+            'mechanism', 'mechanisms', 'principle', 'principles', 'theory', 'theories',
+            'hypothesis', 'hypotheses', 'experiment', 'experiments', 'discovery',
+            'breakthrough', 'innovation', 'technique', 'techniques', 'method', 'methods',
+            'approach', 'approaches', 'framework', 'frameworks', 'algorithm', 'algorithms',
+
+            # Meta-research queries
+            'literature review', 'systematic review', 'meta-analysis', 'survey',
+            'comprehensive', 'exhaustive', 'thorough', 'in-depth',
+            'evidence', 'proof', 'support', 'backing', 'foundation',
+            'consensus', 'debate', 'controversy', 'disagreement',
+
+            # Quality/impact indicators
+            'seminal', 'foundational', 'influential', 'landmark', 'pioneering',
+            'best paper', 'award-winning', 'highly cited', 'top cited',
+            'benchmark', 'state-of-the-art', 'baseline',
+
+            # Temporal research queries
+            'timeline', 'chronology', 'progression', 'trajectory',
+            'before', 'after', 'since', 'until', 'from ... to',
+
+            # Question patterns
+            'key papers', 'important work', 'must read', 'essential reading',
+            'who discovered', 'who invented', 'who proposed', 'who developed',
+            'when was', 'where did', 'which paper',
         ]
         
         # Qualitative indicators (NEW)
