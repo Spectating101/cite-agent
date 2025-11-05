@@ -31,6 +31,7 @@ from .workflow import (
     analyze_paper_collection, calculate_venue_score,
     calculate_citation_score, calculate_recency_score
 )
+from .research_intelligence import ResearchIntelligence, SynthesisResult
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -87,6 +88,10 @@ class EnhancedNocturnalAgent:
             self.web_search = WebSearchIntegration()
         except Exception:
             pass  # Web search optional
+
+        # Initialize research intelligence (world-class multi-source synthesis)
+        self.research_intelligence = ResearchIntelligence()
+
         self.daily_query_count = 0
         self.total_cost = 0.0
         self.cost_per_1k_tokens = 0.0001  # Groq pricing estimate
@@ -2684,6 +2689,171 @@ class EnhancedNocturnalAgent:
 
         except Exception as e:
             return {"error": f"Comparison failed: {e}"}
+
+    async def research_deep_dive(
+        self,
+        query: str,
+        include_web: bool = True,
+        include_financial: bool = False,
+        max_papers: int = 10
+    ) -> SynthesisResult:
+        """
+        WORLD-CLASS: Deep research combining papers, web, and knowledge
+
+        This is the killer feature - combines ALL data sources into one coherent synthesis.
+        Makes the agent undeniably better than ChatGPT/Claude/Perplexity.
+
+        Args:
+            query: Research query
+            include_web: Include web search results
+            include_financial: Include financial data if relevant
+            max_papers: Maximum papers to include
+
+        Returns:
+            SynthesisResult with multi-source synthesis
+        """
+        # Gather data from all sources in parallel
+        tasks = []
+
+        # 1. Academic papers
+        paper_task = self.search_academic_papers(query, limit=max_papers)
+        tasks.append(paper_task)
+
+        # 2. Web search (if enabled)
+        web_task = None
+        if include_web and self.web_search:
+            web_task = self.web_search.search_web(query, num_results=5)
+            tasks.append(web_task)
+
+        # 3. Financial data (if relevant and enabled)
+        financial_task = None
+        if include_financial:
+            # Try to detect ticker in query
+            analysis = await self._analyze_request_type(query)
+            if 'finsight' in analysis.get('apis', []):
+                # Extract ticker if possible
+                words = query.upper().split()
+                tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA']
+                ticker = next((w for w in words if w in tickers), None)
+                if ticker:
+                    financial_task = self.analyze_financial_health(ticker)
+                    tasks.append(financial_task)
+
+        # Gather all results
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results
+        papers_data = results[0] if results and not isinstance(results[0], Exception) else None
+        web_data = None
+        financial_data = None
+
+        result_index = 1
+        if web_task:
+            web_data = results[result_index] if not isinstance(results[result_index], Exception) else None
+            result_index += 1
+        if financial_task:
+            financial_data = results[result_index] if not isinstance(results[result_index], Exception) else None
+
+        # Extract papers
+        papers = papers_data.get('results', []) if papers_data else []
+
+        # Extract web results
+        web_results = web_data.get('results', []) if web_data and web_data.get('success') else []
+
+        # Get LLM knowledge (quick summary)
+        llm_knowledge = None
+        if self.client:
+            try:
+                model_name = "llama-3.3-70b-versatile" if self.llm_provider != "cerebras" else "gpt-oss-120b"
+                response_obj = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a research expert. Provide concise, accurate summaries."},
+                        {"role": "user", "content": f"In 2-3 sentences, explain: {query}"}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+                llm_knowledge = response_obj.choices[0].message.content.strip()
+            except Exception:
+                pass
+
+        # Synthesize all sources
+        synthesis = await self.research_intelligence.synthesize_multi_source(
+            query=query,
+            papers=papers,
+            web_results=web_results,
+            financial_data=financial_data,
+            llm_knowledge=llm_knowledge
+        )
+
+        return synthesis
+
+    async def generate_literature_review(
+        self,
+        query: str,
+        style: str = "academic",
+        max_papers: int = 15
+    ) -> str:
+        """
+        WORLD-CLASS: Auto-generate literature review
+
+        Args:
+            query: Research topic
+            style: 'academic', 'technical', or 'accessible'
+            max_papers: Maximum papers to include
+
+        Returns:
+            Formatted literature review
+        """
+        # Get deep research synthesis
+        synthesis = await self.research_deep_dive(query, include_web=True, max_papers=max_papers)
+
+        # Generate literature review
+        review = self.research_intelligence.generate_literature_review(
+            query, synthesis, style=style
+        )
+
+        return review
+
+    def export_research(
+        self,
+        synthesis: SynthesisResult,
+        format: str = "markdown",
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        WORLD-CLASS: Export research to various formats
+
+        Args:
+            synthesis: Research synthesis result
+            format: 'markdown', 'json', 'text'
+            output_path: Optional file path to save to
+
+        Returns:
+            Formatted content (also saves to file if output_path provided)
+        """
+        if format == "markdown":
+            content = synthesis.to_markdown()
+        elif format == "json":
+            content = synthesis.to_json()
+        elif format == "text":
+            content = f"{synthesis.query}\n\n"
+            content += synthesis.summary + "\n\n"
+            content += "Key Findings:\n"
+            for i, finding in enumerate(synthesis.key_findings, 1):
+                content += f"{i}. {finding}\n"
+        else:
+            content = synthesis.to_markdown()  # Default to markdown
+
+        # Save to file if requested
+        if output_path:
+            try:
+                Path(output_path).write_text(content, encoding='utf-8')
+            except Exception as e:
+                logger.error(f"Failed to save export: {e}")
+
+        return content
 
     def _looks_like_user_prompt(self, command: str) -> bool:
         command_lower = command.strip().lower()
