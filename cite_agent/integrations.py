@@ -508,36 +508,48 @@ class CitationManagerExporter:
 
     def export_to_mendeley(
         self,
-        papers: List[Dict[str, Any]],
-        output_path: str = "mendeley_import.bib"
+        papers: List[Dict[str, Any]]
     ) -> str:
         """
         Export to Mendeley-compatible BibTeX
 
         Args:
             papers: List of papers
-            output_path: Output file path
 
         Returns:
-            Path to created file
+            BibTeX content string
         """
         # Mendeley uses standard BibTeX
-        return self.zotero.export_to_bibtex_file(papers, output_path)
+        from .workflow import Paper
+
+        bibtex_entries = []
+        for paper_dict in papers:
+            # Convert to Paper object
+            paper = Paper(
+                title=paper_dict.get('title', 'Unknown'),
+                authors=paper_dict.get('authors', []),
+                year=paper_dict.get('year', 0),
+                doi=paper_dict.get('doi'),
+                url=paper_dict.get('url'),
+                venue=paper_dict.get('venue'),
+                abstract=paper_dict.get('abstract')
+            )
+            bibtex_entries.append(paper.to_bibtex())
+
+        return "\n\n".join(bibtex_entries)
 
     def export_to_endnote(
         self,
-        papers: List[Dict[str, Any]],
-        output_path: str = "endnote_import.xml"
+        papers: List[Dict[str, Any]]
     ) -> str:
         """
         Export to EndNote XML format
 
         Args:
             papers: List of papers
-            output_path: Output file path
 
         Returns:
-            Path to created file
+            EndNote XML content string
         """
         # EndNote XML format
         xml_content = '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -570,23 +582,20 @@ class CitationManagerExporter:
 
         xml_content += '</records>\n</xml>'
 
-        Path(output_path).write_text(xml_content, encoding='utf-8')
-        return output_path
+        return xml_content
 
     def export_to_ris(
         self,
-        papers: List[Dict[str, Any]],
-        output_path: str = "papers.ris"
+        papers: List[Dict[str, Any]]
     ) -> str:
         """
         Export to RIS format (supported by RefWorks, Mendeley, Zotero)
 
         Args:
             papers: List of papers
-            output_path: Output file path
 
         Returns:
-            Path to created file
+            RIS content string
         """
         ris_content = ""
 
@@ -613,8 +622,7 @@ class CitationManagerExporter:
 
             ris_content += "ER  - \n\n"
 
-        Path(output_path).write_text(ris_content, encoding='utf-8')
-        return output_path
+        return ris_content
 
     def _escape_xml(self, text: str) -> str:
         """Escape XML special characters"""

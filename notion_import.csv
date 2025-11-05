@@ -1,4 +1,0 @@
-Title,Authors,Year,Venue,DOI,URL,Quality Score,Citation Count,Abstract
-Attention Is All You Need,Vaswani et al.,2017,NeurIPS,10.1234/transformer,https://arxiv.org/abs/1706.03762,100,75000,The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.
-BERT: Pre-training of Deep Bidirectional Transformers,Devlin et al.,2019,NAACL,10.1234/bert,https://arxiv.org/abs/1810.04805,98,65000,"We introduce BERT, a new language representation model."
-GPT-3: Language Models are Few-Shot Learners,Brown et al.,2020,NeurIPS,10.1234/gpt3,https://arxiv.org/abs/2005.14165,99,45000,Recent work has demonstrated substantial gains on NLP tasks.
