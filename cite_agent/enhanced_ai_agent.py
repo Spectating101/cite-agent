@@ -2406,6 +2406,17 @@ class EnhancedNocturnalAgent:
         if any(word in question_lower for word in ["list", "show", "files", "ls"]):
             return "ls -lah"
 
+        # 4.5. Change directory (cd command)
+        if question_lower.startswith('cd ') or ' cd ' in question_lower:
+            # Extract target directory
+            cd_match = re.search(r'cd\s+([^\s]+)', question_lower)
+            if cd_match:
+                target = cd_match.group(1)
+                return f"cd {target} && pwd"
+            # If just "cd" mentioned without target, try to infer from context
+            if target_dir:
+                return f"cd {target_dir} && pwd"
+
         # 5. Current directory query
         if any(word in question_lower for word in ["where", "pwd", "current directory", "location"]):
             return "pwd"
@@ -3869,7 +3880,7 @@ class EnhancedNocturnalAgent:
                 'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
-                'git', 'grep', 'navigate', 'go to', 'change to'
+                'git', 'grep', 'navigate', 'go to', 'change to', 'cd ', 'cd'
             ])
             
             if might_need_shell and self.shell_session:
