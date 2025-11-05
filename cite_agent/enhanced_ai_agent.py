@@ -244,8 +244,19 @@ class EnhancedNocturnalAgent:
         if debug_mode:
             print("  ✓ Execution Safety Layer initialized")
 
-        # Note: Request Queue is a singleton, initialized on first use in process_request()
-        # This is intentional to avoid creating unnecessary resources
+        # 6. Concurrency Control using Semaphore (Phase 2.2 alternative)
+        # Simpler than RequestQueue for request-response pattern
+        self.max_concurrent_requests = 50  # Global limit
+        self.max_concurrent_per_user = 3   # Per-user limit
+        self.request_semaphore = asyncio.Semaphore(self.max_concurrent_requests)
+        self.user_semaphores: Dict[str, asyncio.Semaphore] = {}
+        self.active_requests = 0
+        self.active_requests_lock = asyncio.Lock()
+        if debug_mode:
+            print("  ✓ Concurrency Control initialized (50 global, 3/user)")
+
+        # Note: Request Queue integration pending - using semaphores for now
+        # Semaphores provide simpler request-response semantics than fire-and-forget queue
 
         if debug_mode:
             print("🎉 Enterprise infrastructure ready!")
@@ -4313,19 +4324,36 @@ Respond with ONLY the intent name, nothing else."""
         start_time = time.time()
 
         try:
-            # Phase 2.2: Request Queue - TODO: Fix API integration
-            # For now, execute directly while testing Phase 4 features
-            # The RequestQueue doesn't have should_queue() method
-            # Need to check actual API and integrate properly
+            # Phase 2.2: Concurrency Control - Use semaphores for request limiting
+            # Get or create user-specific semaphore
+            if request.user_id not in self.user_semaphores:
+                self.user_semaphores[request.user_id] = asyncio.Semaphore(self.max_concurrent_per_user)
 
-            if debug_mode:
-                print("⚡ Direct execution (queue integration pending)")
-            result = await self._process_request_impl(request)
+            user_semaphore = self.user_semaphores[request.user_id]
+
+            # Check if we're at capacity before acquiring
+            async with self.active_requests_lock:
+                self.active_requests += 1
+                current_load = self.active_requests / self.max_concurrent_requests
+
+            if current_load > 0.9 and debug_mode:
+                print(f"⚠️  High load: {current_load:.0%} capacity ({self.active_requests}/{self.max_concurrent_requests})")
+
+            # Acquire both global and user semaphores
+            async with self.request_semaphore:
+                async with user_semaphore:
+                    if debug_mode:
+                        print(f"✓ Request accepted ({self.active_requests} active)")
+                    result = await self._process_request_impl(request)
 
             # Phase 2.3: Observability - Record success
             duration_ms = (time.time() - start_time) * 1000
             self.metrics.record_latency("request_duration_ms", duration_ms)
             self.metrics.increment("requests_success")
+
+            # Decrement active requests counter
+            async with self.active_requests_lock:
+                self.active_requests -= 1
 
             if debug_mode:
                 print(f"✅ Request completed in {duration_ms:.1f}ms")
@@ -4336,6 +4364,10 @@ Respond with ONLY the intent name, nothing else."""
             # Phase 2.3: Observability - Record error
             duration_ms = (time.time() - start_time) * 1000
             self.metrics.increment("requests_error")
+
+            # Decrement active requests counter
+            async with self.active_requests_lock:
+                self.active_requests -= 1
 
             # Create event object (record_event expects ObservableEvent, not kwargs)
             from .observability import ObservableEvent
