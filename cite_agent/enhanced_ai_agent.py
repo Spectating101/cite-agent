@@ -1258,7 +1258,7 @@ class EnhancedNocturnalAgent:
             
             # If heuristics uncertain, use LLM for intelligent classification
             # This is the safe path - we ask the LLM for ambiguous queries
-            if self.backend_circuit.is_open():
+            if self.backend_circuit.state == CircuitState.OPEN:
                 # Circuit breaker open - default to conversation to stay responsive
                 intent = 'conversation'
                 self._cache_intent(query_hash, intent)
@@ -2377,7 +2377,7 @@ Respond with ONLY the intent name, nothing else."""
             )
 
         # Phase 2.1: Circuit Breaker - Check if circuit is open (fast-fail)
-        if self.backend_circuit.is_open():
+        if self.backend_circuit.state == CircuitState.OPEN:
             if debug_mode:
                 print("⚠️  Circuit breaker OPEN - failing fast")
             self.metrics.increment("backend_circuit_open")
@@ -2399,7 +2399,7 @@ Respond with ONLY the intent name, nothing else."""
             return result
         except Exception as e:
             # Circuit breaker might have opened during call
-            if self.backend_circuit.is_open():
+            if self.backend_circuit.state == CircuitState.OPEN:
                 if debug_mode:
                     print("⚠️  Circuit breaker opened during call")
                 self.metrics.increment("backend_circuit_opened")
