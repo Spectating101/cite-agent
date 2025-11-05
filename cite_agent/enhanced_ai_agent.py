@@ -27,6 +27,19 @@ from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 
+# Enterprise Infrastructure Modules (Phase 1: Foundation)
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
+from .request_queue import IntelligentRequestQueue, RequestPriority
+from .observability import ObservabilitySystem, EventType
+from .self_healing import SelfHealingAgent, FailureType, RecoveryAction
+from .adaptive_providers import AdaptiveProviderSelector, QueryType
+from .execution_safety import (
+    CommandExecutionValidator,
+    CommandPlan,
+    CommandClassification,
+    CommandAuditLevel
+)
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -55,6 +68,33 @@ class ChatResponse:
     execution_results: Dict[str, Any] = field(default_factory=dict)
     api_results: Dict[str, Any] = field(default_factory=dict)
     error_message: Optional[str] = None
+
+
+# Phase 2.2: Request Queue Singleton
+# Global request queue for managing concurrency across all agent instances
+_request_queue: Optional[IntelligentRequestQueue] = None
+
+def get_request_queue() -> IntelligentRequestQueue:
+    """
+    Get or create the global request queue singleton.
+
+    The queue manages:
+    - Global concurrency limit (50 concurrent requests)
+    - Per-user concurrency limit (3 concurrent per user)
+    - Priority-based processing (URGENT > NORMAL > BATCH > MAINTENANCE)
+    - Request expiration (don't serve stale requests)
+    """
+    global _request_queue
+    if _request_queue is None:
+        _request_queue = IntelligentRequestQueue(
+            max_concurrent_global=50,
+            max_concurrent_per_user=3,
+            queue_size_limit=1000,
+            warning_threshold=0.7,   # Warn at 70% capacity
+            rejection_threshold=0.95  # Reject at 95% capacity
+        )
+    return _request_queue
+
 
 class EnhancedNocturnalAgent:
     """
@@ -134,7 +174,10 @@ class EnhancedNocturnalAgent:
         
         self._service_roots: List[str] = []
         self._backend_health_cache: Dict[str, Dict[str, Any]] = {}
-        
+
+        # Enterprise Infrastructure Initialization (Phase 1: Foundation)
+        self._initialize_enterprise_infrastructure()
+
         # Initialize authentication
         self.auth_token = None
         self.user_id = None
@@ -144,6 +187,93 @@ class EnhancedNocturnalAgent:
         except Exception:
             self._health_ttl = 30.0
         self._recent_sources: List[Dict[str, Any]] = []
+
+    def _initialize_enterprise_infrastructure(self):
+        """
+        Initialize all enterprise infrastructure modules (Phase 1)
+
+        Modules:
+        1. Circuit Breaker - Prevents cascading failures
+        2. Request Queue - Manages concurrency and backpressure
+        3. Observability - Metrics and tracing
+        4. Self-Healing - Auto-recovery from failures
+        5. Adaptive Providers - Learns best provider per query type
+        6. Execution Safety - Validates commands before execution
+        """
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+
+        if debug_mode:
+            print("🏗️  Initializing enterprise infrastructure...")
+
+        # 1. Circuit Breaker for backend API
+        self.backend_circuit = CircuitBreaker(
+            name="backend_api",
+            config=CircuitBreakerConfig(
+                failure_threshold=0.5,          # Open if >50% requests fail
+                min_requests_for_decision=10,   # Need 10 requests before decision
+                open_timeout=30.0,              # Try recovery after 30s
+                half_open_max_calls=3           # Allow 3 test calls in half-open
+            )
+        )
+        if debug_mode:
+            print("  ✓ Circuit Breaker initialized")
+
+        # 2. Observability System for metrics and tracing
+        self.metrics = ObservabilitySystem()
+        if debug_mode:
+            print("  ✓ Observability System initialized")
+
+        # 3. Self-Healing Agent for error recovery
+        self.self_healing = SelfHealingAgent()
+
+        # Note: Recovery callbacks are handled by the self-healing module itself
+        # No manual registration needed
+
+        if debug_mode:
+            print("  ✓ Self-Healing Agent initialized")
+
+        # 4. Adaptive Provider Selector for intelligent provider selection
+        self.provider_router = AdaptiveProviderSelector()
+        if debug_mode:
+            print("  ✓ Adaptive Provider Selector initialized")
+
+        # 5. Execution Safety Layer for command validation
+        self.safety = CommandExecutionValidator(
+            audit_level=CommandAuditLevel.STRICT
+        )
+        if debug_mode:
+            print("  ✓ Execution Safety Layer initialized")
+
+        # Note: Request Queue is a singleton, initialized on first use in process_request()
+        # This is intentional to avoid creating unnecessary resources
+
+        if debug_mode:
+            print("🎉 Enterprise infrastructure ready!")
+
+    # Recovery callbacks for self-healing
+
+    async def _recovery_switch_provider(self):
+        """Recovery action: Switch to a different provider"""
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            print("🔄 Recovery: Switching provider...")
+        # Provider switching is handled by adaptive_providers module
+        # This is a placeholder for any additional switching logic
+
+    async def _recovery_degrade_mode(self):
+        """Recovery action: Enable degraded mode"""
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            print("⚠️  Recovery: Enabling degraded mode...")
+        self.self_healing.is_degraded = True
+        self.self_healing.degradation_reason = "Backend unavailable"
+
+    async def _recovery_fallback_local(self):
+        """Recovery action: Fall back to local-only mode"""
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            print("🏠 Recovery: Falling back to local mode...")
+        # Local mode handling is in the request processing logic
 
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
@@ -1019,6 +1149,65 @@ class EnhancedNocturnalAgent:
             return True
         return normalized in {"pwd", "pwd?"}
 
+    def _classify_query_type(self, query: str) -> QueryType:
+        """
+        Classify query type for adaptive provider selection (Phase 3.2)
+
+        Returns the query type based on keywords and patterns in the query.
+        This helps the adaptive provider router learn which provider works best
+        for each type of query.
+        """
+        query_lower = query.lower()
+
+        # Academic research - papers, citations, DOIs
+        if any(keyword in query_lower for keyword in [
+            "paper", "papers", "citation", "citations", "doi", "research",
+            "study", "studies", "journal", "publication", "arxiv", "scholar",
+            "abstract", "literature", "peer review", "author"
+        ]):
+            return QueryType.ACADEMIC_PAPER
+
+        # Financial data - stocks, prices, tickers, metrics
+        if any(keyword in query_lower for keyword in [
+            "stock", "stocks", "ticker", "price", "financial", "earnings",
+            "revenue", "market", "trading", "investment", "portfolio",
+            "dividend", "nasdaq", "nyse", "sec", "10-k", "10-q"
+        ]):
+            return QueryType.FINANCIAL_DATA
+
+        # Code generation/debugging
+        if any(keyword in query_lower for keyword in [
+            "code", "function", "class", "python", "javascript", "java",
+            "debug", "error", "bug", "compile", "syntax", "algorithm",
+            "implement", "write a", "create a function", "fix this code"
+        ]):
+            return QueryType.CODE_GENERATION
+
+        # Data analysis - CSV, statistics, analysis
+        if any(keyword in query_lower for keyword in [
+            "analyze", "analysis", "csv", "data", "statistics", "statistical",
+            "correlation", "regression", "plot", "graph", "chart", "dataset",
+            "dataframe", "pandas", "numpy", "mean", "median", "distribution"
+        ]):
+            return QueryType.DATA_ANALYSIS
+
+        # Web search - general queries
+        if any(keyword in query_lower for keyword in [
+            "search", "find", "google", "web", "internet", "online",
+            "look up", "what is", "who is", "when did", "where is"
+        ]):
+            return QueryType.WEB_SEARCH
+
+        # Shell execution - system commands
+        if any(keyword in query_lower for keyword in [
+            "list files", "directory", "folder", "pwd", "ls", "cd",
+            "execute", "run command", "shell", "terminal", "bash"
+        ]):
+            return QueryType.SHELL_EXECUTION
+
+        # Default: general conversation
+        return QueryType.CONVERSATION
+
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
             logger.info("🔍 DEBUG: _format_api_results_for_prompt called with EMPTY api_results")
@@ -1733,30 +1922,91 @@ class EnhancedNocturnalAgent:
             # Silently ignore update check failures
             pass
     
-    async def call_backend_query(self, query: str, conversation_history: Optional[List[Dict]] = None, 
+    async def call_backend_query(self, query: str, conversation_history: Optional[List[Dict]] = None,
                                  api_results: Optional[Dict[str, Any]] = None, tools_used: Optional[List[str]] = None) -> ChatResponse:
         """
         Call backend /query endpoint instead of Groq directly
         This is the SECURE method - all API keys stay on server
         Includes API results (Archive, FinSight) in context for better responses
+
+        **Phase 2.1: Circuit Breaker Integration**
+        - Checks circuit breaker state before making calls
+        - Fast-fails when circuit is open (< 1s instead of 30s timeout)
+        - Wraps backend call for automatic failure detection
         """
         # DEBUG: Print auth status
         debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         if debug_mode:
             print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
-        
+
         if not self.auth_token:
             return ChatResponse(
                 response="❌ Not authenticated. Please log in first.",
                 error_message="Authentication required"
             )
-        
+
         if not self.session:
             return ChatResponse(
                 response="❌ HTTP session not initialized",
                 error_message="Session not initialized"
             )
-        
+
+        # Phase 2.1: Circuit Breaker - Check if circuit is open (fast-fail)
+        if self.backend_circuit.is_open():
+            if debug_mode:
+                print("⚠️  Circuit breaker OPEN - failing fast")
+            self.metrics.increment("backend_circuit_open")
+            return ChatResponse(
+                response="🔄 Backend temporarily unavailable (auto-recovering). Using local mode where possible.",
+                error_message="Circuit breaker open",
+                tools_used=tools_used or []
+            )
+
+        # Phase 2.1: Circuit Breaker - Wrap call with circuit breaker
+        try:
+            result = await self.backend_circuit.call(
+                self._do_backend_query_impl,
+                query,
+                conversation_history,
+                api_results,
+                tools_used
+            )
+            return result
+        except Exception as e:
+            # Circuit breaker might have opened during call
+            if self.backend_circuit.is_open():
+                if debug_mode:
+                    print("⚠️  Circuit breaker opened during call")
+                self.metrics.increment("backend_circuit_opened")
+                return ChatResponse(
+                    response="🔄 Backend became unavailable. Switched to local mode.",
+                    error_message="Circuit breaker opened",
+                    tools_used=tools_used or []
+                )
+            # Re-raise if not a circuit breaker issue
+            raise
+
+    async def _do_backend_query_impl(self, query: str, conversation_history: Optional[List[Dict]] = None,
+                                     api_results: Optional[Dict[str, Any]] = None, tools_used: Optional[List[str]] = None) -> ChatResponse:
+        """
+        Internal implementation of backend query (wrapped by circuit breaker)
+        This method contains the actual backend API call logic
+
+        **Phase 3.2: Adaptive Provider Integration**
+        - Classifies query type (academic, financial, code, etc.)
+        - Tracks which provider backend used
+        - Records results for learning
+        """
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+
+        # Phase 3.2: Adaptive Providers - Classify query type for tracking
+        query_type = self._classify_query_type(query)
+        if debug_mode:
+            print(f"📊 Query classified as: {query_type.value}")
+
+        # Track start time for latency measurement
+        call_start_time = time.time()
+
         try:
             # Detect language preference from stored state
             language = getattr(self, 'language_preference', 'en')
@@ -1822,10 +2072,25 @@ class EnhancedNocturnalAgent:
                                 data = await retry_response.json()
                                 response_text = data.get('response', '')
                                 tokens = data.get('tokens_used', 0)
-                                
+                                provider = data.get('provider', 'unknown')
+
+                                # Phase 3.2: Adaptive Providers - Record result for learning
+                                latency_ms = (time.time() - call_start_time) * 1000
+                                self.provider_router.record_result(
+                                    provider=provider,
+                                    query_type=query_type,
+                                    success=True,
+                                    latency_ms=latency_ms,
+                                    accuracy_score=0.9,  # Slightly lower due to retries
+                                    cost=tokens * 0.0001
+                                )
+
+                                if debug_mode:
+                                    print(f"✅ Provider {provider} succeeded after {retry_num + 1} retries ({latency_ms:.1f}ms)")
+
                                 all_tools = tools_used or []
                                 all_tools.append("backend_llm")
-                                
+
                                 self.workflow.save_query_result(
                                     query=query,
                                     response=response_text,
@@ -1833,11 +2098,13 @@ class EnhancedNocturnalAgent:
                                         "tools_used": all_tools,
                                         "tokens_used": tokens,
                                         "model": data.get('model'),
-                                        "provider": data.get('provider'),
-                                        "retries": retry_num + 1
+                                        "provider": provider,
+                                        "retries": retry_num + 1,
+                                        "query_type": query_type.value,
+                                        "latency_ms": latency_ms
                                     }
                                 )
-                                
+
                                 return ChatResponse(
                                     response=response_text,
                                     tokens_used=tokens,
@@ -1860,11 +2127,26 @@ class EnhancedNocturnalAgent:
                     data = await response.json()
                     response_text = data.get('response', '')
                     tokens = data.get('tokens_used', 0)
-                    
+                    provider = data.get('provider', 'unknown')
+
+                    # Phase 3.2: Adaptive Providers - Record result for learning
+                    latency_ms = (time.time() - call_start_time) * 1000
+                    self.provider_router.record_result(
+                        provider=provider,
+                        query_type=query_type,
+                        success=True,
+                        latency_ms=latency_ms,
+                        accuracy_score=1.0,  # Assume good quality if request succeeded
+                        cost=tokens * 0.0001  # Rough cost estimate
+                    )
+
+                    if debug_mode:
+                        print(f"✅ Provider {provider} completed in {latency_ms:.1f}ms")
+
                     # Combine tools used
                     all_tools = tools_used or []
                     all_tools.append("backend_llm")
-                    
+
                     # Save to workflow history
                     self.workflow.save_query_result(
                         query=query,
@@ -1873,10 +2155,12 @@ class EnhancedNocturnalAgent:
                             "tools_used": all_tools,
                             "tokens_used": tokens,
                             "model": data.get('model'),
-                            "provider": data.get('provider')
+                            "provider": provider,
+                            "query_type": query_type.value,
+                            "latency_ms": latency_ms
                         }
                     )
-                    
+
                     return ChatResponse(
                         response=response_text,
                         tokens_used=tokens,
@@ -2256,8 +2540,75 @@ class EnhancedNocturnalAgent:
             return "ls -lah"
         return "pwd"
 
-    async def execute_command(self, command: str) -> str:
-        """Execute command and return output - non-blocking async version"""
+    async def execute_command(self, command: str, user_id: Optional[str] = None) -> str:
+        """
+        Execute command and return output - non-blocking async version
+
+        **Phase 3.1: Self-Healing Integration**
+        - Wraps execution with auto-recovery
+        - Retries failed commands with exponential backoff
+        - Falls back to error message on persistent failures
+
+        **Phase 3.3: Execution Safety Integration**
+        - Validates commands before execution
+        - Blocks dangerous operations
+        - Audit logs all executions
+        """
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+
+        # Phase 3.3: Execution Safety - Classify command
+        classification = self.safety.classify_command(command)
+
+        # Block dangerous/blocked commands
+        if classification == CommandClassification.BLOCKED:
+            self.safety.log_blocked_command(command, user_id or "unknown")
+            return f"⛔ Command blocked for safety: {command[:50]}..."
+
+        # Warn on dangerous commands (but allow for now - can be configured)
+        if classification == CommandClassification.DANGEROUS:
+            self.safety.log_dangerous_command(command, user_id or "unknown")
+            if debug_mode:
+                print(f"⚠️  Executing dangerous command: {command}")
+
+        # Phase 3.1: Self-Healing - Wrap execution with recovery
+        async def _execute_impl():
+            return await self._execute_command_raw(command)
+
+        try:
+            result = await self.self_healing.execute_with_recovery(
+                _execute_impl,
+                fallback=lambda: f"Command failed after retries: {command[:50]}...",
+                max_retries=3,
+                backoff_multiplier=2.0,
+                initial_delay=1.0
+            )
+
+            # Phase 3.3: Execution Safety - Log successful execution
+            self.safety.log_execution(
+                command=command,
+                output=result[:500],  # First 500 chars
+                success=True,
+                user_id=user_id or "unknown"
+            )
+
+            return result
+
+        except Exception as e:
+            # Phase 3.3: Execution Safety - Log failed execution
+            self.safety.log_execution(
+                command=command,
+                output="",
+                success=False,
+                error=str(e),
+                user_id=user_id or "unknown"
+            )
+            return f"ERROR: {e}"
+
+    async def _execute_command_raw(self, command: str) -> str:
+        """
+        Raw command execution (wrapped by self-healing and safety layers)
+        This is the original execute_command implementation
+        """
         try:
             if self.shell_session is None:
                 return "ERROR: Shell session not initialized"
@@ -3501,8 +3852,77 @@ class EnhancedNocturnalAgent:
         
         return False  # Query seems specific enough for API calls
     
-    async def process_request(self, request: ChatRequest) -> ChatResponse:
-        """Process request with full AI capabilities and API integration"""
+    async def process_request(self, request: ChatRequest, priority: RequestPriority = RequestPriority.NORMAL) -> ChatResponse:
+        """
+        Process request with full AI capabilities and API integration
+
+        **Phase 2.2: Request Queue Integration**
+        - Manages concurrency (max 50 global, max 3 per user)
+        - Priority-based processing (URGENT > NORMAL > BATCH)
+
+        **Phase 2.3: Observability Integration**
+        - Tracks request metrics
+        - Records latency (p50, p95, p99)
+        - Traces request lifecycle
+        """
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+
+        # Phase 2.3: Observability - Start request tracking
+        self.metrics.increment("requests_total")
+        start_time = time.time()
+
+        try:
+            # Phase 2.2: Request Queue - Check if we should queue based on load
+            queue = get_request_queue()
+
+            if queue.should_queue():
+                if debug_mode:
+                    print(f"📊 Queue active - submitting request (priority={priority.name})")
+
+                # Submit to queue with priority
+                result = await queue.submit(
+                    self._process_request_impl,
+                    request,
+                    priority=priority,
+                    user_id=request.user_id or "anonymous"
+                )
+            else:
+                # Direct execution if not under load
+                if debug_mode:
+                    print("⚡ Direct execution (not under load)")
+                result = await self._process_request_impl(request)
+
+            # Phase 2.3: Observability - Record success
+            duration_ms = (time.time() - start_time) * 1000
+            self.metrics.record_latency("request_duration_ms", duration_ms)
+            self.metrics.increment("requests_success")
+
+            if debug_mode:
+                print(f"✅ Request completed in {duration_ms:.1f}ms")
+
+            return result
+
+        except Exception as e:
+            # Phase 2.3: Observability - Record error
+            duration_ms = (time.time() - start_time) * 1000
+            self.metrics.increment("requests_error")
+            self.metrics.record_event(
+                EventType.REQUEST_FAILED,
+                user_id=request.user_id,
+                error_message=str(e)
+            )
+
+            if debug_mode:
+                print(f"❌ Request failed after {duration_ms:.1f}ms: {e}")
+
+            # Re-raise to preserve stack trace
+            raise
+
+    async def _process_request_impl(self, request: ChatRequest) -> ChatResponse:
+        """
+        Internal implementation of request processing
+        This is the original process_request logic, now wrapped by queue and observability
+        """
         try:
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
