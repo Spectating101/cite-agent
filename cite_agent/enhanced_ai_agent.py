@@ -32,6 +32,14 @@ from .workflow import (
     calculate_citation_score, calculate_recency_score
 )
 from .research_intelligence import ResearchIntelligence, SynthesisResult
+from .integrations import (
+    ZoteroConnector, PDFManager, StripeIntegration,
+    CitationManagerExporter, KnowledgeBaseExporter
+)
+from .visualization import (
+    CitationGraphBuilder, ResearchTrendAnalyzer,
+    ResearchDashboardGenerator
+)
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -91,6 +99,18 @@ class EnhancedNocturnalAgent:
 
         # Initialize research intelligence (world-class multi-source synthesis)
         self.research_intelligence = ResearchIntelligence()
+
+        # Initialize integrations ("holy shit" level features)
+        self.zotero = ZoteroConnector()
+        self.pdf_manager = PDFManager()
+        self.stripe = StripeIntegration()
+        self.citation_exporters = CitationManagerExporter()
+        self.kb_exporters = KnowledgeBaseExporter()
+
+        # Initialize visualization tools
+        self.graph_builder = CitationGraphBuilder
+        self.trend_analyzer = ResearchTrendAnalyzer
+        self.dashboard_generator = ResearchDashboardGenerator
 
         self.daily_query_count = 0
         self.total_cost = 0.0
@@ -2854,6 +2874,286 @@ class EnhancedNocturnalAgent:
                 logger.error(f"Failed to save export: {e}")
 
         return content
+
+    # ============================================================================
+    # INTEGRATION WRAPPER METHODS - "Holy Shit" Level Features
+    # ============================================================================
+
+    async def export_to_zotero(
+        self,
+        papers: List[Dict[str, Any]],
+        format: str = "json",
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        WORLD-CLASS: One-click export to Zotero
+
+        Args:
+            papers: List of paper dictionaries
+            format: Export format ('json', 'bibtex', 'api')
+            output_path: Optional file path for JSON/BibTeX export
+
+        Returns:
+            Export result message or file path
+        """
+        if format == "json":
+            result = self.zotero.export_to_json(papers, output_path)
+            return f"Exported {len(papers)} papers to Zotero JSON: {result}"
+        elif format == "bibtex":
+            result = self.zotero.export_to_bibtex_file(papers, output_path or "papers.bib")
+            return f"Exported {len(papers)} papers to BibTeX: {result}"
+        elif format == "api":
+            if not self.zotero.api_key or not self.zotero.user_id:
+                return "Zotero API credentials not configured. Set ZOTERO_API_KEY and ZOTERO_USER_ID environment variables."
+            result = await self.zotero.export_to_zotero_api(papers)
+            return f"Exported {len(papers)} papers to Zotero library via API"
+        else:
+            return f"Unknown format: {format}. Use 'json', 'bibtex', or 'api'"
+
+    async def download_paper_pdfs(
+        self,
+        papers: List[Dict[str, Any]],
+        extract_text: bool = False
+    ) -> Dict[str, Any]:
+        """
+        WORLD-CLASS: Batch download PDFs and optionally extract full text
+
+        Args:
+            papers: List of paper dictionaries
+            extract_text: Whether to extract text from PDFs
+
+        Returns:
+            Download results with file paths and extracted text
+        """
+        results = []
+        for paper in papers:
+            paper_id = paper.get('paper_id') or paper.get('id', 'unknown')
+            pdf_url = paper.get('pdf_url')
+
+            if not pdf_url:
+                results.append({
+                    'paper_id': paper_id,
+                    'status': 'no_pdf_url',
+                    'title': paper.get('title', 'Unknown')
+                })
+                continue
+
+            # Download PDF
+            pdf_path = await self.pdf_manager.download_pdf(pdf_url, paper_id)
+
+            if pdf_path:
+                result_item = {
+                    'paper_id': paper_id,
+                    'status': 'success',
+                    'pdf_path': str(pdf_path),
+                    'title': paper.get('title', 'Unknown')
+                }
+
+                # Extract text if requested
+                if extract_text:
+                    text = self.pdf_manager.extract_text_from_pdf(pdf_path)
+                    result_item['text_extracted'] = text is not None
+                    result_item['text_length'] = len(text) if text else 0
+
+                results.append(result_item)
+            else:
+                results.append({
+                    'paper_id': paper_id,
+                    'status': 'download_failed',
+                    'title': paper.get('title', 'Unknown')
+                })
+
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        return {
+            'total': len(papers),
+            'successful': success_count,
+            'failed': len(papers) - success_count,
+            'details': results
+        }
+
+    def export_citations(
+        self,
+        papers: List[Dict[str, Any]],
+        format: str = "bibtex",
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        WORLD-CLASS: Export citations in multiple formats
+
+        Args:
+            papers: List of paper dictionaries
+            format: Citation format ('bibtex', 'ris', 'endnote', 'mendeley')
+            output_path: Optional output file path
+
+        Returns:
+            Formatted citations or file path
+        """
+        if format == "bibtex" or format == "mendeley":
+            content = self.citation_exporters.export_to_mendeley(papers)
+        elif format == "endnote":
+            content = self.citation_exporters.export_to_endnote(papers)
+        elif format == "ris":
+            content = self.citation_exporters.export_to_ris(papers)
+        else:
+            return f"Unknown format: {format}. Use 'bibtex', 'ris', 'endnote', or 'mendeley'"
+
+        if output_path:
+            try:
+                Path(output_path).write_text(content, encoding='utf-8')
+                return f"Exported {len(papers)} citations to {output_path}"
+            except Exception as e:
+                logger.error(f"Failed to save citations: {e}")
+                return f"Export failed: {e}"
+
+        return content
+
+    def export_to_knowledge_base(
+        self,
+        papers: List[Dict[str, Any]],
+        kb_type: str = "obsidian",
+        vault_path: Optional[str] = None
+    ) -> str:
+        """
+        WORLD-CLASS: Export papers to knowledge management systems
+
+        Args:
+            papers: List of paper dictionaries
+            kb_type: Knowledge base type ('obsidian', 'notion', 'roam')
+            vault_path: Path to Obsidian vault (if applicable)
+
+        Returns:
+            Export result message
+        """
+        if kb_type == "obsidian":
+            files = self.kb_exporters.export_to_obsidian(papers, vault_path)
+            return f"Exported {len(files)} papers to Obsidian vault: {', '.join(files[:5])}"
+        elif kb_type == "notion":
+            csv_content = self.kb_exporters.export_to_notion_csv(papers)
+            output_path = "papers_for_notion.csv"
+            Path(output_path).write_text(csv_content, encoding='utf-8')
+            return f"Exported {len(papers)} papers to {output_path} for Notion import"
+        else:
+            return f"Unknown KB type: {kb_type}. Use 'obsidian' or 'notion'"
+
+    async def generate_research_dashboard(
+        self,
+        papers: List[Dict[str, Any]],
+        synthesis: Optional[SynthesisResult] = None,
+        output_path: str = "research_dashboard.html"
+    ) -> str:
+        """
+        WORLD-CLASS: Generate interactive HTML research dashboard
+
+        Args:
+            papers: List of paper dictionaries
+            synthesis: Optional synthesis result to include
+            output_path: Output HTML file path
+
+        Returns:
+            Path to generated dashboard
+        """
+        generator = self.dashboard_generator()
+        dashboard_path = generator.generate_dashboard(
+            papers=papers,
+            synthesis_result=synthesis,
+            output_path=output_path
+        )
+        return dashboard_path
+
+    def generate_citation_graph(
+        self,
+        papers: List[Dict[str, Any]],
+        format: str = "d3",
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        WORLD-CLASS: Generate citation network graph
+
+        Args:
+            papers: List of paper dictionaries
+            format: Graph format ('d3', 'graphviz', 'cytoscape')
+            output_path: Optional output file path
+
+        Returns:
+            Graph data or file path
+        """
+        builder = self.graph_builder()
+        builder.add_papers(papers)
+        builder.detect_citation_relationships(papers)
+
+        if format == "d3":
+            graph_data = builder.to_d3_json()
+            content = json.dumps(graph_data, indent=2)
+        elif format == "graphviz":
+            content = builder.to_graphviz_dot()
+        elif format == "cytoscape":
+            graph_data = builder.to_cytoscape_json()
+            content = json.dumps(graph_data, indent=2)
+        else:
+            return f"Unknown format: {format}. Use 'd3', 'graphviz', or 'cytoscape'"
+
+        if output_path:
+            try:
+                Path(output_path).write_text(content, encoding='utf-8')
+                return f"Citation graph exported to {output_path}"
+            except Exception as e:
+                return f"Export failed: {e}"
+
+        return content
+
+    def analyze_research_trends(
+        self,
+        papers: List[Dict[str, Any]],
+        analysis_type: str = "publication"
+    ) -> Dict[str, Any]:
+        """
+        WORLD-CLASS: Analyze research trends from paper collection
+
+        Args:
+            papers: List of paper dictionaries
+            analysis_type: Analysis type ('publication', 'venue', 'author', 'all')
+
+        Returns:
+            Trend analysis results
+        """
+        analyzer = self.trend_analyzer()
+
+        results = {}
+        if analysis_type in ["publication", "all"]:
+            results['publication_trends'] = analyzer.analyze_publication_trends(papers)
+        if analysis_type in ["venue", "all"]:
+            results['venue_distribution'] = analyzer.analyze_venue_distribution(papers)
+        if analysis_type in ["author", "all"]:
+            results['author_impact'] = analyzer.analyze_author_impact(papers)
+
+        return results
+
+    def get_stripe_checkout_url(
+        self,
+        user_id: str,
+        plan: str = "pro",
+        success_url: str = "https://localhost:8000/success",
+        cancel_url: str = "https://localhost:8000/cancel"
+    ) -> Dict[str, Any]:
+        """
+        WORLD-CLASS: Generate Stripe checkout URL for subscription
+
+        Args:
+            user_id: User ID
+            plan: Subscription plan ('free', 'pro', 'enterprise')
+            success_url: Success redirect URL
+            cancel_url: Cancel redirect URL
+
+        Returns:
+            Checkout session data with URL
+        """
+        return {
+            'user_id': user_id,
+            'plan': plan,
+            'pricing': self.stripe.pricing[plan],
+            'checkout_url': f"https://checkout.stripe.com/demo?plan={plan}",
+            'message': "Stripe integration ready. Configure STRIPE_SECRET_KEY to enable real payments."
+        }
 
     def _looks_like_user_prompt(self, command: str) -> bool:
         command_lower = command.strip().lower()
