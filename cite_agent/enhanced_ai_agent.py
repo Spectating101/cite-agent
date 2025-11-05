@@ -3906,11 +3906,15 @@ class EnhancedNocturnalAgent:
             # Phase 2.3: Observability - Record error
             duration_ms = (time.time() - start_time) * 1000
             self.metrics.increment("requests_error")
-            self.metrics.record_event(
-                EventType.REQUEST_FAILED,
+
+            # Create event object (record_event expects ObservableEvent, not kwargs)
+            from .observability import ObservableEvent
+            error_event = ObservableEvent(
+                event_type=EventType.REQUEST_FAILED,
                 user_id=request.user_id,
                 error_message=str(e)
             )
+            self.metrics.record_event(error_event)
 
             if debug_mode:
                 print(f"❌ Request failed after {duration_ms:.1f}ms: {e}")

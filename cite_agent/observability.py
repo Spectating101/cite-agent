@@ -307,11 +307,30 @@ class ObservabilitySystem:
         
         return sorted(rankings, key=lambda x: x[1], reverse=True)
     
+    def increment(self, counter_name: str, amount: int = 1):
+        """
+        Convenience method to increment a counter
+
+        Usage: metrics.increment("requests_total")
+        """
+        if counter_name not in self.counters:
+            self.counters[counter_name] = 0
+        self.counters[counter_name] += amount
+
+    def record_latency(self, metric_name: str, latency_ms: float):
+        """
+        Convenience method to record latency
+
+        Usage: metrics.record_latency("request_duration_ms", 125.5)
+        """
+        # Convert ms to seconds for histogram
+        self.request_latencies.observe(latency_ms / 1000.0)
+
     def get_best_provider(self, exclude: Optional[List[str]] = None) -> Optional[str]:
         """Get highest-performing provider"""
         rankings = self.get_provider_rankings()
         exclude = exclude or []
-        
+
         for provider_name, score, metrics in rankings:
             if provider_name not in exclude and metrics.total_calls > 0:
                 return provider_name
