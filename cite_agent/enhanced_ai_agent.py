@@ -1006,18 +1006,31 @@ class EnhancedNocturnalAgent:
         """Detect requests asking for the current working directory."""
         normalized = re.sub(r"[^a-z0-9/._\s-]", " ", text.lower())
         normalized = " ".join(normalized.split())
+
+        # Check for exact pwd command
+        if normalized in {"pwd", "pwd?"}:
+            return True
+
+        # Check for location questions (but NOT if they're asking to DO something in current directory)
+        # Exclude queries that are about listing, showing, finding files
+        if any(action in normalized for action in ["list", "show", "find", "search", "files", "file"]):
+            return False
+
         location_phrases = [
             "where are we",
             "where am i",
             "where are we right now",
             "what directory",
-            "current directory",
-            "current folder",
-            "current path",
+            "what is the current directory",
+            "what is the current folder",
+            "what is the current path",
+            "show current directory",
+            "show current folder",
         ]
         if any(phrase in normalized for phrase in location_phrases):
             return True
-        return normalized in {"pwd", "pwd?"}
+
+        return False
 
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
@@ -2247,13 +2260,73 @@ class EnhancedNocturnalAgent:
         return any(phrase in command_lower for phrase in phrases)
 
     def _infer_shell_command(self, question: str) -> str:
+        """Infer shell command from natural language question."""
         question_lower = question.lower()
-        if any(word in question_lower for word in ["list", "show", "files", "directory", "folder", "ls"]):
+
+        # Check for file type patterns
+        file_patterns = {
+            'python': '*.py',
+            '.py': '*.py',
+            'py files': '*.py',
+            'javascript': '*.js',
+            '.js': '*.js',
+            'typescript': '*.ts',
+            '.ts': '*.ts',
+            'markdown': '*.md',
+            '.md': '*.md',
+            'json': '*.json',
+            'yaml': '*.yaml',
+            'yml': '*.yml',
+            'csv': '*.csv',
+            'text': '*.txt',
+        }
+
+        # Extract directory/pattern if mentioned
+        import re
+        dir_match = re.search(r'in\s+(\w+)|(\w+)\s+(?:directory|folder|dir)', question_lower)
+        target_dir = dir_match.group(1) or dir_match.group(2) if dir_match else None
+
+        # 1. Find specific file types
+        for keyword, pattern in file_patterns.items():
+            if keyword in question_lower:
+                if any(word in question_lower for word in ['find', 'search', 'locate', 'what', 'show', 'list']):
+                    if target_dir:
+                        return f"find {target_dir} -name '{pattern}' -type f 2>/dev/null | head -20"
+                    else:
+                        return f"find . -name '{pattern}' -type f 2>/dev/null | head -20"
+
+        # 2. Find directories
+        if any(word in question_lower for word in ['find', 'locate', 'where is']) and any(word in question_lower for word in ['directory', 'folder', 'dir']):
+            # Extract search term
+            search_term = None
+            for word in question_lower.split():
+                if len(word) > 3 and word not in ['find', 'locate', 'where', 'directory', 'folder', 'the', 'this', 'that']:
+                    search_term = word
+                    break
+            if search_term:
+                return f"find . -name '*{search_term}*' -type d 2>/dev/null | head -20"
+
+        # 3. List files in directory
+        if target_dir and any(word in question_lower for word in ['list', 'show', 'files', 'contents']):
+            return f"ls -lah {target_dir}"
+
+        # 4. General list files
+        if any(word in question_lower for word in ["list", "show", "files", "ls"]):
             return "ls -lah"
+
+        # 5. Current directory query
         if any(word in question_lower for word in ["where", "pwd", "current directory", "location"]):
             return "pwd"
-        if "read" in question_lower and any(ext in question_lower for ext in [".py", ".txt", ".csv", "file"]):
+
+        # 6. Read file
+        if "read" in question_lower or "show me" in question_lower:
+            # Try to extract filename
+            filename_match = re.search(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', question)
+            if filename_match:
+                return f"head -100 {filename_match.group(1)}"
             return "ls -lah"
+
+        # Default: show current directory
         return "pwd"
 
     def execute_command(self, command: str) -> str:
@@ -3625,6 +3698,13 @@ Examples:
 
 JSON:"""
 
+                # Initialize plan variables before try block
+                shell_action = "none"
+                command = ""
+                reason = ""
+                updates_context = False
+                plan = {}
+
                 try:
                     # Use LOCAL LLM for planning (don't recurse into call_backend_query)
                     # This avoids infinite recursion and uses temp key if available
@@ -3648,69 +3728,86 @@ JSON:"""
                             api_results={},
                             tools_used=[]
                         )
-                    
+
                     plan_text = plan_response.response.strip()
                     if '```' in plan_text:
                         plan_text = plan_text.split('```')[1].replace('json', '').strip()
-                    
+
                     plan = json.loads(plan_text)
                     shell_action = plan.get("action", "none")
                     command = plan.get("command", "")
                     reason = plan.get("reason", "")
                     updates_context = plan.get("updates_context", False)
-                    
+
                     # Only show planning details with explicit verbose flag (don't leak to users)
                     verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
                     if verbose_planning:
                         print(f"🔍 SHELL PLAN: {plan}")
 
-                    # GENERIC COMMAND EXECUTION - No more hardcoded actions!
-                    if shell_action != "execute" and might_need_shell:
-                        command = self._infer_shell_command(request.question)
+                except Exception as e:
+                    if debug_mode:
+                        print(f"🔍 Shell planner failed: {e}, using heuristic fallback")
+                    # Use heuristic fallback when LLM planner fails
+                    command = self._infer_shell_command(request.question)
+                    if command:
                         shell_action = "execute"
+                        reason = "Heuristic-based command inference"
                         updates_context = False
-                        if verbose_planning:
-                            print(f"🔄 Planner opted out; inferred fallback command: {command}")
+                        plan = {"action": "execute", "command": command, "reason": reason, "updates_context": updates_context}
+                        if debug_mode:
+                            print(f"🔄 Fallback command: {command}")
+                    else:
+                        shell_action = "none"
 
-                    if shell_action == "execute" and not command:
+                # GENERIC COMMAND EXECUTION - Now runs regardless of planner success/failure!
+                if shell_action != "execute" and might_need_shell:
+                    command = self._infer_shell_command(request.question)
+                    shell_action = "execute"
+                    updates_context = False
+                    verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
+                    if verbose_planning:
+                        print(f"🔄 Planner opted out; inferred fallback command: {command}")
+
+                if shell_action == "execute" and not command:
+                    command = self._infer_shell_command(request.question)
+                    plan["command"] = command
+                    verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
+                    if verbose_planning:
+                        print(f"🔄 Planner omitted command, inferred {command}")
+
+                if shell_action == "execute" and command:
+                    if self._looks_like_user_prompt(command):
                         command = self._infer_shell_command(request.question)
                         plan["command"] = command
-                        if verbose_planning:
-                            print(f"🔄 Planner omitted command, inferred {command}")
-
-                    if shell_action == "execute" and command:
-                        if self._looks_like_user_prompt(command):
-                            command = self._infer_shell_command(request.question)
-                            plan["command"] = command
-                            if debug_mode:
-                                print(f"🔄 Replacing delegating plan with command: {command}")
-                        # Check command safety
-                        safety_level = self._classify_command_safety(command)
-                        
                         if debug_mode:
-                            print(f"🔍 Command: {command}")
-                            print(f"🔍 Safety: {safety_level}")
-                        
-                        if safety_level in ('BLOCKED', 'DANGEROUS'):
-                            reason = (
-                                "Command classified as destructive; requires manual confirmation"
-                                if safety_level == 'DANGEROUS'
-                                else "This command could cause system damage"
-                            )
-                            api_results["shell_info"] = {
-                                "error": f"Command blocked for safety: {command}",
-                                "reason": reason
-                            }
-                        else:
-                            # ========================================
-                            # COMMAND INTERCEPTOR: Translate shell commands to file operations
-                            # (Claude Code / Cursor parity)
-                            # ========================================
-                            intercepted = False
-                            output = ""
+                            print(f"🔄 Replacing delegating plan with command: {command}")
+                    # Check command safety
+                    safety_level = self._classify_command_safety(command)
 
-                            # Check for file reading commands (cat, head, tail)
-                            if command.startswith(('cat ', 'head ', 'tail ')):
+                    if debug_mode:
+                        print(f"🔍 Command: {command}")
+                        print(f"🔍 Safety: {safety_level}")
+
+                    if safety_level in ('BLOCKED', 'DANGEROUS'):
+                        reason = (
+                            "Command classified as destructive; requires manual confirmation"
+                            if safety_level == 'DANGEROUS'
+                            else "This command could cause system damage"
+                        )
+                        api_results["shell_info"] = {
+                            "error": f"Command blocked for safety: {command}",
+                            "reason": reason
+                        }
+                    else:
+                        # ========================================
+                        # COMMAND INTERCEPTOR: Translate shell commands to file operations
+                        # (Claude Code / Cursor parity)
+                        # ========================================
+                        intercepted = False
+                        output = ""
+
+                        # Check for file reading commands (cat, head, tail)
+                        if command.startswith(('cat ', 'head ', 'tail ')):
                                 import shlex
                                 try:
                                     parts = shlex.split(command)
@@ -3751,8 +3848,8 @@ JSON:"""
                                 except:
                                     pass  # Fall back to shell execution
 
-                            # Check for file search commands (find)
-                            if not intercepted and 'find' in command and '-name' in command:
+                        # Check for file search commands (find)
+                        if not intercepted and 'find' in command and '-name' in command:
                                 try:
                                     # import re removed - using module-level import
                                     # Extract pattern: find ... -name '*pattern*'
@@ -3771,10 +3868,10 @@ JSON:"""
                                 except:
                                     pass
 
-                            # Check for file writing commands (echo > file, grep > file, etc.) - CHECK THIS FIRST!
-                            # This must come BEFORE the plain grep interceptor
-                            # BUT: Ignore 2>/dev/null which is error redirection, not file writing
-                            if not intercepted and ('>' in command or '>>' in command) and '2>' not in command:
+                        # Check for file writing commands (echo > file, grep > file, etc.) - CHECK THIS FIRST!
+                        # This must come BEFORE the plain grep interceptor
+                        # BUT: Ignore 2>/dev/null which is error redirection, not file writing
+                        if not intercepted and ('>' in command or '>>' in command) and '2>' not in command:
                                 try:
                                     # import re removed - using module-level import
 
@@ -3844,8 +3941,8 @@ JSON:"""
                                 except:
                                     pass
 
-                            # Check for sed editing commands
-                            if not intercepted and command.startswith('sed '):
+                        # Check for sed editing commands
+                        if not intercepted and command.startswith('sed '):
                                 try:
                                     # import re removed - using module-level import
                                     # sed 's/old/new/g' file OR sed -i 's/old/new/' file
@@ -3870,8 +3967,8 @@ JSON:"""
                                 except:
                                     pass
 
-                            # Check for heredoc file creation (cat << EOF > file)
-                            if not intercepted and '<<' in command and ('EOF' in command or 'HEREDOC' in command):
+                        # Check for heredoc file creation (cat << EOF > file)
+                        if not intercepted and '<<' in command and ('EOF' in command or 'HEREDOC' in command):
                                 try:
                                     # import re removed - using module-level import
                                     # Extract: cat << EOF > filename OR cat > filename << EOF
@@ -3883,9 +3980,9 @@ JSON:"""
                                 except:
                                     pass
 
-                            # Check for content search commands (grep -r) WITHOUT redirection
-                            # This comes AFTER grep > file interceptor to avoid conflicts
-                            if not intercepted and 'grep' in command and ('-r' in command or '-R' in command):
+                        # Check for content search commands (grep -r) WITHOUT redirection
+                        # This comes AFTER grep > file interceptor to avoid conflicts
+                        if not intercepted and 'grep' in command and ('-r' in command or '-R' in command):
                                 try:
                                     # import re removed - using module-level import
                                     # Extract pattern: grep -r 'pattern' path
@@ -3926,11 +4023,11 @@ JSON:"""
                                         print(f"⚠️  Grep interceptor failed: {e}")
                                     pass
 
-                            # If not intercepted, execute as shell command
-                            if not intercepted:
+                        # If not intercepted, execute as shell command
+                        if not intercepted:
                                 output = self.execute_command(command)
-                            
-                            if not output.startswith("ERROR"):
+                        
+                        if not output.startswith("ERROR"):
                                 # Success - store results with formatted preview
                                 formatted_output = self._format_shell_output(output, command)
                                 api_results["shell_info"] = {
@@ -3974,151 +4071,29 @@ JSON:"""
                                             self.file_context['current_cwd'] = new_cwd
                                         except:
                                             pass
-                            else:
+                        else:
                                 # Command failed
                                 api_results["shell_info"] = {
                                     "error": output,
                                     "command": command
                                 }
-                    
-                    # Backwards compatibility: support old hardcoded actions if LLM still returns them
-                    elif shell_action == "pwd":
-                        target = plan.get("target_path")
-                        if target:
-                            ls_output = self.execute_command(f"ls -lah {target}")
-                            api_results["shell_info"] = {
-                                "directory_contents": ls_output,
-                                "target_path": target
-                            }
-                        else:
-                            ls_output = self.execute_command("ls -lah")
-                            api_results["shell_info"] = {"directory_contents": ls_output}
-                        tools_used.append("shell_execution")
-                    
-                    elif shell_action == "find":
-                        search_target = plan.get("search_target", "")
-                        search_path = plan.get("search_path", "~")
-                        if search_target:
-                            find_cmd = f"find {search_path} -maxdepth 4 -type d -iname '*{search_target}*' 2>/dev/null | head -20"
-                            find_output = self.execute_command(find_cmd)
-                            if debug_mode:
-                                print(f"🔍 FIND: {find_cmd}")
-                                print(f"🔍 OUTPUT: {repr(find_output)}")
-                            if find_output.strip():
-                                api_results["shell_info"] = {
-                                    "search_results": f"Searched for '*{search_target}*' in {search_path}:\n{find_output}"
-                                }
-                            else:
-                                api_results["shell_info"] = {
-                                    "search_results": f"No directories matching '{search_target}' found in {search_path}"
-                                }
-                            tools_used.append("shell_execution")
-                    
-                    elif shell_action == "cd":
-                        # NEW: Change directory
-                        target = plan.get("target_path")
-                        if target:
-                            # Expand ~ to home directory
-                            if target.startswith("~"):
-                                home = os.path.expanduser("~")
-                                target = target.replace("~", home, 1)
-                            
-                            # Execute cd command
-                            cd_cmd = f"cd {target} && pwd"
-                            cd_output = self.execute_command(cd_cmd)
-                            
-                            if not cd_output.startswith("ERROR"):
-                                api_results["shell_info"] = {
-                                    "directory_changed": True,
-                                    "new_directory": cd_output.strip(),
-                                    "target_path": target
-                                }
-                                tools_used.append("shell_execution")
-                            else:
-                                api_results["shell_info"] = {
-                                    "directory_changed": False,
-                                    "error": f"Failed to change to {target}: {cd_output}"
-                                }
-                    
-                    elif shell_action == "read_file":
-                        # NEW: Read and inspect file (R, Python, CSV, etc.)
-                        # import re removed - using module-level import
-                        
-                        file_path = plan.get("file_path", "")
-                        if not file_path and might_need_shell:
-                            # Try to infer from query (e.g., "show me calculate_betas.R")
-                            filenames = re.findall(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', request.question)
-                            if filenames:
-                                # Check if file exists in current directory
-                                pwd = self.execute_command("pwd").strip()
-                                file_path = f"{pwd}/{filenames[0]}"
-                        
-                        if file_path:
-                            if debug_mode:
-                                print(f"🔍 READING FILE: {file_path}")
-                            
-                            # Read file content (first 100 lines to detect structure)
-                            cat_output = self.execute_command(f"head -100 {file_path}")
-                            
-                            if not cat_output.startswith("ERROR"):
-                                # Detect file type and extract structure
-                                file_ext = file_path.split('.')[-1].lower()
-                                
-                                # Extract column/variable info based on file type
-                                columns_info = ""
-                                if file_ext in ['csv', 'tsv']:
-                                    # CSV: first line is usually headers
-                                    first_line = cat_output.split('\n')[0] if cat_output else ""
-                                    columns_info = f"CSV columns: {first_line}"
-                                elif file_ext in ['r', 'rmd']:
-                                    # R script: look for dataframe column references (df$columnname)
-                                    column_refs = re.findall(r'\$(\w+)', cat_output)
-                                    unique_cols = list(dict.fromkeys(column_refs))[:10]
-                                    if unique_cols:
-                                        columns_info = f"Detected columns/variables: {', '.join(unique_cols)}"
-                                elif file_ext == 'py':
-                                    # Python: look for DataFrame['column'] or df.column
-                                    column_refs = re.findall(r'\[[\'""](\w+)[\'"]\]|\.(\w+)', cat_output)
-                                    unique_cols = list(dict.fromkeys([c[0] or c[1] for c in column_refs if c[0] or c[1]]))[:10]
-                                    if unique_cols:
-                                        columns_info = f"Detected columns/attributes: {', '.join(unique_cols)}"
-                                
-                                api_results["file_context"] = {
-                                    "file_path": file_path,
-                                    "file_type": file_ext,
-                                    "content_preview": cat_output[:2000],  # First 2000 chars
-                                    "structure": columns_info,
-                                    "full_content": cat_output  # Full content for analysis
-                                }
-                                tools_used.append("file_read")
-                                
-                                if debug_mode:
-                                    print(f"🔍 FILE STRUCTURE: {columns_info}")
-                            else:
-                                api_results["file_context"] = {
-                                    "error": f"Could not read file: {file_path}"
-                                }
-                
-                except Exception as e:
-                    if debug_mode:
-                        print(f"🔍 Shell planner failed: {e}, continuing without shell")
-                    shell_action = "none"
-            
+
+
             # ========================================================================
             # PRIORITY 2: DATA APIs (Only if shell didn't fully handle the query)
             # ========================================================================
             # If shell_action = pwd/ls/find, we might still want data APIs
             # But we skip vague queries to save tokens
-            
+
             # Analyze what data APIs are needed (only if not pure shell command)
             request_analysis = await self._analyze_request_type(request.question)
             if debug_mode:
                 print(f"🔍 Request analysis: {request_analysis}")
-            
+
             is_vague = self._is_query_too_vague_for_apis(request.question)
             if debug_mode and is_vague:
                 print(f"🔍 Query is VAGUE - skipping expensive APIs")
-            
+
             # If query is vague, hint to backend LLM to ask clarifying questions
             if is_vague:
                 api_results["query_analysis"] = {
@@ -4289,12 +4264,47 @@ JSON:"""
                     if debug_mode:
                         print(f"🔍 Web search decision failed: {e}")
             
-            # PRODUCTION MODE: Call backend LLM with all gathered data
-            if self.client is None:
+            # ========================================================================
+            # SMART ROUTING: Only call backend if query needs AI reasoning
+            # ========================================================================
+            # Check if shell operations already fully handled the query
+            shell_handled_query = (
+                shell_action == "execute" and
+                api_results.get("shell_info", {}).get("output") and
+                not api_results.get("shell_info", {}).get("error")
+            )
+
+            # Detect if query needs explanation/analysis (not just command execution)
+            # Use word boundaries to avoid false positives (e.g., "show" containing "how")
+            import re
+            query_lower = request.question.lower()
+            reasoning_keywords = [
+                r'\bexplain\b', r'\bwhy\b', r'\bhow\b', r'\bwhat does\b', r'\bwhat is\b',
+                r'\banalyze\b', r'\bunderstand\b', r'\btell me about\b', r'\bdescribe\b',
+                r'\bsummarize\b', r'\bcompare\b', r'\bfind papers\b', r'\bresearch\b',
+                r'\bfind research\b', r'\blook up\b', r'\brevenue\b', r'\bprofit\b',
+                r'\bstock\b', r'\bmean\b', r'\bmeans\b', r'\bsignificance\b',
+                r'\binterpret\b', r'\bhelp me understand\b'
+            ]
+            needs_ai_reasoning = any(re.search(pattern, query_lower) for pattern in reasoning_keywords)
+
+            # Skip backend if:
+            # 1. Shell fully handled it AND
+            # 2. No AI reasoning needed (pure command execution like "list files", "show pwd")
+            skip_backend = shell_handled_query and not needs_ai_reasoning
+
+            if debug_mode:
+                print(f"🔍 ROUTING DECISION:")
+                print(f"  - Shell handled: {shell_handled_query}")
+                print(f"  - Needs AI reasoning: {needs_ai_reasoning}")
+                print(f"  - Skip backend: {skip_backend}")
+
+            # PRODUCTION MODE: Call backend LLM with all gathered data (if needed)
+            if self.client is None and not skip_backend:
                 # DEBUG: Log what we're sending
                 if debug_mode and api_results.get("shell_info"):
                     print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
-                
+
                 # Call backend and UPDATE CONVERSATION HISTORY
                 response = await self.call_backend_query(
                     query=request.question,
@@ -4376,6 +4386,36 @@ JSON:"""
                     tools_used,
                     api_results,
                     request_analysis,
+                    log_workflow=False,
+                )
+
+            elif skip_backend:
+                # Shell already handled the query - return results directly
+                shell_output = api_results.get("shell_info", {}).get("output", "")
+
+                # Format the response nicely
+                if shell_output:
+                    response = ChatResponse(
+                        response=shell_output.strip(),
+                        tools_used=tools_used,
+                        api_results=api_results,
+                        confidence_score=0.9
+                    )
+                else:
+                    # Fallback if no output
+                    response = ChatResponse(
+                        response="Command executed successfully.",
+                        tools_used=tools_used,
+                        api_results=api_results,
+                        confidence_score=0.7
+                    )
+
+                return self._finalize_interaction(
+                    request,
+                    response,
+                    tools_used,
+                    api_results,
+                    request_analysis={},
                     log_workflow=False,
                 )
 
