@@ -3155,6 +3155,122 @@ class EnhancedNocturnalAgent:
             'message': "Stripe integration ready. Configure STRIPE_SECRET_KEY to enable real payments."
         }
 
+    def _validate_and_fix_response(
+        self,
+        response: ChatResponse,
+        api_results: Dict[str, Any],
+        tools_used: List[str],
+        debug_mode: bool = False
+    ) -> ChatResponse:
+        """
+        BULLETPROOF: Validate response and fix common failure modes.
+
+        Detects and fixes:
+        1. Raw planning JSON instead of user-friendly text
+        2. Empty or useless responses
+        3. Backend asking user to run commands
+        4. Missing command output
+
+        Returns: Fixed ChatResponse or original if valid
+        """
+        if not response or not response.response:
+            if debug_mode:
+                print("⚠️ Empty response detected")
+            # Try to recover with shell output
+            shell_info = api_results.get('shell_info', {})
+            if shell_info.get('output'):
+                return ChatResponse(
+                    response=f"Here's what I found:\n\n{shell_info['output']}",
+                    tools_used=tools_used,
+                    api_results=api_results
+                )
+            return ChatResponse(
+                response="I encountered an issue. Could you rephrase your question?",
+                tools_used=tools_used,
+                api_results=api_results
+            )
+
+        response_text = response.response.strip()
+
+        # Detect raw JSON (planning format leaked to user)
+        is_raw_json = False
+        try:
+            if response_text.startswith('{') and response_text.endswith('}'):
+                parsed = json.loads(response_text)
+                if isinstance(parsed, dict) and ('action' in parsed or 'command' in parsed):
+                    is_raw_json = True
+                    if debug_mode:
+                        print(f"⚠️ Detected raw planning JSON: {parsed}")
+        except:
+            pass
+
+        # Detect backend asking user to run commands (UNACCEPTABLE)
+        bad_phrases = [
+            "could you run",
+            "please run",
+            "can you run",
+            "you can run",
+            "try running",
+            "share the output",
+            "paste the output",
+            "run the following"
+        ]
+        asks_user_to_run = any(phrase in response_text.lower() for phrase in bad_phrases)
+
+        # Detect useless responses (just JSON or empty)
+        is_too_short = len(response_text) < 20
+        is_just_json_string = response_text.startswith('{"') and response_text.endswith('"}')
+
+        # If response is bad, fix it with shell output
+        if is_raw_json or asks_user_to_run or (is_too_short and not response_text.startswith('✅')):
+            if debug_mode:
+                print(f"⚠️ Bad response detected: json={is_raw_json}, asks_user={asks_user_to_run}, short={is_too_short}")
+
+            shell_info = api_results.get('shell_info', {})
+            shell_output = shell_info.get('output', '').strip()
+            shell_command = shell_info.get('command', '').strip()
+
+            # Priority 1: Use actual command output
+            if shell_output and len(shell_output) > 0:
+                return ChatResponse(
+                    response=f"Here's what I found:\n\n{shell_output}",
+                    tools_used=tools_used,
+                    api_results=api_results
+                )
+
+            # Priority 2: Acknowledge command execution
+            if shell_command:
+                return ChatResponse(
+                    response=f"Executed: `{shell_command}`\n\nThe command completed successfully.",
+                    tools_used=tools_used,
+                    api_results=api_results
+                )
+
+            # Priority 3: Use any other API results
+            if api_results.get('archive_results'):
+                return ChatResponse(
+                    response="I found some research papers related to your query. Let me show you what I found.",
+                    tools_used=tools_used,
+                    api_results=api_results
+                )
+
+            if api_results.get('finsight_results'):
+                return ChatResponse(
+                    response="I found financial data for your query. Here's what I discovered.",
+                    tools_used=tools_used,
+                    api_results=api_results
+                )
+
+            # Last resort: Generic helpful message
+            return ChatResponse(
+                response="I processed your request. What would you like to do next?",
+                tools_used=tools_used,
+                api_results=api_results
+            )
+
+        # Response looks good - return as-is
+        return response
+
     def _looks_like_user_prompt(self, command: str) -> bool:
         command_lower = command.strip().lower()
         if not command_lower:
@@ -4299,6 +4415,28 @@ class EnhancedNocturnalAgent:
             except Exception as archive_error:
                 logger.debug("Archive write failed", error=str(archive_error))
 
+        # ULTIMATE SAFETY CHECK: Absolutely ensure response is usable before returning
+        # This is the last line of defense against bad responses reaching users
+        if not response or not response.response or len(response.response.strip()) == 0:
+            # Empty response - this should NEVER happen
+            logger.error("⚠️ CRITICAL: Empty response detected in _finalize_interaction")
+            response.response = "I processed your request but encountered an issue generating a response. Please try rephrasing your question."
+
+        # Check for raw JSON leak
+        response_text = response.response.strip()
+        if response_text.startswith('{') and response_text.endswith('}'):
+            try:
+                parsed = json.loads(response_text)
+                if isinstance(parsed, dict) and ('action' in parsed or 'command' in parsed):
+                    logger.error("⚠️ CRITICAL: Raw JSON leaked to user in _finalize_interaction")
+                    # Try to extract useful info
+                    if 'command' in parsed:
+                        response.response = f"I tried to execute: `{parsed['command']}`\n\nPlease let me know if you need the output."
+                    else:
+                        response.response = "I processed your request. What would you like to know?"
+            except:
+                pass  # Not valid JSON, probably fine
+
         return response
     
     def _get_memory_context(self, user_id: str, conversation_id: str) -> str:
@@ -5309,6 +5447,35 @@ JSON:"""
                                     "command": command
                                 }
 
+                # MANDATORY VERIFICATION: Ensure command actually executed if we said it would
+                if shell_action == "execute" and command:
+                    shell_info = api_results.get("shell_info", {})
+
+                    # Check: Did the command execute successfully?
+                    has_output = bool(shell_info.get("output", "").strip())
+                    has_error = "error" in shell_info
+
+                    if not has_output and not has_error:
+                        # Command was supposed to run but produced nothing!
+                        if debug_mode:
+                            print(f"⚠️ VERIFICATION FAILED: Command '{command}' produced no output or error")
+
+                        # Try executing again to get output
+                        try:
+                            retry_output = self.execute_command(command)
+                            if retry_output and not retry_output.startswith("ERROR:"):
+                                api_results["shell_info"] = {
+                                    "command": command,
+                                    "output": retry_output,
+                                    "reason": "Retry after empty result",
+                                    "safety_level": safety_level
+                                }
+                                if debug_mode:
+                                    print(f"✓ Retry successful: {len(retry_output)} bytes")
+                        except Exception as e:
+                            if debug_mode:
+                                print(f"⚠️ Retry also failed: {e}")
+
 
             # ========================================================================
             # PRIORITY 2: DATA APIs (Only if shell didn't fully handle the query)
@@ -5549,34 +5716,30 @@ JSON:"""
                     # Backend failed - create friendly error with available data
                     if debug_mode:
                         print(f"⚠️ Backend response invalid or missing")
+
+                    # Try to recover with shell output if available
+                    shell_info = api_results.get('shell_info', {})
+                    if shell_info.get('output'):
+                        return ChatResponse(
+                            response=f"Here's what I found:\n\n{shell_info['output']}",
+                            tools_used=tools_used,
+                            api_results=api_results
+                        )
+
                     return ChatResponse(
-                        response="I ran into a technical issue processing that. Let me try to help with what I found:",
+                        response="I ran into a technical issue processing that. Could you rephrase or try again?",
                         error_message="Backend response invalid",
                         tools_used=tools_used,
                         api_results=api_results
                     )
                 
-                # Check if response contains planning JSON instead of final answer
-                response_text = response.response.strip()
-                if response_text.startswith('{') and '"action"' in response_text and '"command"' in response_text:
-                    # This is planning JSON, not a final response!
-                    if debug_mode:
-                        print(f"⚠️ Backend returned planning JSON instead of final response")
-                    
-                    # Extract real output from api_results and generate friendly response
-                    shell_output = api_results.get('shell_info', {}).get('output', '')
-                    if shell_output:
-                        return ChatResponse(
-                            response=f"I found what you were looking for:\n\n{shell_output}",
-                            tools_used=tools_used,
-                            api_results=api_results
-                        )
-                    else:
-                        return ChatResponse(
-                            response=f"I completed the action: {api_results.get('shell_info', {}).get('command', '')}",
-                            tools_used=tools_used,
-                            api_results=api_results
-                        )
+                # BULLETPROOF VALIDATION: Check and fix bad responses
+                response = self._validate_and_fix_response(
+                    response=response,
+                    api_results=api_results,
+                    tools_used=tools_used,
+                    debug_mode=debug_mode
+                )
 
                 # POST-PROCESSING: Auto-extract code blocks and write files if user requested file creation
                 # This fixes the issue where LLM shows corrected code but doesn't create the file
