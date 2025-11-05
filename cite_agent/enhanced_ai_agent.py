@@ -729,7 +729,7 @@ class EnhancedNocturnalAgent:
             success = False
             output_len = 0
         else:
-            output = self.execute_command(command)
+            output = await self.execute_command(command)
             truncated_output = output if len(output) <= 2000 else output[:2000] + "\n… (truncated)"
             message = (
                 f"Running the command: `{command}`\n\n"
@@ -2249,16 +2249,16 @@ class EnhancedNocturnalAgent:
             return "ls -lah"
         return "pwd"
 
-    def execute_command(self, command: str) -> str:
-        """Execute command and return output - improved with echo markers"""
+    async def execute_command(self, command: str) -> str:
+        """Execute command and return output - non-blocking async version"""
         try:
             if self.shell_session is None:
                 return "ERROR: Shell session not initialized"
-            
+
             # Clean command - remove natural language prefixes
             command = command.strip()
             prefixes_to_remove = [
-                'run this bash:', 'execute this:', 'run command:', 'execute:', 
+                'run this bash:', 'execute this:', 'run command:', 'execute:',
                 'run this:', 'run:', 'bash:', 'command:', 'this bash:', 'this:',
                 'r code to', 'R code to', 'python code to', 'in r:', 'in R:',
                 'in python:', 'in bash:', 'with r:', 'with bash:'
@@ -2272,11 +2272,11 @@ class EnhancedNocturnalAgent:
                             command = command[len(prefix2):].strip()
                             break
                     break
-            
+
             # Use echo markers to detect when command is done
             import uuid
             marker = f"CMD_DONE_{uuid.uuid4().hex[:8]}"
-            
+
             # Send command with marker
             terminator = "\r\n" if self._is_windows else "\n"
             if self._is_windows:
@@ -2286,36 +2286,56 @@ class EnhancedNocturnalAgent:
             self.shell_session.stdin.write(full_command)
             self.shell_session.stdin.flush()
 
-            # Read until we see the marker
+            # Read until we see the marker - NON-BLOCKING with asyncio
             output_lines = []
             start_time = time.time()
             timeout = 30  # Increased for R scripts
-            
+
+            loop = asyncio.get_event_loop()
             while time.time() - start_time < timeout:
                 try:
-                    line = self.shell_session.stdout.readline()
+                    # Run blocking readline in executor to avoid blocking event loop
+                    line = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.shell_session.stdout.readline),
+                        timeout=1.0  # 1 second timeout per read
+                    )
+
                     if not line:
                         break
-                    
+
                     line = line.rstrip()
-                    
+
                     # Check if we hit the marker
                     if marker in line:
                         break
-                    
+
                     output_lines.append(line)
-                except Exception:
+                except asyncio.TimeoutError:
+                    # Check if we've exceeded overall timeout
+                    if time.time() - start_time >= timeout:
+                        break
+                    # Otherwise continue reading (command might be slow)
+                    continue
+                except (OSError, ValueError) as e:
+                    # Handle specific I/O errors
+                    if debug_mode:
+                        print(f"⚠️ Shell read error: {e}")
                     break
-            
+                except Exception as e:
+                    # Catch-all for unexpected errors
+                    if debug_mode:
+                        print(f"⚠️ Unexpected error in shell execution: {e}")
+                    break
+
             output = '\n'.join(output_lines).strip()
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            
+
             # Log execution details in debug mode
             if debug_mode:
                 output_preview = output[:200] if output else "(no output)"
                 print(f"✅ Command executed: {command}")
                 print(f"📤 Output ({len(output)} chars): {output_preview}...")
-            
+
             return output if output else "Command executed (no output)"
 
         except Exception as e:
@@ -2655,7 +2675,8 @@ class EnhancedNocturnalAgent:
                             content = f.read()
                         if regex.search(content):
                             matching_files.append(file_path)
-                    except:
+                    except (OSError, PermissionError, UnicodeDecodeError):
+                        # Skip files that can't be read (permissions, binary files, etc.)
                         continue
 
                 return {
@@ -3016,6 +3037,11 @@ class EnhancedNocturnalAgent:
 
         self.conversation_history.append({"role": "user", "content": request.question})
         self.conversation_history.append({"role": "assistant", "content": response.response})
+
+        # CRITICAL FIX: Limit conversation history size to prevent memory bloat
+        # Keep last 100 messages (50 exchanges) to maintain context without unbounded growth
+        if len(self.conversation_history) > 100:
+            self.conversation_history = self.conversation_history[-100:]
 
         self._update_memory(
             request.user_id,
@@ -3497,7 +3523,7 @@ class EnhancedNocturnalAgent:
                 tools: List[str] = []
 
                 if self.shell_session:
-                    pwd_output = self.execute_command("pwd")
+                    pwd_output = await self.execute_command("pwd")
                     if pwd_output and not pwd_output.startswith("ERROR"):
                         cwd_line = pwd_output.strip().splitlines()[-1]
                         tools.append("shell_execution")
@@ -3551,7 +3577,7 @@ class EnhancedNocturnalAgent:
             if might_need_shell and self.shell_session:
                 # Get current directory and context for intelligent planning
                 try:
-                    current_dir = self.execute_command("pwd").strip()
+                    current_dir = (await self.execute_command("pwd")).strip()
                     self.file_context['current_cwd'] = current_dir
                 except:
                     current_dir = "~"
@@ -3921,7 +3947,7 @@ JSON:"""
 
                             # If not intercepted, execute as shell command
                             if not intercepted:
-                                output = self.execute_command(command)
+                                output = await self.execute_command(command)
                             
                             if not output.startswith("ERROR"):
                                 # Success - store results with formatted preview
@@ -3934,6 +3960,13 @@ JSON:"""
                                     "safety_level": safety_level
                                 }
                                 tools_used.append("shell_execution")
+
+                                # CRITICAL FIX: Update conversation history with command execution
+                                # This prevents command repetition by letting agent remember what it already did
+                                self.conversation_history.append({
+                                    "role": "system",
+                                    "content": f"[Executed shell command: {command}]\n[Output: {output[:500]}{'...' if len(output) > 500 else ''}]"
+                                })
                                 
                                 # Update file context if needed
                                 if updates_context:
@@ -3963,7 +3996,7 @@ JSON:"""
                                     # If cd command, update current_cwd
                                     if command.startswith('cd '):
                                         try:
-                                            new_cwd = self.execute_command("pwd").strip()
+                                            new_cwd = (await self.execute_command("pwd")).strip()
                                             self.file_context['current_cwd'] = new_cwd
                                         except:
                                             pass
@@ -4744,7 +4777,7 @@ JSON:"""
                 command = commands[0].strip()
                 if self._is_safe_shell_command(command):
                     print(f"\n🔧 Executing: {command}")
-                    output = self.execute_command(command)
+                    output = await self.execute_command(command)
                     print(f"✅ Command completed")
                     execution_results = {
                         "command": command,
