@@ -15,7 +15,13 @@ These tests verify the 3-layer protection system:
 """
 
 import asyncio
+import os
+from pathlib import Path
 from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest, ChatResponse
+
+# Get user's actual home directory (works on any system)
+HOME = str(Path.home())
+USER = os.getenv('USER') or os.getenv('USERNAME') or 'user'
 
 # Test data simulating bad backend responses
 BAD_RESPONSES = [
@@ -29,7 +35,7 @@ BAD_RESPONSES = [
     # 2. Backend asking user to run commands (UNACCEPTABLE)
     {
         "name": "Backend Asks User To Run Command",
-        "response": "Could you run `ls /home/phyrexian` and share the output?",
+        "response": f"Could you run `ls {HOME}` and share the output?",
         "should_contain": ["found", "here's", "executed"],  # Should be replaced
         "should_not_contain": ["could you run", "share the output", "please run"],
     },
@@ -79,11 +85,11 @@ async def test_validate_and_fix_response():
             tools_used=["shell_execution"],
         )
 
-        # Simulate shell output available
+        # Simulate shell output available (use actual user's home directory)
         api_results = {
             "shell_info": {
-                "command": "ls /home/phyrexian",
-                "output": "/home/phyrexian/Downloads\n/home/phyrexian/Documents\n/home/phyrexian/cite-agent",
+                "command": f"ls {HOME}",
+                "output": f"{HOME}/Downloads\n{HOME}/Documents\n{HOME}/cite-agent",
                 "safety_level": "SAFE"
             }
         }

@@ -7,10 +7,14 @@ import sys
 import os
 import time
 
-# Add the installed package to the path
-sys.path.insert(0, "/home/phyrexian/.local/share/pipx/venvs/cite-agent/lib/python3.13/site-packages")
-
-from cite_agent.account_client import AccountClient
+# Note: cite-agent should be installed (via pip or pipx)
+# If running this test fails with ImportError, install with: pip install -e .
+try:
+    from cite_agent.account_client import AccountClient
+except ImportError:
+    print("⚠️  cite-agent not installed. Install with: pip install -e .")
+    print("   Or if using pipx: pipx install -e .")
+    sys.exit(1)
 
 # Test with academic email
 TEST_EMAIL = f"test{int(time.time())}@stanford.edu"
