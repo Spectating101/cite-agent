@@ -2263,6 +2263,64 @@ class EnhancedNocturnalAgent:
         """Infer shell command from natural language question."""
         question_lower = question.lower()
 
+        # COMMAND CHAINING: Detect multi-step operations
+        # Look for keywords that indicate chaining: "and", "then", "also"
+        import re
+
+        # Pattern 1: "find X and Y" → pipe commands
+        if ' and ' in question_lower:
+            parts = question_lower.split(' and ')
+
+            # "find files and count" → find | wc -l
+            if 'find' in parts[0] and any(word in parts[1] for word in ['count', 'how many']):
+                # Determine what to find
+                file_type = None
+                for keyword in ['python', '.py', 'js', 'javascript', 'files']:
+                    if keyword in parts[0]:
+                        if keyword in ['python', '.py']:
+                            file_type = '*.py'
+                        elif keyword in ['js', 'javascript']:
+                            file_type = '*.js'
+                        break
+
+                if file_type:
+                    return f"find . -name '{file_type}' -type f 2>/dev/null | wc -l"
+                else:
+                    return "find . -type f 2>/dev/null | wc -l"
+
+            # "find X and count lines" → find | xargs wc -l
+            if 'find' in parts[0] and ('count lines' in parts[1] or 'lines' in parts[1]):
+                file_type = None
+                for keyword in ['python', '.py']:
+                    if keyword in parts[0]:
+                        file_type = '*.py'
+                        break
+
+                if file_type:
+                    return f"find . -name '{file_type}' -type f -exec wc -l {{}} \\; 2>/dev/null | sort -nr | head -20"
+
+            # "list files and sort by size" → ls with sorting
+            if any(word in parts[0] for word in ['list', 'show']) and ('size' in parts[1] or 'biggest' in parts[1]):
+                return "ls -lhS"  # Sort by size
+
+            # "list files and sort by date" → ls with time sorting
+            if any(word in parts[0] for word in ['list', 'show']) and ('date' in parts[1] or 'recent' in parts[1] or 'modified' in parts[1]):
+                return "ls -lht"  # Sort by modification time
+
+        # Pattern 2: "X then Y" → sequential commands with &&
+        if ' then ' in question_lower:
+            parts = question_lower.split(' then ')
+            commands = []
+
+            for part in parts:
+                # Recursively infer each step
+                part_cmd = self._infer_shell_command(part.strip())
+                if part_cmd and part_cmd != "pwd":  # Avoid trivial commands
+                    commands.append(part_cmd)
+
+            if len(commands) >= 2:
+                return " && ".join(commands)
+
         # Check for file type patterns
         file_patterns = {
             'python': '*.py',
@@ -2285,6 +2343,40 @@ class EnhancedNocturnalAgent:
         import re
         dir_match = re.search(r'in\s+(\w+)|(\w+)\s+(?:directory|folder|dir)', question_lower)
         target_dir = dir_match.group(1) or dir_match.group(2) if dir_match else None
+
+        # BATCH OPTIMIZATION: Detect multi-attribute operations
+        # These need special handling for efficiency
+
+        # 1a. File listings with sizes
+        if any(keyword in question_lower for keyword in ['size', 'sizes', 'how big', 'disk space']):
+            if any(keyword in question_lower for keyword in ['python', '.py', 'py files']):
+                base_dir = target_dir or '.'
+                return f"find {base_dir} -name '*.py' -type f -exec ls -lh {{}} \\; 2>/dev/null | head -20"
+            elif any(keyword in question_lower for keyword in ['all files', 'files']):
+                return "ls -lhS"  # Sort by size, human-readable
+
+        # 1b. Line counting operations
+        if any(phrase in question_lower for phrase in ['count lines', 'line count', 'how many lines', 'lines in', 'wc']):
+            if any(keyword in question_lower for keyword in ['python', '.py', 'py files']):
+                base_dir = target_dir or '.'
+                return f"find {base_dir} -name '*.py' -type f -exec wc -l {{}} \\; 2>/dev/null | sort -nr | head -20"
+            elif 'all' in question_lower or 'files' in question_lower:
+                return "find . -type f -exec wc -l {} \\; 2>/dev/null | sort -nr | head -20"
+
+        # 1c. Recently modified files
+        if any(phrase in question_lower for phrase in ['recently modified', 'recent', 'modified today', 'changed today', 'newest']):
+            if any(keyword in question_lower for keyword in ['python', '.py']):
+                return "find . -name '*.py' -type f -mtime -1 -ls 2>/dev/null | head -20"
+            else:
+                return "ls -lht | head -20"  # Sort by modification time
+
+        # 1d. File searching with content grep
+        if any(phrase in question_lower for phrase in ['containing', 'with text', 'that have', 'files with']):
+            # Extract search pattern
+            pattern_match = re.search(r'(?:containing|with text|that have|files with)\s+["\']?(\w+)["\']?', question_lower)
+            if pattern_match:
+                search_term = pattern_match.group(1)
+                return f"grep -rn '{search_term}' . 2>/dev/null | head -20"
 
         # 1. Find specific file types
         for keyword, pattern in file_patterns.items():
@@ -2328,6 +2420,131 @@ class EnhancedNocturnalAgent:
 
         # Default: show current directory
         return "pwd"
+
+    def _fuzzy_match_path(self, target: str, threshold: int = 2) -> Optional[str]:
+        """Find close matches for a path using Levenshtein distance."""
+        def levenshtein_distance(s1: str, s2: str) -> int:
+            """Calculate edit distance between two strings."""
+            if len(s1) < len(s2):
+                return levenshtein_distance(s2, s1)
+            if len(s2) == 0:
+                return len(s1)
+
+            previous_row = range(len(s2) + 1)
+            for i, c1 in enumerate(s1):
+                current_row = [i + 1]
+                for j, c2 in enumerate(s2):
+                    # Cost of insertions, deletions, or substitutions
+                    insertions = previous_row[j + 1] + 1
+                    deletions = current_row[j] + 1
+                    substitutions = previous_row[j] + (c1 != c2)
+                    current_row.append(min(insertions, deletions, substitutions))
+                previous_row = current_row
+            return previous_row[-1]
+
+        # Get candidates from current directory using direct shell access
+        try:
+            # Directly use OS to avoid recursion
+            import os as os_module
+            try:
+                candidates = os_module.listdir('.')
+            except:
+                # Fallback: try getting from current working dir
+                try:
+                    import subprocess
+                    result = subprocess.run(['ls', '-1'], capture_output=True, text=True, timeout=2)
+                    candidates = result.stdout.strip().split('\n') if result.returncode == 0 else []
+                except:
+                    return None
+
+            if not candidates:
+                return None
+
+            # Find closest match
+            best_match = None
+            best_distance = threshold + 1
+
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                distance = levenshtein_distance(target.lower(), candidate.lower())
+                if distance < best_distance and distance <= threshold:
+                    best_distance = distance
+                    best_match = candidate
+
+            return best_match
+        except:
+            return None
+
+    def _analyze_error_and_suggest(self, command: str, output: str) -> str:
+        """Analyze command errors and provide actionable suggestions."""
+        output_lower = output.lower()
+        suggestions = []
+
+        # Permission denied errors
+        if any(err in output_lower for err in ['permission denied', 'access denied', 'operation not permitted']):
+            if not command.strip().startswith('sudo'):
+                suggestions.append(f"💡 Try with sudo: sudo {command}")
+            suggestions.append("💡 Check file permissions: ls -la")
+
+        # Command not found
+        if 'command not found' in output_lower or 'not recognized' in output_lower:
+            cmd_name = command.split()[0] if command.split() else ""
+            common_typos = {
+                'pytohn': 'python',
+                'pyton': 'python',
+                'cd..': 'cd ..',
+                'sl': 'ls',
+                'grpe': 'grep',
+                'got': 'git',
+            }
+            if cmd_name in common_typos:
+                suggestions.append(f"💡 Did you mean: {common_typos[cmd_name]}")
+            else:
+                suggestions.append(f"💡 Install {cmd_name}: sudo apt-get install {cmd_name} or brew install {cmd_name}")
+
+        # Directory not empty
+        if 'directory not empty' in output_lower:
+            dir_name = command.split()[-1] if len(command.split()) > 1 else "directory"
+            suggestions.append(f"💡 To remove with contents: rm -rf {dir_name}")
+            suggestions.append(f"💡 To empty first: rm -r {dir_name}/*")
+
+        # File exists
+        if 'file exists' in output_lower or 'already exists' in output_lower:
+            suggestions.append("💡 Use -f flag to force overwrite")
+            suggestions.append("💡 Choose a different name")
+
+        # No space left on device
+        if 'no space left' in output_lower:
+            suggestions.append("💡 Check disk space: df -h")
+            suggestions.append("💡 Find large files: du -sh * | sort -hr | head -10")
+
+        # Argument list too long
+        if 'argument list too long' in output_lower:
+            suggestions.append("💡 Use xargs to handle large lists")
+            suggestions.append("💡 Process files in smaller batches")
+
+        # Python/pip errors
+        if 'modulenotfounderror' in output_lower or 'no module named' in output_lower:
+            module_match = re.search(r"no module named ['\"](\w+)['\"]", output_lower)
+            if module_match:
+                module = module_match.group(1)
+                suggestions.append(f"💡 Install module: pip install {module}")
+
+        # Git errors
+        if 'fatal: not a git repository' in output_lower:
+            suggestions.append("💡 Initialize git: git init")
+            suggestions.append("💡 Clone a repository: git clone <url>")
+
+        # Network errors
+        if any(err in output_lower for err in ['connection refused', 'network unreachable', 'timeout']):
+            suggestions.append("💡 Check network connection: ping google.com")
+            suggestions.append("💡 Check if service is running")
+
+        # Return enhanced output with suggestions
+        if suggestions:
+            return output + "\n\n" + "\n".join(suggestions)
+        return output
 
     def execute_command(self, command: str) -> str:
         """Execute command and return output - improved with echo markers"""
@@ -2389,13 +2606,40 @@ class EnhancedNocturnalAgent:
             
             output = '\n'.join(output_lines).strip()
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            
+
             # Log execution details in debug mode
             if debug_mode:
                 output_preview = output[:200] if output else "(no output)"
                 print(f"✅ Command executed: {command}")
                 print(f"📤 Output ({len(output)} chars): {output_preview}...")
-            
+
+            # FUZZY PATH MATCHING: Detect errors and suggest corrections
+            if output and any(err in output.lower() for err in ['no such file or directory', 'cannot cd', 'not found']):
+                # Extract the problematic path from cd commands
+                if command.strip().startswith('cd '):
+                    import re
+                    path_match = re.search(r'cd\s+([^\s;&|]+)', command)
+                    if path_match:
+                        target_path = path_match.group(1).strip()
+                        # Try fuzzy matching
+                        suggestion = self._fuzzy_match_path(target_path)
+                        if suggestion:
+                            output += f"\n\n💡 Did you mean '{suggestion}'? Try: cd {suggestion}"
+
+                # Extract failed file/directory from other commands
+                elif any(cmd in command for cmd in ['ls', 'cat', 'head', 'tail']):
+                    # Extract file argument
+                    parts = command.split()
+                    if len(parts) > 1:
+                        target = parts[-1]  # Usually last argument
+                        suggestion = self._fuzzy_match_path(target)
+                        if suggestion:
+                            output += f"\n\n💡 Did you mean '{suggestion}'?"
+
+            # SMART ERROR RECOVERY: Analyze errors and provide actionable suggestions
+            if output:
+                output = self._analyze_error_and_suggest(command, output)
+
             return output if output else "Command executed (no output)"
 
         except Exception as e:
