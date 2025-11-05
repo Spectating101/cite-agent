@@ -190,10 +190,11 @@ async def simulate_streaming(text: str, chunk_size: int = 5) -> AsyncGenerator[s
 # Example usage
 async def example_usage():
     """Example of how to use the streaming UI"""
-    
+    import os
+
     ui = StreamingChatUI(
         app_name="Nocturnal Archive",
-        working_dir="/home/researcher/project"
+        working_dir=os.getcwd()  # Use current directory, not hardcoded path
     )
     
     # Show header on startup
