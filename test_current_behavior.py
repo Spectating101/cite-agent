@@ -82,9 +82,9 @@ async def test_agent_behavior():
             is_location = agent._is_location_query(test['query'])
             print(f"🔍 _is_location_query() returns: {is_location}")
 
-            # Check query classification
+            # Check query classification (now async in Phase 4)
             from cite_agent.adaptive_providers import QueryType
-            query_type = agent._classify_query_type(test['query'])
+            query_type = await agent._classify_query_type(test['query'])
             print(f"🏷️  _classify_query_type() returns: {query_type.value}")
 
             print()
