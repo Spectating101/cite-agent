@@ -716,7 +716,7 @@ class EnhancedNocturnalAgent:
             api_results={"workspace_listing": listing}
         )
 
-    def _respond_with_shell_command(self, request: ChatRequest, command: str) -> ChatResponse:
+    async def _respond_with_shell_command(self, request: ChatRequest, command: str) -> ChatResponse:
         command_stub = command.split()[0] if command else ""
         if not self._is_safe_shell_command(command):
             message = (
@@ -4011,13 +4011,13 @@ JSON:"""
                     elif shell_action == "pwd":
                         target = plan.get("target_path")
                         if target:
-                            ls_output = self.execute_command(f"ls -lah {target}")
+                            ls_output = await self.execute_command(f"ls -lah {target}")
                             api_results["shell_info"] = {
                                 "directory_contents": ls_output,
                                 "target_path": target
                             }
                         else:
-                            ls_output = self.execute_command("ls -lah")
+                            ls_output = await self.execute_command("ls -lah")
                             api_results["shell_info"] = {"directory_contents": ls_output}
                         tools_used.append("shell_execution")
                     
@@ -4026,7 +4026,7 @@ JSON:"""
                         search_path = plan.get("search_path", "~")
                         if search_target:
                             find_cmd = f"find {search_path} -maxdepth 4 -type d -iname '*{search_target}*' 2>/dev/null | head -20"
-                            find_output = self.execute_command(find_cmd)
+                            find_output = await self.execute_command(find_cmd)
                             if debug_mode:
                                 print(f"🔍 FIND: {find_cmd}")
                                 print(f"🔍 OUTPUT: {repr(find_output)}")
@@ -4051,7 +4051,7 @@ JSON:"""
                             
                             # Execute cd command
                             cd_cmd = f"cd {target} && pwd"
-                            cd_output = self.execute_command(cd_cmd)
+                            cd_output = await self.execute_command(cd_cmd)
                             
                             if not cd_output.startswith("ERROR"):
                                 api_results["shell_info"] = {
@@ -4076,7 +4076,7 @@ JSON:"""
                             filenames = re.findall(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', request.question)
                             if filenames:
                                 # Check if file exists in current directory
-                                pwd = self.execute_command("pwd").strip()
+                                pwd = (await self.execute_command("pwd")).strip()
                                 file_path = f"{pwd}/{filenames[0]}"
                         
                         if file_path:
@@ -4084,7 +4084,7 @@ JSON:"""
                                 print(f"🔍 READING FILE: {file_path}")
                             
                             # Read file content (first 100 lines to detect structure)
-                            cat_output = self.execute_command(f"head -100 {file_path}")
+                            cat_output = await self.execute_command(f"head -100 {file_path}")
                             
                             if not cat_output.startswith("ERROR"):
                                 # Detect file type and extract structure
@@ -4434,7 +4434,7 @@ JSON:"""
 
             direct_shell = re.match(r"^(?:run|execute)\s*:?\s*(.+)$", request.question.strip(), re.IGNORECASE)
             if direct_shell:
-                return self._respond_with_shell_command(request, direct_shell.group(1).strip())
+                return await self._respond_with_shell_command(request, direct_shell.group(1).strip())
 
             # Get memory context
             memory_context = self._get_memory_context(request.user_id, request.conversation_id)
@@ -4926,7 +4926,7 @@ JSON:"""
             # Direct shell commands (non-streaming fallback)
             direct_shell = re.match(r"^(?:run|execute)\s*:?\s*(.+)$", request.question.strip(), re.IGNORECASE)
             if direct_shell:
-                result = self._respond_with_shell_command(request, direct_shell.group(1).strip())
+                result = await self._respond_with_shell_command(request, direct_shell.group(1).strip())
                 async def shell_gen():
                     yield result.response
                 return shell_gen()
