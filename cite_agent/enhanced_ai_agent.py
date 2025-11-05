@@ -1152,6 +1152,13 @@ class EnhancedNocturnalAgent:
 
         guidelines.extend([
             "",
+            "- COMMUNICATION RULES:",
+            "- You MUST NOT return an empty response. EVER.",
+            "- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., \"Okay, I'll check the contents of that directory,\" or \"I will search for that file.\")",
+        ])
+
+        guidelines.extend([
+            "",
             "- PROACTIVE FILE SEARCH:",
             "- If a user asks to find a file or directory and you are not sure where it is, use the `find` command with wildcards to search for it.",
             "- If a `cd` command fails, automatically run `ls -F` on the current or parent directory to understand the directory structure and find the correct path.",
