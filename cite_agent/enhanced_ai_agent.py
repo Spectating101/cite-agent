@@ -1672,22 +1672,64 @@ class EnhancedNocturnalAgent:
                     if debug_mode:
                         print(f"✅ Loaded {len(self.api_keys)} {self.llm_provider.upper()} API key(s)")
                     # Initialize first client - Cerebras uses OpenAI-compatible API
+                    client_initialized = False
                     try:
                         if self.llm_provider == "cerebras":
                             # Cerebras uses OpenAI client with custom base URL
-                            from openai import OpenAI
-                            self.client = OpenAI(
-                                api_key=self.api_keys[0],
-                                base_url="https://api.cerebras.ai/v1"
-                            )
+                            try:
+                                from openai import OpenAI
+                                self.client = OpenAI(
+                                    api_key=self.api_keys[0],
+                                    base_url="https://api.cerebras.ai/v1"
+                                )
+                                client_initialized = True
+                            except Exception as ce:
+                                if debug_mode:
+                                    print(f"⚠️ CEREBRAS client failed: {ce}")
+                                # Try Groq as fallback with GROQ keys
+                                try:
+                                    from groq import Groq
+                                    if debug_mode:
+                                        print("🔄 Falling back to Groq...")
+
+                                    # Load GROQ API keys separately
+                                    groq_keys = []
+                                    for i in range(10):
+                                        key_name = f"GROQ_API_KEY_{i}" if i > 0 else "GROQ_API_KEY"
+                                        key = os.getenv(key_name)
+                                        if key and key.strip():
+                                            groq_keys.append(key.strip())
+
+                                    if groq_keys:
+                                        self.client = Groq(api_key=groq_keys[0])
+                                        self.api_keys = groq_keys  # Update to Groq keys
+                                        self.llm_provider = "groq"  # Update provider
+                                        client_initialized = True
+                                        print(f"✅ Switched to Groq client successfully ({len(groq_keys)} key(s))")
+                                    else:
+                                        if debug_mode:
+                                            print("⚠️ No GROQ_API_KEY found for fallback")
+                                except Exception as ge:
+                                    if debug_mode:
+                                        print(f"⚠️ Groq fallback also failed: {ge}")
                         else:
-                            # Groq fallback
+                            # Groq
                             from groq import Groq
                             self.client = Groq(api_key=self.api_keys[0])
-                        self.current_api_key = self.api_keys[0]
-                        self.current_key_index = 0
+                            client_initialized = True
+
+                        if client_initialized:
+                            self.current_api_key = self.api_keys[0]
+                            self.current_key_index = 0
+                            if debug_mode:
+                                print(f"✅ {self.llm_provider.upper()} client initialized successfully")
+                        else:
+                            self.client = None
+                            print("⚠️ All client initialization attempts failed")
+                            print("⚠️ Research queries will require backend authentication")
                     except Exception as e:
-                        print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
+                        print(f"⚠️ Fatal error initializing client: {e}")
+                        self.client = None
 
             # Initialize shell session for BOTH production and dev mode
             # Production users need code execution too (like Cursor/Aider)
@@ -1756,13 +1798,62 @@ class EnhancedNocturnalAgent:
         # DEBUG: Print auth status
         debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         if debug_mode:
-            print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
-        
+            print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}, client={self.client}")
+
+        # If no auth token, check if we can use local client instead
         if not self.auth_token:
-            return ChatResponse(
-                response="❌ Not authenticated. Please log in first.",
-                error_message="Authentication required"
-            )
+            if self.client and hasattr(self, 'llm_provider'):
+                # Use local LLM client (Groq/CEREBRAS) instead of backend
+                if debug_mode:
+                    print(f"🔄 No auth token, using local {self.llm_provider.upper()} client")
+
+                try:
+                    # Build prompt with API context
+                    prompt = query
+                    if api_results:
+                        context_parts = []
+                        if api_results.get("shell_info"):
+                            context_parts.append(f"Shell output: {api_results['shell_info'].get('output', '')[:500]}")
+                        if api_results.get("archive_results"):
+                            context_parts.append(f"Research papers: {len(api_results['archive_results'].get('results', []))} found")
+                        if context_parts:
+                            prompt = f"Context:\\n{chr(10).join(context_parts)}\\n\\nQuestion: {query}"
+
+                    # Call local LLM
+                    if self.llm_provider == "cerebras":
+                        model_name = "gpt-oss-120b"
+                    else:
+                        model_name = "llama-3.3-70b-versatile"
+
+                    response_obj = self.client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful research assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=2000,
+                        temperature=0.7
+                    )
+
+                    response_text = response_obj.choices[0].message.content.strip()
+                    return ChatResponse(
+                        response=response_text,
+                        tools_used=tools_used or [],
+                        api_results=api_results
+                    )
+                except Exception as e:
+                    if debug_mode:
+                        print(f"⚠️ Local client call failed: {e}")
+                    return ChatResponse(
+                        response=f"⚠️ I couldn't finish the reasoning step because the language model call failed.\\n\\nDetails: {str(e)}\\n\\nPlease retry shortly or verify your {self.llm_provider.upper()} API keys and network connectivity.",
+                        error_message=str(e)
+                    )
+            else:
+                # No client and no auth
+                return ChatResponse(
+                    response="❌ Not authenticated. Please log in first.",
+                    error_message="Authentication required"
+                )
         
         if not self.session:
             return ChatResponse(
@@ -3966,7 +4057,7 @@ JSON:"""
                     if hasattr(self, 'client') and self.client:
                         # Local mode with temp key or dev keys
                         # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
-                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
+                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.3-70b-versatile"
                         response = self.client.chat.completions.create(
                             model=model_name,
                             messages=[{"role": "user", "content": planner_prompt}],
@@ -4478,7 +4569,7 @@ JSON:"""
                     if hasattr(self, 'client') and self.client:
                         # Local mode
                         # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
-                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
+                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.3-70b-versatile"
                         response = self.client.chat.completions.create(
                             model=model_name,
                             messages=[{"role": "user", "content": web_decision_prompt}],
