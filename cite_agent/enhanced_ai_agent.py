@@ -1186,18 +1186,24 @@ class EnhancedNocturnalAgent:
             # FILE_SEARCH: Looking for files (CHECK FIRST - higher priority than location)
             # Bug fix: Check for action verbs first to avoid false location matches
             file_search_keywords = {
-                'find', 'search', 'locate', 'which', 'find file', 'ls', 'list', 'show'
+                'find', 'search', 'locate', 'which', 'where is', 'where are',
+                'ls', 'list', 'show', 'look for'
             }
-            if any(kw in query_lower for kw in file_search_keywords) and any(
-                word in query_lower for word in ['file', 'files', 'directory', 'folder']
-            ):
+            file_search_targets = {
+                'file', 'files', 'directory', 'folder', 'path', 'directories',
+                'python', 'txt', 'json', 'csv', 'code', 'script', 'directory'
+            }
+            has_search_keyword = any(kw in query_lower for kw in file_search_keywords)
+            has_file_target = any(target in query_lower for target in file_search_targets)
+            
+            if has_search_keyword and has_file_target:
                 intent = 'file_search'
                 self._cache_intent(query_hash, intent)
                 return intent
 
             # LOCATION: Current directory queries
             # Only match if NO action verbs present (to avoid "list files in current directory")
-            action_verbs = ['list', 'show', 'display', 'find', 'search', 'get', 'see', 'view']
+            action_verbs = ['list', 'show', 'display', 'find', 'search', 'get', 'see', 'view', 'show me', 'list']
             has_action_verb = any(verb in query_lower.split() for verb in action_verbs)
 
             if not has_action_verb:
@@ -1213,12 +1219,23 @@ class EnhancedNocturnalAgent:
                     return intent
             
             # FILE_READ: Read/view file
+            # IMPROVED: Better detection of "explain what X.py does" type queries
             file_read_keywords = {
-                'read', 'show', 'display', 'view', 'cat', 'open', 'contents', 'print'
+                'read', 'show', 'display', 'view', 'cat', 'open', 'contents', 'print',
+                'what is', 'what are', 'explain', 'tell me', 'describe', 'look at'
             }
-            if any(kw in query_lower for kw in file_read_keywords) and any(
-                word in query_lower for word in ['file', '.txt', '.py', '.json', '.csv']
-            ):
+            file_extensions = {'.txt', '.py', '.json', '.csv', '.yaml', '.yml', '.xml', '.md', '.sh'}
+            file_references = {'file', 'config', 'code', 'script', 'log', 'data', 'main'}
+            
+            has_file_extension = any(ext in query_lower for ext in file_extensions)
+            has_file_read_keyword = any(kw in query_lower for kw in file_read_keywords)
+            has_file_reference = any(word in query_lower for word in file_references)
+            
+            # Don't confuse file_read with multi-file searches
+            is_searching_for_multiple = any(word in query_lower for word in ['all', 'find', 'search', 'where is', 'list', 'locate'])
+            
+            if (has_file_read_keyword and has_file_reference and not is_searching_for_multiple) or \
+               (has_file_extension and has_file_read_keyword and not is_searching_for_multiple):
                 intent = 'file_read'
                 self._cache_intent(query_hash, intent)
                 return intent
