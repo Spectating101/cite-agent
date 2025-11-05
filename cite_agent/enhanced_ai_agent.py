@@ -26,6 +26,11 @@ import platform
 from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
+from .workflow import (
+    Paper, calculate_paper_quality_score, rank_papers,
+    analyze_paper_collection, calculate_venue_score,
+    calculate_citation_score, calculate_recency_score
+)
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -2237,8 +2242,17 @@ class EnhancedNocturnalAgent:
             self._record_data_source("FinSight", f"POST {endpoint}", False, str(e))
             return {"error": f"FinSight API call failed: {e}"}
     
-    async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
-        """Search academic papers using Archive API with resilient fallbacks."""
+    async def search_academic_papers(self, query: str, limit: int = 10, rank_by: str = "quality") -> Dict[str, Any]:
+        """Search academic papers using Archive API with resilient fallbacks and quality ranking.
+
+        Args:
+            query: Search query
+            limit: Maximum number of papers to return
+            rank_by: Ranking criteria - 'quality', 'citations', 'recency', 'venue'
+
+        Returns:
+            Dictionary with ranked and scored papers
+        """
         source_sets: List[List[str]] = [
             ["semantic_scholar", "openalex"],
             ["semantic_scholar"],
@@ -2289,18 +2303,174 @@ class EnhancedNocturnalAgent:
             )
             aggregated_payload["EMPTY_RESULTS"] = True
             aggregated_payload["warning"] = "DO NOT GENERATE FAKE PAPERS - API returned zero results"
+            return aggregated_payload
+
+        # === QUALITY ENHANCEMENT: Rank and score papers ===
+        try:
+            # Convert raw dicts to Paper objects for quality analysis
+            paper_objects = []
+            for raw_paper in aggregated_payload["results"]:
+                try:
+                    # Extract authors
+                    authors_raw = raw_paper.get("authors", [])
+                    if isinstance(authors_raw, list):
+                        authors = [a.get("name", a) if isinstance(a, dict) else str(a) for a in authors_raw]
+                    else:
+                        authors = []
+
+                    # Create Paper object
+                    paper_obj = Paper(
+                        title=raw_paper.get("title", "Unknown"),
+                        authors=authors,
+                        year=raw_paper.get("year", 0),
+                        doi=raw_paper.get("doi"),
+                        url=raw_paper.get("url") or raw_paper.get("pdf_url"),
+                        abstract=raw_paper.get("abstract"),
+                        venue=raw_paper.get("venue"),
+                        citation_count=raw_paper.get("citations_count", 0) or raw_paper.get("citation_count", 0),
+                        paper_id=raw_paper.get("id") or raw_paper.get("paper_id")
+                    )
+                    paper_objects.append(paper_obj)
+                except Exception as e:
+                    logger.warning(f"Failed to convert paper to object: {e}")
+                    continue
+
+            if paper_objects:
+                # Rank papers by specified criteria
+                ranked_papers = rank_papers(paper_objects, criteria=rank_by)
+
+                # Add quality scores to results
+                enhanced_results = []
+                for paper_obj in ranked_papers:
+                    quality_score = calculate_paper_quality_score(paper_obj)
+                    citation_score = calculate_citation_score(paper_obj.citation_count)
+                    venue_score = calculate_venue_score(paper_obj.venue)
+                    recency_score = calculate_recency_score(paper_obj.year)
+
+                    # Preserve original data but add quality metrics
+                    paper_dict = {
+                        "title": paper_obj.title,
+                        "authors": paper_obj.authors,
+                        "year": paper_obj.year,
+                        "doi": paper_obj.doi,
+                        "url": paper_obj.url,
+                        "abstract": paper_obj.abstract,
+                        "venue": paper_obj.venue,
+                        "citation_count": paper_obj.citation_count,
+                        "paper_id": paper_obj.paper_id,
+                        # Quality metrics
+                        "quality_score": quality_score,
+                        "citation_score": citation_score,
+                        "venue_score": venue_score,
+                        "recency_score": recency_score,
+                        "quality_tier": "high" if quality_score >= 75 else "medium" if quality_score >= 50 else "low"
+                    }
+                    enhanced_results.append(paper_dict)
+
+                aggregated_payload["results"] = enhanced_results
+
+                # Add collection analysis
+                collection_analysis = analyze_paper_collection(ranked_papers)
+                aggregated_payload["collection_analysis"] = collection_analysis
+                aggregated_payload["ranking_criteria"] = rank_by
+
+        except Exception as e:
+            logger.error(f"Quality enhancement failed: {e}")
+            # Continue with unenhanced results if quality scoring fails
 
         return aggregated_payload
     
-    async def synthesize_research(self, paper_ids: List[str], max_words: int = 500) -> Dict[str, Any]:
-        """Synthesize research papers using Archive API"""
-        data = {
-            "paper_ids": paper_ids,
-            "max_words": max_words,
-            "focus": "key_findings",
-            "style": "academic"
-        }
-        return await self._call_archive_api("synthesize", data)
+    async def synthesize_research(
+        self,
+        paper_ids: List[str] = None,
+        papers: List[Dict[str, Any]] = None,
+        max_words: int = 500,
+        focus: str = "key_findings",
+        style: str = "academic",
+        citation_format: str = "apa"
+    ) -> Dict[str, Any]:
+        """Synthesize research papers using Archive API with enhanced formatting.
+
+        Args:
+            paper_ids: List of paper IDs to synthesize
+            papers: Alternative - list of paper dicts with metadata
+            max_words: Maximum words for synthesis
+            focus: Synthesis focus - 'key_findings', 'methodology', 'results', 'future_work'
+            style: Writing style - 'academic', 'technical', 'accessible'
+            citation_format: Citation style - 'apa', 'mla', 'ieee', 'chicago'
+
+        Returns:
+            Enhanced synthesis with formatted citations and quality insights
+        """
+        if paper_ids:
+            data = {
+                "paper_ids": paper_ids,
+                "max_words": max_words,
+                "focus": focus,
+                "style": style
+            }
+            result = await self._call_archive_api("synthesize", data)
+
+            # Enhance with citation formatting if papers data available
+            if "summary" in result and papers:
+                try:
+                    # Add formatted citations
+                    citations = []
+                    for paper_dict in papers[:len(paper_ids)]:
+                        paper_obj = Paper(
+                            title=paper_dict.get("title", "Unknown"),
+                            authors=paper_dict.get("authors", []),
+                            year=paper_dict.get("year", 0),
+                            doi=paper_dict.get("doi"),
+                            url=paper_dict.get("url"),
+                            venue=paper_dict.get("venue"),
+                            citation_count=paper_dict.get("citation_count", 0)
+                        )
+                        formatted = paper_obj.format_citation(citation_format)
+                        citations.append(formatted)
+
+                    result["formatted_citations"] = citations
+                    result["citation_format"] = citation_format
+                except Exception as e:
+                    logger.warning(f"Failed to add formatted citations: {e}")
+
+            return result
+
+        elif papers:
+            # Local synthesis from paper list (lightweight - just generate citations)
+            try:
+                paper_objects = []
+                for paper_dict in papers:
+                    paper_obj = Paper(
+                        title=paper_dict.get("title", "Unknown"),
+                        authors=paper_dict.get("authors", []),
+                        year=paper_dict.get("year", 0),
+                        doi=paper_dict.get("doi"),
+                        url=paper_dict.get("url"),
+                        abstract=paper_dict.get("abstract"),
+                        venue=paper_dict.get("venue"),
+                        citation_count=paper_dict.get("citation_count", 0),
+                        paper_id=paper_dict.get("paper_id")
+                    )
+                    paper_objects.append(paper_obj)
+
+                # Generate formatted citations
+                citations = [p.format_citation(citation_format) for p in paper_objects]
+
+                # Basic analysis
+                analysis = analyze_paper_collection(paper_objects)
+
+                return {
+                    "formatted_citations": citations,
+                    "citation_format": citation_format,
+                    "analysis": analysis,
+                    "paper_count": len(papers),
+                    "note": "Local synthesis - formatted citations and analysis only"
+                }
+            except Exception as e:
+                return {"error": f"Local synthesis failed: {e}"}
+        else:
+            return {"error": "Either paper_ids or papers must be provided"}
     
     async def get_financial_data(self, ticker: str, metric: str, limit: int = 12) -> Dict[str, Any]:
         """Get financial data using FinSight API"""
@@ -2336,6 +2506,184 @@ class EnhancedNocturnalAgent:
             results.update(payload)
 
         return results
+
+    async def analyze_financial_health(self, ticker: str) -> Dict[str, Any]:
+        """Comprehensive financial health analysis with key ratios and trends.
+
+        Args:
+            ticker: Stock ticker symbol
+
+        Returns:
+            Dictionary with financial ratios, trends, and health indicators
+        """
+        try:
+            # Fetch key metrics
+            metrics = ["revenue", "grossProfit", "operatingIncome", "netIncome",
+                      "totalAssets", "totalLiabilities", "cashAndCashEquivalents"]
+
+            results = await self.get_financial_metrics(ticker, metrics)
+
+            # Calculate financial ratios
+            ratios = {}
+
+            # Profitability ratios
+            revenue_data = results.get("revenue", {})
+            net_income_data = results.get("netIncome", {})
+            gross_profit_data = results.get("grossProfit", {})
+
+            if revenue_data and net_income_data and not ("error" in revenue_data or "error" in net_income_data):
+                try:
+                    revenue_val = revenue_data.get("value", 0)
+                    net_income_val = net_income_data.get("value", 0)
+                    if revenue_val and revenue_val != 0:
+                        ratios["net_profit_margin"] = round((net_income_val / revenue_val) * 100, 2)
+                except (TypeError, ZeroDivisionError):
+                    pass
+
+            if revenue_data and gross_profit_data and not ("error" in revenue_data or "error" in gross_profit_data):
+                try:
+                    revenue_val = revenue_data.get("value", 0)
+                    gross_profit_val = gross_profit_data.get("value", 0)
+                    if revenue_val and revenue_val != 0:
+                        ratios["gross_profit_margin"] = round((gross_profit_val / revenue_val) * 100, 2)
+                except (TypeError, ZeroDivisionError):
+                    pass
+
+            # Liquidity ratios
+            assets_data = results.get("totalAssets", {})
+            liabilities_data = results.get("totalLiabilities", {})
+
+            if assets_data and liabilities_data and not ("error" in assets_data or "error" in liabilities_data):
+                try:
+                    assets_val = assets_data.get("value", 0)
+                    liabilities_val = liabilities_data.get("value", 0)
+                    if liabilities_val and liabilities_val != 0:
+                        ratios["debt_to_assets"] = round(liabilities_val / assets_val, 2)
+                except (TypeError, ZeroDivisionError):
+                    pass
+
+            # Growth analysis - fetch historical data
+            try:
+                revenue_history = await self.get_financial_data(ticker, "revenue", limit=8)
+                if "data" in revenue_history and len(revenue_history["data"]) >= 2:
+                    recent = revenue_history["data"][0].get("value", 0)
+                    previous = revenue_history["data"][-1].get("value", 0)
+                    if previous and previous != 0:
+                        quarters = len(revenue_history["data"]) - 1
+                        growth = ((recent / previous) ** (1 / quarters) - 1) * 100
+                        ratios["revenue_qoq_growth"] = round(growth, 2)
+            except Exception as e:
+                logger.warning(f"Failed to calculate growth: {e}")
+
+            # Health indicators
+            health_score = 0
+            indicators = []
+
+            # Profitability check
+            net_margin = ratios.get("net_profit_margin", 0)
+            if net_margin > 20:
+                health_score += 30
+                indicators.append("✓ Strong profitability (>20% margin)")
+            elif net_margin > 10:
+                health_score += 20
+                indicators.append("✓ Good profitability (10-20% margin)")
+            elif net_margin > 0:
+                health_score += 10
+                indicators.append("⚠ Low profitability (<10% margin)")
+            else:
+                indicators.append("✗ Unprofitable")
+
+            # Debt check
+            debt_ratio = ratios.get("debt_to_assets", 0)
+            if debt_ratio < 0.3:
+                health_score += 30
+                indicators.append("✓ Low debt (<30% of assets)")
+            elif debt_ratio < 0.6:
+                health_score += 20
+                indicators.append("✓ Moderate debt (30-60% of assets)")
+            else:
+                health_score += 5
+                indicators.append("⚠ High debt (>60% of assets)")
+
+            # Growth check
+            growth = ratios.get("revenue_qoq_growth", 0)
+            if growth > 10:
+                health_score += 25
+                indicators.append("✓ Strong growth (>10% QoQ)")
+            elif growth > 5:
+                health_score += 15
+                indicators.append("✓ Moderate growth (5-10% QoQ)")
+            elif growth > 0:
+                health_score += 5
+                indicators.append("⚠ Slow growth (<5% QoQ)")
+            else:
+                indicators.append("✗ Declining revenue")
+
+            # Cash position
+            cash_data = results.get("cashAndCashEquivalents", {})
+            if cash_data and not "error" in cash_data:
+                health_score += 15
+                indicators.append("✓ Cash reserves available")
+
+            # Overall rating
+            if health_score >= 80:
+                rating = "Excellent"
+            elif health_score >= 60:
+                rating = "Good"
+            elif health_score >= 40:
+                rating = "Fair"
+            else:
+                rating = "Poor"
+
+            return {
+                "ticker": ticker,
+                "health_score": health_score,
+                "rating": rating,
+                "ratios": ratios,
+                "indicators": indicators,
+                "metrics": results,
+                "analysis_date": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Financial health analysis failed: {e}")
+            return {"error": f"Analysis failed: {e}"}
+
+    async def compare_companies(self, tickers: List[str], metric: str = "revenue") -> Dict[str, Any]:
+        """Compare multiple companies on a specific financial metric.
+
+        Args:
+            tickers: List of ticker symbols
+            metric: Financial metric to compare
+
+        Returns:
+            Comparison data with rankings
+        """
+        try:
+            results = {}
+            for ticker in tickers:
+                data = await self.get_financial_data(ticker, metric, limit=4)
+                if "error" not in data:
+                    results[ticker] = data
+
+            # Rank by latest value
+            rankings = []
+            for ticker, data in results.items():
+                if "data" in data and data["data"]:
+                    latest_value = data["data"][0].get("value", 0)
+                    rankings.append({"ticker": ticker, "value": latest_value, "data": data})
+
+            rankings.sort(key=lambda x: x["value"], reverse=True)
+
+            return {
+                "metric": metric,
+                "comparison": rankings,
+                "count": len(rankings),
+                "leader": rankings[0]["ticker"] if rankings else None
+            }
+
+        except Exception as e:
+            return {"error": f"Comparison failed: {e}"}
 
     def _looks_like_user_prompt(self, command: str) -> bool:
         command_lower = command.strip().lower()

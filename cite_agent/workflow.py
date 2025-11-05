@@ -85,18 +85,170 @@ class Paper:
             authors_part = f"{self.authors[0]} & {self.authors[1]}"
         elif len(self.authors) > 2:
             authors_part = f"{self.authors[0]} et al."
-        
+
         citation = f"{authors_part} ({self.year}). {self.title}."
-        
+
         if self.venue:
             citation += f" {self.venue}."
-        
+
         if self.doi:
             citation += f" https://doi.org/{self.doi}"
         elif self.url:
             citation += f" {self.url}"
-        
+
         return citation
+
+    def to_mla_citation(self) -> str:
+        """Convert paper to MLA format citation"""
+        if not self.authors:
+            authors_part = "Unknown Author"
+        elif len(self.authors) == 1:
+            # Last, First format
+            name_parts = self.authors[0].split()
+            if len(name_parts) >= 2:
+                authors_part = f"{name_parts[-1]}, {' '.join(name_parts[:-1])}"
+            else:
+                authors_part = self.authors[0]
+        elif len(self.authors) == 2:
+            name_parts1 = self.authors[0].split()
+            if len(name_parts1) >= 2:
+                first_author = f"{name_parts1[-1]}, {' '.join(name_parts1[:-1])}"
+            else:
+                first_author = self.authors[0]
+            authors_part = f"{first_author}, and {self.authors[1]}"
+        else:
+            name_parts = self.authors[0].split()
+            if len(name_parts) >= 2:
+                authors_part = f"{name_parts[-1]}, {' '.join(name_parts[:-1])}, et al."
+            else:
+                authors_part = f"{self.authors[0]}, et al."
+
+        citation = f"{authors_part} \"{self.title}.\""
+
+        if self.venue:
+            citation += f" {self.venue}"
+
+        citation += f" ({self.year})"
+
+        if self.doi:
+            citation += f", doi:{self.doi}."
+        elif self.url:
+            citation += f", {self.url}."
+        else:
+            citation += "."
+
+        return citation
+
+    def to_ieee_citation(self) -> str:
+        """Convert paper to IEEE format citation"""
+        # IEEE uses initials for first names
+        if not self.authors:
+            authors_part = "Unknown Author"
+        elif len(self.authors) <= 6:
+            # All authors if 6 or fewer
+            author_list = []
+            for author in self.authors:
+                name_parts = author.split()
+                if len(name_parts) >= 2:
+                    # Convert to: J. Smith
+                    initials = ". ".join([n[0] for n in name_parts[:-1]]) + "."
+                    author_list.append(f"{initials} {name_parts[-1]}")
+                else:
+                    author_list.append(author)
+            authors_part = ", ".join(author_list)
+        else:
+            # First author et al. if more than 6
+            name_parts = self.authors[0].split()
+            if len(name_parts) >= 2:
+                initials = ". ".join([n[0] for n in name_parts[:-1]]) + "."
+                authors_part = f"{initials} {name_parts[-1]}, et al."
+            else:
+                authors_part = f"{self.authors[0]}, et al."
+
+        citation = f"{authors_part}, \"{self.title},\""
+
+        if self.venue:
+            citation += f" {self.venue},"
+
+        citation += f" {self.year}."
+
+        if self.doi:
+            citation += f" doi: {self.doi}."
+        elif self.url:
+            citation += f" [Online]. Available: {self.url}"
+
+        return citation
+
+    def to_chicago_citation(self) -> str:
+        """Convert paper to Chicago format citation"""
+        if not self.authors:
+            authors_part = "Unknown Author"
+        elif len(self.authors) == 1:
+            name_parts = self.authors[0].split()
+            if len(name_parts) >= 2:
+                authors_part = f"{name_parts[-1]}, {' '.join(name_parts[:-1])}"
+            else:
+                authors_part = self.authors[0]
+        elif len(self.authors) == 2:
+            name_parts1 = self.authors[0].split()
+            if len(name_parts1) >= 2:
+                first_author = f"{name_parts1[-1]}, {' '.join(name_parts1[:-1])}"
+            else:
+                first_author = self.authors[0]
+            authors_part = f"{first_author} and {self.authors[1]}"
+        elif len(self.authors) == 3:
+            name_parts1 = self.authors[0].split()
+            if len(name_parts1) >= 2:
+                first_author = f"{name_parts1[-1]}, {' '.join(name_parts1[:-1])}"
+            else:
+                first_author = self.authors[0]
+            authors_part = f"{first_author}, {self.authors[1]}, and {self.authors[2]}"
+        else:
+            name_parts = self.authors[0].split()
+            if len(name_parts) >= 2:
+                authors_part = f"{name_parts[-1]}, {' '.join(name_parts[:-1])}, et al."
+            else:
+                authors_part = f"{self.authors[0]}, et al."
+
+        citation = f"{authors_part}. \"{self.title}.\""
+
+        if self.venue:
+            citation += f" {self.venue}"
+
+        citation += f" ({self.year})"
+
+        if self.doi:
+            citation += f". https://doi.org/{self.doi}."
+        elif self.url:
+            citation += f". {self.url}."
+        else:
+            citation += "."
+
+        return citation
+
+    def format_citation(self, style: str = "apa") -> str:
+        """Format citation in specified style
+
+        Args:
+            style: Citation style - 'apa', 'mla', 'ieee', 'chicago', or 'bibtex'
+
+        Returns:
+            Formatted citation string
+        """
+        style = style.lower()
+        if style == "apa":
+            return self.to_apa_citation()
+        elif style == "mla":
+            return self.to_mla_citation()
+        elif style == "ieee":
+            return self.to_ieee_citation()
+        elif style == "chicago":
+            return self.to_chicago_citation()
+        elif style == "bibtex":
+            return self.to_bibtex()
+        else:
+            # Default to APA
+            return self.to_apa_citation()
 
     def to_markdown(self) -> str:
         """Convert paper to markdown format"""
@@ -130,6 +282,238 @@ class Paper:
         md += f"*Added: {self.added_date}*\n"
         
         return md
+
+
+# Venue Quality Rankings - Top-tier conferences and journals
+# Based on research community consensus (CORE, Google Scholar metrics, impact factors)
+VENUE_QUALITY_TIERS = {
+    # AI/ML Conferences (A*)
+    "neurips": 100, "nips": 100, "icml": 100, "iclr": 100, "cvpr": 100,
+    "iccv": 100, "eccv": 100, "aaai": 95, "ijcai": 95, "acl": 100,
+    "emnlp": 95, "naacl": 90, "coling": 85,
+
+    # Systems Conferences (A*)
+    "sosp": 100, "osdi": 100, "nsdi": 100, "sigcomm": 100, "mobicom": 95,
+    "sigmod": 100, "vldb": 100, "icde": 90,
+
+    # Theory Conferences (A*)
+    "stoc": 100, "focs": 100, "soda": 95,
+
+    # HCI Conferences (A*)
+    "chi": 100, "uist": 95, "ubicomp": 90,
+
+    # Security Conferences (A*)
+    "ccs": 100, "usenix security": 100, "oakland": 100, "ndss": 95,
+
+    # Top Journals
+    "nature": 100, "science": 100, "cell": 100,
+    "pnas": 95, "nature machine intelligence": 95,
+    "nature communications": 90, "science advances": 90,
+    "jmlr": 95, "pami": 95, "tacl": 95,
+    "tocs": 95, "tods": 90, "tkde": 85,
+
+    # ArXiv (preprints - quality unknown)
+    "arxiv": 50,
+}
+
+
+def calculate_venue_score(venue: Optional[str]) -> int:
+    """Calculate venue quality score (0-100)
+
+    Args:
+        venue: Publication venue name
+
+    Returns:
+        Quality score from 0 (unknown) to 100 (top-tier)
+    """
+    if not venue:
+        return 0
+
+    venue_lower = venue.lower()
+
+    # Direct match
+    for known_venue, score in VENUE_QUALITY_TIERS.items():
+        if known_venue in venue_lower:
+            return score
+
+    # Pattern matching for common patterns
+    if "nature" in venue_lower:
+        return 85  # Nature family journals
+    if "science" in venue_lower:
+        return 80  # Science family journals
+    if "proceedings" in venue_lower and any(conf in venue_lower for conf in ["neurips", "icml", "cvpr"]):
+        return 95
+    if "transaction" in venue_lower or "trans." in venue_lower:
+        return 75  # IEEE/ACM transactions
+    if "journal" in venue_lower:
+        return 60  # Generic journal
+    if "workshop" in venue_lower:
+        return 40  # Workshop paper
+    if "arxiv" in venue_lower:
+        return 50  # Preprint
+
+    return 30  # Unknown venue
+
+
+def calculate_citation_score(citations: int) -> int:
+    """Calculate citation score (0-100) with logarithmic scaling
+
+    Args:
+        citations: Number of citations
+
+    Returns:
+        Score from 0 to 100
+    """
+    if citations <= 0:
+        return 0
+    elif citations < 10:
+        return 20
+    elif citations < 50:
+        return 40
+    elif citations < 100:
+        return 60
+    elif citations < 500:
+        return 75
+    elif citations < 1000:
+        return 85
+    elif citations < 5000:
+        return 95
+    else:
+        return 100  # Highly cited (5000+)
+
+
+def calculate_recency_score(year: int) -> int:
+    """Calculate recency score (0-100) with decay for older papers
+
+    Args:
+        year: Publication year
+
+    Returns:
+        Score from 0 to 100
+    """
+    current_year = datetime.now().year
+    age = current_year - year
+
+    if age < 0:
+        return 100  # Future paper (likely error, but give benefit of doubt)
+    elif age == 0:
+        return 100  # This year
+    elif age == 1:
+        return 95
+    elif age == 2:
+        return 90
+    elif age <= 5:
+        return 80
+    elif age <= 10:
+        return 60
+    elif age <= 20:
+        return 40
+    else:
+        return 20  # Very old paper
+
+
+def calculate_paper_quality_score(
+    paper: Paper,
+    weight_citations: float = 0.4,
+    weight_venue: float = 0.35,
+    weight_recency: float = 0.25
+) -> float:
+    """Calculate overall paper quality score (0-100)
+
+    Args:
+        paper: Paper object to score
+        weight_citations: Weight for citation count (default 0.4)
+        weight_venue: Weight for venue quality (default 0.35)
+        weight_recency: Weight for recency (default 0.25)
+
+    Returns:
+        Overall quality score from 0 to 100
+    """
+    citation_score = calculate_citation_score(paper.citation_count)
+    venue_score = calculate_venue_score(paper.venue)
+    recency_score = calculate_recency_score(paper.year)
+
+    overall = (
+        citation_score * weight_citations +
+        venue_score * weight_venue +
+        recency_score * weight_recency
+    )
+
+    return round(overall, 2)
+
+
+def rank_papers(papers: List[Paper], criteria: str = "quality") -> List[Paper]:
+    """Rank papers by specified criteria
+
+    Args:
+        papers: List of Paper objects
+        criteria: Ranking criterion - 'quality', 'citations', 'recency', 'venue'
+
+    Returns:
+        Sorted list of papers (highest quality first)
+    """
+    if criteria == "quality":
+        return sorted(papers, key=lambda p: calculate_paper_quality_score(p), reverse=True)
+    elif criteria == "citations":
+        return sorted(papers, key=lambda p: p.citation_count, reverse=True)
+    elif criteria == "recency":
+        return sorted(papers, key=lambda p: p.year, reverse=True)
+    elif criteria == "venue":
+        return sorted(papers, key=lambda p: calculate_venue_score(p.venue), reverse=True)
+    else:
+        # Default to quality
+        return sorted(papers, key=lambda p: calculate_paper_quality_score(p), reverse=True)
+
+
+def analyze_paper_collection(papers: List[Paper]) -> Dict[str, Any]:
+    """Analyze a collection of papers for insights
+
+    Args:
+        papers: List of Paper objects
+
+    Returns:
+        Dictionary with analysis results
+    """
+    if not papers:
+        return {"error": "No papers to analyze"}
+
+    total_citations = sum(p.citation_count for p in papers)
+    avg_citations = total_citations / len(papers)
+
+    years = [p.year for p in papers]
+    year_range = (min(years), max(years)) if years else (0, 0)
+
+    # Count venues
+    venues = {}
+    for p in papers:
+        if p.venue:
+            venues[p.venue] = venues.get(p.venue, 0) + 1
+
+    # Top cited papers
+    top_cited = sorted(papers, key=lambda p: p.citation_count, reverse=True)[:5]
+
+    # Quality distribution
+    quality_scores = [calculate_paper_quality_score(p) for p in papers]
+    avg_quality = sum(quality_scores) / len(quality_scores)
+
+    high_quality = len([s for s in quality_scores if s >= 75])
+    medium_quality = len([s for s in quality_scores if 50 <= s < 75])
+    low_quality = len([s for s in quality_scores if s < 50])
+
+    return {
+        "total_papers": len(papers),
+        "total_citations": total_citations,
+        "avg_citations": round(avg_citations, 2),
+        "year_range": year_range,
+        "top_venues": dict(sorted(venues.items(), key=lambda x: x[1], reverse=True)[:10]),
+        "top_cited_titles": [p.title for p in top_cited],
+        "quality_distribution": {
+            "high (75+)": high_quality,
+            "medium (50-74)": medium_quality,
+            "low (<50)": low_quality
+        },
+        "avg_quality_score": round(avg_quality, 2)
+    }
 
 
 class WorkflowManager:
