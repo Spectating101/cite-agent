@@ -5,6 +5,7 @@ Minimal, clean, conversational interface for data analysis assistant
 """
 
 import sys
+import os
 import asyncio
 from typing import Optional, AsyncGenerator
 from rich.console import Console
@@ -193,7 +194,7 @@ async def example_usage():
     
     ui = StreamingChatUI(
         app_name="Nocturnal Archive",
-        working_dir="/home/researcher/project"
+        working_dir=os.getcwd()
     )
     
     # Show header on startup

@@ -7,9 +7,6 @@ import sys
 import os
 import time
 
-# Add the installed package to the path
-sys.path.insert(0, "/home/phyrexian/.local/share/pipx/venvs/cite-agent/lib/python3.13/site-packages")
-
 from cite_agent.account_client import AccountClient
 
 # Test with academic email
