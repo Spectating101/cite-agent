@@ -1,0 +1,7 @@
+#!/bin/bash
+export CEREBRAS_API_KEY_1="csk-34cp53294pcmrexym8h2r4x5cyy2npnrd344928yhf2hpctj"
+export CEREBRAS_API_KEY_2="csk-edrc3v63k43fe4hdt529ynt4h9mfd9k9wjpjj3nn5pcvm2t4"
+export CEREBRAS_API_KEY_3="csk-ek3cj5jv26hpnd2h65d8955pjmvxctdjknfv6pwehr82pnhr"
+export CEREBRAS_API_KEY_4="csk-n5h26f263vr5rxp9fpn4w8xkfvpc5v9kjdw95vfc8d3x4ce9"
+
+python3 show_actual_interactions.py 2>&1

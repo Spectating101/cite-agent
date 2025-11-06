@@ -1,0 +1,93 @@
+====================================================================================================
+ACTUAL TEST INTERACTIONS - Real Questions & Real Responses
+====================================================================================================
+
+====================================================================================================
+TEST 1: Research Paper Search
+====================================================================================================
+
+QUESTION: Find papers on machine learning interpretability from the last 2 years
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: ['archive_api']
+
+
+====================================================================================================
+TEST 2: Statistical Analysis Guidance
+====================================================================================================
+
+QUESTION: I have survey data with 5-point Likert scales. What statistical tests should I use?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: []
+
+
+====================================================================================================
+TEST 3: Data Analysis Recommendations
+====================================================================================================
+
+QUESTION: I have a CSV file with customer purchase data. How should I analyze it to find patterns?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: []
+
+
+====================================================================================================
+TEST 4: Literature Review Synthesis
+====================================================================================================
+
+QUESTION: Summarize the current research on deep learning for medical image analysis
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: ['archive_api']
+
+
+====================================================================================================
+TEST 5: Specific Methodology Question
+====================================================================================================
+
+QUESTION: What's the difference between random forest and gradient boosting for classification?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: []
+
+
+====================================================================================================
+TEST 6: Research Gap Identification
+====================================================================================================
+
+QUESTION: What are the current limitations in natural language processing for low-resource languages?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I'm having trouble processing that right now. Could you try rephrasing or asking something else?
+----------------------------------------------------------------------------------------------------
+Length: 96 chars | Tools used: []
+
+
+====================================================================================================
+SUMMARY OF ACTUAL INTERACTIONS
+====================================================================================================
+Test 1 (Paper Search): 96 chars
+Test 2 (Statistical): 96 chars
+Test 3 (Data Analysis): 96 chars
+Test 4 (Literature Review): 96 chars
+Test 5 (Methodology): 96 chars
+Test 6 (Research Gaps): 96 chars
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7ed51d823dd0>

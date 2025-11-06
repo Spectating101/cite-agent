@@ -1,0 +1,140 @@
+====================================================================================================
+COMPREHENSIVE TEST SUITE - 21 Tests
+====================================================================================================
+
+
+[1/21] Testing: research_paper_search
+Query: Find papers on climate change mitigation strategies...
+✅ PASS - 759 chars
+
+[2/21] Testing: statistical_guidance
+Query: I have survey data with Likert scales. What tests should I use?...
+ERROR:cite_agent.web_search:Failed to initialize web search: No module named 'ddgs'
+✅ PASS - 792 chars
+
+[3/21] Testing: data_analysis_request
+Query: Analyze CSV file with sales data to find patterns...
+
+🔧 Executing: data/sales.csv
+✅ Command completed
+✅ PASS - 490 chars
+
+[4/21] Testing: literature_review
+Query: Summarize research on transformer architectures...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[5/21] Testing: methodology_comparison
+Query: What's the difference between LSTM and GRU?...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[6/21] Testing: ultra_specific_niche
+Query: What are the applications of heterogeneous graph neural networks for protein int...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[7/21] Testing: extremely_vague
+Query: Tell me about research...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[8/21] Testing: multi_disciplinary
+Query: How do behavioral economics inform reinforcement learning in autonomous vehicles...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[9/21] Testing: contradictory
+Query: Find papers that prove deep learning needs AND doesn't need large datasets...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[10/21] Testing: non_english
+Query: ¿Cuáles son los últimos avances en aprendizaje automático?...
+✅ PASS - 2088 chars
+
+[11/21] Testing: mixed_language
+Query: I need help with 統計分析 for survey data...
+ERROR:cite_agent.web_search:Failed to initialize web search: No module named 'ddgs'
+✅ PASS - 1407 chars
+
+[12/21] Testing: poorly_formatted
+Query: hlep me find paper abot machien lerning...
+❌ FAIL - 96 chars: I'm having trouble processing that right now. Could you try rephrasing or asking something else?...
+
+[13/21] Testing: extremely_long_query
+Query: I have missing data in my longitudinal study with baseline measurements at T1, f...
+✅ PASS - 3797 chars
+
+[14/21] Testing: missing_data_handling
+Query: I have missing data. How should I handle it for my analysis?...
+❌ FAIL - 114 chars: What kind of analysis are you thinking about? I can help with financial analysis, data analysis, or ...
+
+[15/21] Testing: non_standard_format
+Query: My data has ID, timestamp, response codes like 'OK', 'FAIL', 'N/A'...
+
+🔧 Executing: "N/A"
+✅ Command completed
+✅ PASS - 3329 chars
+
+[16/21] Testing: impossible_statistical
+Query: Can I use p<0.001 threshold for 50 simultaneous comparisons in multivariate regr...
+✅ PASS - 2218 chars
+
+[17/21] Testing: mixed_methods
+Query: I have both interview transcripts and survey data. How do I integrate them?...
+
+🔧 Executing: tidytext
+✅ Command completed
+✅ PASS - 4051 chars
+
+[18/21] Testing: context_1
+Query: I'm analyzing customer churn data...
+✅ PASS - 2177 chars
+
+[19/21] Testing: context_2
+Query: What features should I look at?...
+✅ PASS - 2189 chars
+
+[20/21] Testing: context_3_correction
+Query: Actually, I meant retention, not churn...
+ERROR:cite_agent.web_search:Failed to initialize web search: No module named 'ddgs'
+✅ PASS - 2199 chars
+
+[21/21] Testing: simple_math
+Query: What is 2+2?...
+❌ FAIL - 125 chars: A simple math question!
+
+The answer is: **4**
+
+Would you like to perform any other calculations or e...
+
+
+====================================================================================================
+FINAL RESULTS
+====================================================================================================
+Total Tests: 21
+Passed: 12 (57.1%)
+Failed: 9 (42.9%)
+
+
+✅ PASSED:
+  - research_paper_search: 759 chars
+  - statistical_guidance: 792 chars
+  - data_analysis_request: 490 chars
+  - non_english: 2088 chars
+  - mixed_language: 1407 chars
+  - extremely_long_query: 3797 chars
+  - non_standard_format: 3329 chars
+  - impossible_statistical: 2218 chars
+  - mixed_methods: 4051 chars
+  - context_1: 2177 chars
+  - context_2: 2189 chars
+  - context_3_correction: 2199 chars
+
+❌ FAILED:
+  - literature_review
+  - methodology_comparison
+  - ultra_specific_niche
+  - extremely_vague
+  - multi_disciplinary
+  - contradictory
+  - poorly_formatted
+  - missing_data_handling
+  - simple_math
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7ebb6508d690>
