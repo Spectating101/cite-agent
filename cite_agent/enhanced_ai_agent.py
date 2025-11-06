@@ -3496,6 +3496,79 @@ class EnhancedNocturnalAgent:
             recent_messages = self.conversation_history[-4:]  # Last 2 exchanges
             recent_context = " ".join(msg.get("content", "") for msg in recent_messages).lower()
 
+        # NEW: Pronoun resolution - resolve "it", "this", "that", "they" to previous entities
+        expanded_question = question
+        pronouns_to_resolve = ['it', 'this', 'that', 'they', 'them']
+
+        # Check if question contains pronouns that might need resolution
+        question_words = question_lower.split()
+        has_pronoun = any(pronoun in question_words for pronoun in pronouns_to_resolve)
+
+        if has_pronoun and recent_context:
+            # Extract potential entities from recent context (files, projects, companies, etc.)
+            # Look for: file names, directory names, project types, company names
+
+            # Extract file/directory mentions
+            file_pattern = r'(\w+\.py|\w+\.js|\w+\.java|\w+/\w+|cite[_-]?\w+|enhanced_\w+_agent)'
+            files_mentioned = re.findall(file_pattern, recent_context)
+
+            # Extract specific topics or entities mentioned
+            entity_patterns = [
+                r'(research project|data science project|coding project|financial analysis)',
+                r'(python|javascript|java|rust|go) (?:project|file|code)',
+                r'(file|directory|folder|script|module|class|function|method)\s+(?:called|named)?\s*(\w+)',
+            ]
+            entities_mentioned = []
+            for pattern in entity_patterns:
+                entities_mentioned.extend(re.findall(pattern, recent_context))
+
+            # Flatten and clean up entities
+            all_entities = files_mentioned + [e if isinstance(e, str) else e[0] for e in entities_mentioned if e]
+
+            # If we found entities and the question is short (likely pronoun-heavy), expand it
+            if all_entities and len(question.split()) <= 10:
+                # Use the most recently mentioned entity
+                most_recent_entity = all_entities[-1] if all_entities else None
+
+                if most_recent_entity:
+                    # Replace pronouns with the entity for analysis purposes
+                    # Don't modify the actual question shown to user, just for intent analysis
+                    for pronoun in pronouns_to_resolve:
+                        if f' {pronoun} ' in f' {question_lower} ' or question_lower.startswith(f'{pronoun} '):
+                            # Expand for better intent detection
+                            expanded_question = question.replace(pronoun, most_recent_entity)
+                            expanded_question = question.replace(pronoun.capitalize(), most_recent_entity)
+                            # Update question_lower for analysis
+                            question_lower = expanded_question.lower()
+                            break
+
+        # NEW: Detect corrections/contradictions - user is correcting previous information
+        correction_detected = False
+        correction_acknowledgment = None
+
+        correction_patterns = [
+            'actually', 'no', 'not', 'instead', 'rather', 'correction',
+            'i meant', 'i mean', 'sorry', 'wait', 'oops'
+        ]
+
+        has_correction = any(pattern in question_lower for pattern in correction_patterns)
+
+        if has_correction and recent_context:
+            # Extract what they're correcting TO
+            # Patterns like: "Actually it's X", "No, Y", "I meant Z"
+            correction_match = re.search(r'(?:actually|no|instead|rather|i\s+mean[t]?)\s+(?:it\'s|its|it is)?\s*(\w+)', question_lower)
+            if correction_match:
+                corrected_value = correction_match.group(1)
+                correction_detected = True
+                # Generate natural acknowledgment
+                acknowledgments = [
+                    f"Got it, {corrected_value} then.",
+                    f"Ah, {corrected_value} - understood!",
+                    f"Thanks for clarifying - {corrected_value} it is.",
+                    f"Noted - switching to {corrected_value}."
+                ]
+                correction_acknowledgment = acknowledgments[hash(question_lower) % len(acknowledgments)]
+
         # NEW: Detect stock tickers (2-5 uppercase letters, not common words)
         # Pattern: AAPL, MSFT, GOOGL, etc. (but not I, A, IT, US, API, etc.)
         ticker_pattern = r'\b[A-Z]{2,5}\b'  # Changed from {1,5} to {2,5} to avoid matching "I"
@@ -3573,10 +3646,11 @@ class EnhancedNocturnalAgent:
 
             clarification_templates = [
                 f"What kind of {term} are you thinking about? I can help with {options_str}.",
-                f"Just to clarify - is this about {options_str}?",
-                f"I'd love to help! Are you working with {options_str}?",
-                f"Want to make sure I understand - which type of {term}? ({options_str})",
-                f"Could you clarify what kind of {term}? I can assist with {options_str}."
+                f"Tell me more about what you're looking for - is this {options_str}?",
+                f"I'd love to help! What kind of {term} are you working on? I can assist with {options_str}.",
+                f"What are you hoping to do? I can help with {options_str}.",
+                f"Could you clarify what kind of {term}? I can assist with {options_str}.",
+                f"Tell me a bit more - which type of {term} matches what you need? ({options_str})"
             ]
             # Pick template based on hash for variety
             template_idx = hash(term + question_lower) % len(clarification_templates)
@@ -3689,7 +3763,9 @@ class EnhancedNocturnalAgent:
             "confidence": confidence,
             "analysis_mode": analysis_mode,
             "clarification_needed": clarification_needed,  # NEW
-            "clarification_message": clarification_message  # NEW
+            "clarification_message": clarification_message,  # NEW
+            "correction_detected": correction_detected,  # NEW
+            "correction_acknowledgment": correction_acknowledgment  # NEW
         }
     
     def _is_query_too_vague_for_apis(self, question: str) -> bool:
@@ -4444,6 +4520,9 @@ JSON:"""
                     confidence=0.3
                 )
 
+            # NEW: Store correction acknowledgment to prepend to final response
+            correction_acknowledgment = request_analysis.get("correction_acknowledgment")
+
             is_vague = self._is_query_too_vague_for_apis(request.question)
             if debug_mode and is_vague:
                 print(f"🔍 Query is VAGUE - skipping expensive APIs")
@@ -4698,6 +4777,10 @@ JSON:"""
                             except Exception as e:
                                 if debug_mode:
                                     print(f"⚠️ Auto-write failed: {e}")
+
+                # NEW: Prepend correction acknowledgment if detected
+                if correction_acknowledgment:
+                    response.response = f"{correction_acknowledgment} {response.response}"
 
                 return self._finalize_interaction(
                     request,
