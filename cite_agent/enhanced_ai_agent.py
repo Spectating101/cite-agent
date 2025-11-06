@@ -1120,23 +1120,24 @@ class EnhancedNocturnalAgent:
         """Detect requests that are clearly outside the agent's domain."""
         text_lower = text.lower()
 
-        # Physical world requests
+        # Physical world requests - be VERY specific to avoid false positives
         physical_world = [
-            'make me a sandwich', 'make a sandwich', 'get me', 'bring me',
-            'cook', 'food', 'eat', 'drink', 'coffee', 'pizza'
+            'make me a sandwich', 'make a sandwich', 'bring me coffee',
+            'cook me', 'order pizza', 'get me food'
         ]
 
-        # Entertainment/social requests
+        # Entertainment/social requests - specific phrases only
         entertainment = [
-            'tell me a joke', 'tell a joke', 'sing', 'play a game',
-            'what\'s the weather', 'weather', 'time', 'what time',
-            'chat', 'be my friend'
+            'tell me a joke', 'tell a joke', 'sing me a song', 'sing a song',
+            'play a game with me', 'be my friend', 'chat with me about'
         ]
 
-        # General knowledge outside domain
+        # General knowledge CLEARLY outside domain - very specific
+        # AVOID patterns like 'who is', 'what is', 'define' that catch research queries
         outside_domain = [
-            'who won', 'who is', 'define', 'translate',
-            'what is the capital', 'when did', 'history of'
+            'what is the weather', 'what time is it', 'current time',
+            'what is the capital of', 'who won the game', 'sports score',
+            'translate this to', 'what does this word mean in'
         ]
 
         all_out_of_scope = physical_world + entertainment + outside_domain
@@ -1306,6 +1307,21 @@ class EnhancedNocturnalAgent:
             "- PROACTIVE FILE SEARCH:",
             "- If a user asks to find a file or directory and you are not sure where it is, use the `find` command with wildcards to search for it.",
             "- If a `cd` command fails, automatically run `ls -F` on the current or parent directory to understand the directory structure and find the correct path.",
+        ])
+
+        guidelines.extend([
+            "",
+            "BE ACTION-ORIENTED, NOT INSTRUCTIONAL:",
+            "• When user says 'I have data/CSV/file to analyze' → ASK for file path, then ACTUALLY analyze it and show results",
+            "• When user says 'I have survey data' → ASK for the file, READ it, RUN analysis, SHOW results",
+            "• NEVER just list steps the user should take - DO the work yourself using available tools",
+            "• Bad: 'You should run a Mann-Whitney test. Here are the steps...'",
+            "• Good: 'Share the file path and I'll analyze it for you.' Then actually read and analyze it.",
+            "• Bad: 'Here are 6 steps to analyze customer data...'",
+            "• Good: 'Let me analyze that CSV for you. What's the file path?' Then read_file() and analyze.",
+            "• If user provides file path, immediately use read_file() tool to get the data",
+            "• After reading data, perform the analysis they requested (descriptive stats, tests, visualizations guidance)",
+            "• Show RESULTS and INSIGHTS, not just methodology lists"
         ])
 
         sections.append("\n".join(guidelines))
@@ -3649,6 +3665,29 @@ class EnhancedNocturnalAgent:
                         'statistical', 'analysis', 'correlation', 'regression', 'anova',
                         'sample', 'variable', 'hypothesis', 'research'
                     ]):
+                        context_clear = True
+
+                elif term == 'analysis':
+                    # Research/academic analysis context
+                    if any(keyword in question_lower for keyword in [
+                        'research', 'paper', 'study', 'literature', 'academic', 'medical', 'image',
+                        'deep learning', 'machine learning', 'nlp', 'natural language', 'text',
+                        'data analysis', 'statistical', 'quantitative', 'qualitative'
+                    ]):
+                        context_clear = True
+                    # Financial analysis
+                    elif has_financial_term or has_ticker or has_company_name:
+                        context_clear = True
+
+                elif term == 'processing':
+                    # Research/NLP processing context
+                    if any(keyword in question_lower for keyword in [
+                        'language', 'nlp', 'natural language', 'text', 'speech', 'image',
+                        'signal', 'computational', 'linguistic', 'semantic'
+                    ]):
+                        context_clear = True
+                    # Data processing
+                    elif any(keyword in question_lower for keyword in ['data', 'batch', 'pipeline']):
                         context_clear = True
 
                 if not context_clear:

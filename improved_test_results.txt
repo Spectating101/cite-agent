@@ -1,0 +1,155 @@
+====================================================================================================
+ACTUAL TEST INTERACTIONS - Real Questions & Real Responses
+====================================================================================================
+
+====================================================================================================
+TEST 1: Research Paper Search
+====================================================================================================
+
+QUESTION: Find papers on machine learning interpretability from the last 2 years
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+I tried pulling recent papers on machine‑learning interpretability, but the research services are currently unavailable, so nothing came back for the last two years.
+
+Here are a couple of ways we can move forward:
+
+- **Retry in a few minutes** – the APIs often recover quickly from temporary outages.  
+- **Broaden the time window** (e.g., last 3‑5 years) – that usually yields more hits and we can then filter to the most recent work.  
+- **Switch to a different source** – I can query open‑access repositories (arXiv, PubMed Central) directly if that helps.
+
+Let me know which option you’d prefer, or if there’s another angle you’d like to explore!
+
+_Data sources: Archive POST search – error (/livez failed: Cannot connect to host cite-agent-api-720dfadd602c.herokuapp.com:443 ssl:default [Temporary failure in name resolution]); Archive POST search – error (/livez failed: Cannot connect to host cite-agent-api-720dfadd602c.herokuapp.com:443 ssl:default [Temporary failure in name resolution]); Archive POST search – error (/livez failed: Cannot connect to host cite-agent-api-720dfadd602c.herokuapp.com:443 ssl:default [Temporary failure in name resolution]); Archive POST search – error (/livez failed: Cannot connect to host cite-agent-api-720dfadd602c.herokuapp.com:443 ssl:default [Temporary failure in name resolution]); …_
+----------------------------------------------------------------------------------------------------
+Length: 1333 chars | Tools used: ['archive_api']
+
+
+====================================================================================================
+TEST 2: Statistical Analysis Guidance
+====================================================================================================
+
+QUESTION: I have survey data with 5-point Likert scales. What statistical tests should I use?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+Let me check that survey data of yours. For 5-point Likert scales, I'd recommend using non-parametric tests since the data is ordinal and not normally distributed. Here are some options:
+
+*   **Wilcoxon Signed-Rank Test**: This test is suitable for comparing paired samples (e.g., before-and-after measurements) and can help you determine if there's a significant difference in the median scores.
+*   **Mann-Whitney U Test**: This test is used for comparing two independent groups and can help you determine if there's a significant difference in the median scores between the groups.
+*   **Kruskal-Wallis H Test**: This test is used for comparing more than two independent groups and can help you determine if there's a significant difference in the median scores between the groups.
+
+Before choosing a test, I'd like to clarify a few things:
+
+*   Are you comparing paired samples (e.g., before-and-after measurements) or independent groups?
+*   Do you have more than two groups you'd like to compare?
+*   Are there any specific research questions or hypotheses you'd like to address with the statistical analysis?
+
+Let me know, and I can provide more tailored guidance on choosing the right statistical tests for your survey data.
+
+_Data sources: None_
+----------------------------------------------------------------------------------------------------
+Length: 1254 chars | Tools used: []
+
+
+====================================================================================================
+TEST 3: Data Analysis Recommendations
+====================================================================================================
+
+QUESTION: I have a CSV file with customer purchase data. How should I analyze it to find patterns?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+Let me check that CSV file of yours. To find patterns in your customer purchase data, I'd recommend the following steps:
+
+1.  **Explore the data**: Use summary statistics (e.g., mean, median, mode) and data visualizations (e.g., histograms, box plots) to understand the distribution of purchase amounts, frequencies, and other relevant variables.
+2.  **Identify key variables**: Determine which variables are most relevant to your analysis, such as purchase amount, frequency, product categories, customer demographics, and time of purchase.
+3.  **Visualize relationships**: Use scatter plots, heat maps, or other visualizations to explore relationships between key variables and identify patterns, such as correlations or clusters.
+4.  **Segment customers**: Use clustering algorithms (e.g., k-means, hierarchical clustering) to segment customers based on their purchase behavior and identify distinct groups.
+5.  **Analyze purchase behavior**: Use techniques like time series analysis or event study analysis to understand how customer purchase behavior changes over time or in response to specific events.
+6.  **Identify trends and anomalies**: Use statistical methods (e.g., regression, hypothesis testing) to identify trends and anomalies in customer purchase behavior.
+
+Before we dive deeper, I'd like to clarify a few things:
+
+*   What specific research questions or hypotheses do you want to address with the analysis?
+*   Are there any specific variables or product categories you'd like to focus on?
+*   Do you have any prior knowledge or expectations about the data that might influence the analysis?
+
+Let me know, and I can provide more tailored guidance on analyzing your customer purchase data.
+
+_Data sources: None_
+----------------------------------------------------------------------------------------------------
+Length: 1730 chars | Tools used: []
+
+
+====================================================================================================
+TEST 4: Literature Review Synthesis
+====================================================================================================
+
+QUESTION: Summarize the current research on deep learning for medical image analysis
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+What kind of analysis are you thinking about? I can help with financial analysis, data analysis, or code analysis.
+----------------------------------------------------------------------------------------------------
+Length: 114 chars | Tools used: ['clarification']
+
+
+====================================================================================================
+TEST 5: Specific Methodology Question
+====================================================================================================
+
+QUESTION: What's the difference between random forest and gradient boosting for classification?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+Let me check that comparison between random forest and gradient boosting for classification. Random Forest and Gradient Boosting are both popular ensemble learning algorithms used for classification tasks.
+
+Random Forest is an ensemble learning method that combines multiple decision trees to improve the accuracy and robustness of the model. It works by creating multiple decision trees on random subsets of the data and then aggregating their predictions to produce a final output.
+
+Gradient Boosting, on the other hand, is an ensemble learning method that combines multiple weak models to create a strong predictive model. It works by iteratively adding new decision trees to the model, with each tree attempting to correct the errors of the previous tree.
+
+Here are some key differences between Random Forest and Gradient Boosting:
+
+*   **Model complexity**: Random Forest is generally less complex than Gradient Boosting, as it only requires the creation of multiple decision trees, whereas Gradient Boosting requires the creation of multiple decision trees and the iterative addition of new trees.
+*   **Hyperparameter tuning**: Random Forest has fewer hyperparameters to tune than Gradient Boosting, which can make it easier to optimize.
+*   **Handling missing values**: Random Forest is more robust to missing values than Gradient Boosting, as it can handle missing values by using surrogate splits.
+*   **Interpretability**: Random Forest is generally more interpretable than Gradient Boosting, as it provides feature importance scores and can be used to identify the most important features in the data.
+
+Before we dive deeper, I'd like to clarify a few things:
+
+*   Are you looking for a more interpretable model or a more accurate model?
+*   Do you have a large dataset or a small dataset?
+*   Are there any specific research questions or hypotheses you'd like to address with the comparison?
+
+Let me know, and I can provide more tailored guidance on choosing between Random Forest and Gradient Boosting for your classification task.
+
+_Data sources: None_
+----------------------------------------------------------------------------------------------------
+Length: 2067 chars | Tools used: []
+
+
+====================================================================================================
+TEST 6: Research Gap Identification
+====================================================================================================
+
+QUESTION: What are the current limitations in natural language processing for low-resource languages?
+
+AGENT RESPONSE:
+----------------------------------------------------------------------------------------------------
+Could you clarify what kind of processing? I can assist with data processing, payment processing, or file processing.
+----------------------------------------------------------------------------------------------------
+Length: 117 chars | Tools used: ['clarification']
+
+
+====================================================================================================
+SUMMARY OF ACTUAL INTERACTIONS
+====================================================================================================
+Test 1 (Paper Search): 1333 chars
+Test 2 (Statistical): 1254 chars
+Test 3 (Data Analysis): 1730 chars
+Test 4 (Literature Review): 114 chars
+Test 5 (Methodology): 2067 chars
+Test 6 (Research Gaps): 117 chars
+ERROR:asyncio:Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7ea0b2e929d0>
