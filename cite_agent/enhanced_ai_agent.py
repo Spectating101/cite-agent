@@ -26,6 +26,8 @@ import platform
 from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
+from .session_memory_manager import get_memory_manager
+from .timeout_retry_handler import get_retry_handler
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -92,6 +94,12 @@ class EnhancedNocturnalAgent:
         self.workflow = WorkflowManager()
         self.last_paper_result = None  # Track last paper mentioned for "save that"
         self.archive = ConversationArchive()
+
+        # Session memory management (prevents memory leaks in long sessions)
+        self.memory_manager = get_memory_manager()
+
+        # Timeout and retry handler (intelligent retry with exponential backoff)
+        self.retry_handler = get_retry_handler()
         
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
@@ -1893,11 +1901,41 @@ class EnhancedNocturnalAgent:
                         error_message=f"HTTP {response.status}"
                     )
         
-        except asyncio.TimeoutError:
-            return ChatResponse(
-                response="❌ Request timeout. Please try again.",
-                error_message="Timeout"
+        except asyncio.TimeoutError as timeout_error:
+            # Timeout occurred - wrap the entire call in retry handler
+            logger.warning(f"Timeout occurred in call_backend_query, implementing retry logic")
+
+            # Use retry handler for timeout
+            async def retry_operation():
+                async with self.session.post(url, json=payload, headers=headers, timeout=60) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return ChatResponse(
+                            response=data.get('response', ''),
+                            tokens_used=data.get('tokens_used', 0),
+                            tools_used=(tools_used or []) + ["backend_llm"],
+                            model=data.get('model', 'openai/gpt-oss-120b'),
+                            timestamp=data.get('timestamp', datetime.now(timezone.utc).isoformat()),
+                            api_results=api_results
+                        )
+                    else:
+                        # Re-raise to trigger retry
+                        raise Exception(f"HTTP {response.status}: {await response.text()}")
+
+            retry_result = await self.retry_handler.execute_with_retry(
+                retry_operation,
+                operation_name="backend_query",
+                custom_timeout=90,  # Longer timeout on retry
+                custom_max_attempts=2  # One retry for timeout
             )
+
+            if retry_result.success:
+                return retry_result.result
+            else:
+                return ChatResponse(
+                    response="❌ Request timeout after retries. The backend service may be slow or unavailable. Please try again in a moment.",
+                    error_message=f"Timeout after {len(retry_result.attempts)} attempts"
+                )
         except Exception as e:
             return ChatResponse(
                 response=f"❌ Error calling backend: {str(e)}",
@@ -3474,7 +3512,64 @@ class EnhancedNocturnalAgent:
             return True  # Too short and questioning - likely needs clarification
         
         return False  # Query seems specific enough for API calls
-    
+
+    async def _check_and_archive_if_needed(self, user_id: str, conversation_id: str):
+        """
+        Check if conversation history should be archived and do so if needed.
+        This prevents memory leaks in long-running sessions.
+        """
+        try:
+            current_message_count = len(self.conversation_history)
+
+            # Update session activity
+            import psutil
+            try:
+                process = psutil.Process()
+                memory_mb = process.memory_info().rss / 1024 / 1024
+            except:
+                memory_mb = 0.0
+
+            self.memory_manager.update_session_activity(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_count=current_message_count,
+                memory_mb=memory_mb
+            )
+
+            # Check if we should archive
+            if self.memory_manager.should_archive(user_id, conversation_id, current_message_count):
+                logger.info(
+                    f"Archiving conversation history for {user_id}:{conversation_id} "
+                    f"({current_message_count} messages)"
+                )
+
+                # Archive and get back recent context
+                result = await self.memory_manager.archive_session(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    conversation_history=self.conversation_history,
+                    keep_recent=True
+                )
+
+                # Replace conversation history with recent context
+                self.conversation_history = result["kept_messages"]
+
+                logger.info(
+                    f"Archived {result['archived_count']} messages, "
+                    f"kept {len(result['kept_messages'])} recent messages"
+                )
+
+                # Optional: Add system message about archival for context
+                if result["summary"]:
+                    self.conversation_history.insert(0, {
+                        "role": "system",
+                        "content": f"Previous conversation archived: {result['summary']}"
+                    })
+
+        except Exception as e:
+            # Don't fail the request if archival fails
+            logger.error(f"Error during conversation archival: {e}")
+
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
@@ -3482,10 +3577,13 @@ class EnhancedNocturnalAgent:
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
-            
+
             # Detect and store language preference from user input
             self._detect_language_preference(request.question)
-            
+
+            # Check if we need to archive conversation history (memory management)
+            await self._check_and_archive_if_needed(request.user_id, request.conversation_id)
+
             # Initialize
             api_results = {}
             tools_used = []
