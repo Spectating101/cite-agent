@@ -3637,9 +3637,18 @@ class EnhancedNocturnalAgent:
 
                 # Check current question for disambiguating terms
                 if term == 'data':
+                    # File-related data
                     if any(disambig in question_lower for disambig in ['csv', 'file', 'json', 'excel', 'database']):
                         context_clear = True
+                    # Financial data
                     elif has_financial_term or has_ticker or has_company_name:
+                        context_clear = True
+                    # Research/survey data
+                    elif any(disambig in question_lower for disambig in [
+                        'survey', 'likert', 'questionnaire', 'respondent', 'participant',
+                        'statistical', 'analysis', 'correlation', 'regression', 'anova',
+                        'sample', 'variable', 'hypothesis', 'research'
+                    ]):
                         context_clear = True
 
                 if not context_clear:
