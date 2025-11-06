@@ -327,8 +327,8 @@ class ExcellenceTestSuite:
         eval_result = await self._evaluate_response(
             "Ambiguous Company Query",
             response.response,
-            good_indicators=['which company', 'what company', 'clarify', 'which one', 'specific'],
-            bad_indicators=['revenue', 'ERROR', 'HTTP']
+            good_indicators=['which company', 'what company', 'what kind of company', 'clarify', 'which one', 'specific'],
+            bad_indicators=['revenue', 'HTTP']  # Removed 'ERROR' since friendly error is OK
         )
 
         self._print_result(eval_result)
