@@ -3498,10 +3498,14 @@ class EnhancedNocturnalAgent:
             recent_messages = self.conversation_history[-4:]  # Last 2 exchanges
             recent_context = " ".join(msg.get("content", "") for msg in recent_messages).lower()
 
-        # NEW: Detect stock tickers (1-5 uppercase letters, often standalone)
-        # Pattern: AAPL, MSFT, GOOGL, etc.
-        ticker_pattern = r'\b[A-Z]{1,5}\b'
-        has_ticker = bool(re.search(ticker_pattern, question))
+        # NEW: Detect stock tickers (2-5 uppercase letters, not common words)
+        # Pattern: AAPL, MSFT, GOOGL, etc. (but not I, A, IT, US, API, etc.)
+        ticker_pattern = r'\b[A-Z]{2,5}\b'  # Changed from {1,5} to {2,5} to avoid matching "I"
+        potential_tickers = re.findall(ticker_pattern, question)
+
+        # Filter out common English words that aren't tickers
+        common_words = {'IT', 'US', 'AI', 'API', 'CEO', 'CFO', 'CTO', 'PDF', 'URL', 'SQL', 'CSV', 'JSON'}
+        has_ticker = any(ticker not in common_words for ticker in potential_tickers)
 
         # NEW: Detect well-known company names
         common_companies = [
