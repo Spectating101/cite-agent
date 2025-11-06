@@ -495,6 +495,51 @@ class EnhancedNocturnalAgent:
             snippets.append("…")
         return "Data sources: " + "; ".join(snippets)
 
+    def _filter_technical_details(self, response: str) -> str:
+        """
+        Filter technical details from responses to make them more user-friendly
+
+        Removes or replaces:
+        - HTTP error codes
+        - API endpoint paths
+        - Technical status messages
+        - Long file paths (keeps basename)
+        """
+        import re
+
+        # Replace HTTP error codes with friendly messages
+        response = re.sub(
+            r'HTTP\s+(500|404|502|503)\b',
+            'temporarily unavailable',
+            response,
+            flags=re.IGNORECASE
+        )
+
+        # Remove API endpoint details like "FinSight GET calc/I/grossProfit"
+        response = re.sub(
+            r'FinSight\s+(GET|POST)\s+[\w/]+\s*[-–]',
+            'Data source',
+            response
+        )
+
+        # Replace "(value unavailable)" with friendlier message
+        response = re.sub(
+            r'\(value unavailable\)',
+            '(couldn\'t fetch this)',
+            response,
+            flags=re.IGNORECASE
+        )
+
+        # Shorten long file paths in responses
+        # E.g., "/home/user/long/path/to/project" → "project/"
+        response = re.sub(
+            r'/home/[\w]+/[\w/]+/([\w-]+)/?',
+            r'\1/',
+            response
+        )
+
+        return response
+
     def _reset_data_sources(self) -> None:
         self._recent_sources = []
 
@@ -657,6 +702,7 @@ class EnhancedNocturnalAgent:
         }
 
     def _format_workspace_listing_response(self, listing: Dict[str, Any]) -> str:
+        """Format workspace listing in a scannable, user-friendly way"""
         base = listing.get("base", Path.cwd().resolve())
         items = listing.get("items")
         if not items:
@@ -665,34 +711,76 @@ class EnhancedNocturnalAgent:
         error = listing.get("error")
         truncated_flag = listing.get("truncated")
 
-        if not items:
-            summary_lines = ["(no visible files in the current directory)"]
-        else:
-            max_entries = min(len(items), 12)
-            summary_lines = [
-                f"- {item.get('name')} ({item.get('type', 'unknown')})"
-                for item in items[:max_entries]
-            ]
-            if len(items) > max_entries:
-                remaining = len(items) - max_entries
-                summary_lines.append(f"… and {remaining} more")
-
-        message_parts = [
-            f"Workspace root: {base}",
-            "Here are the first entries I can see:",
-            "\n".join(summary_lines)
+        # Filter out Python internals and hidden files for cleaner display
+        hidden_patterns = ['__pycache__', '.git', '.pytest_cache', '.venv', 'node_modules', '.DS_Store']
+        filtered_items = [
+            item for item in items
+            if not any(pattern in item.get('name', '') for pattern in hidden_patterns)
         ]
 
-        if note:
-            message_parts.append(note)
-        if error:
-            message_parts.append(f"Workspace API warning: {error}")
-        if truncated_flag:
-            message_parts.append("(Listing truncated by workspace service)")
+        if not filtered_items:
+            return "(No visible files in the current directory)"
 
-        footer = self._format_data_sources_footer()
-        if footer:
-            message_parts.append(f"_{footer}_")
+        # Group by type for better organization
+        directories = [item for item in filtered_items if item.get('type') == 'directory']
+        files = [item for item in filtered_items if item.get('type') != 'directory']
+
+        # Detect project type for context
+        file_names = [item.get('name', '').lower() for item in files]
+        project_context = ""
+        if 'setup.py' in file_names or 'requirements.txt' in file_names:
+            project_context = "This looks like a Python project! "
+        elif 'package.json' in file_names:
+            project_context = "This looks like a Node.js project! "
+        elif 'cargo.toml' in file_names:
+            project_context = "This looks like a Rust project! "
+
+        # Build scannable message
+        message_parts = []
+
+        # Start with context if detected, not technical path
+        if project_context:
+            message_parts.append(project_context + "I see:")
+        else:
+            # Show simplified path (basename only)
+            dir_name = Path(base).name or "this directory"
+            message_parts.append(f"In {dir_name}, I see:")
+
+        # Show directories first (more important for navigation)
+        if directories:
+            dir_lines = []
+            for item in directories[:8]:  # Limit to prevent spam
+                dir_lines.append(f"  • {item.get('name')}/ (directory)")
+            if len(directories) > 8:
+                dir_lines.append(f"  ... and {len(directories) - 8} more directories")
+            message_parts.append("\n".join(dir_lines))
+
+        # Show files grouped by relevance
+        if files:
+            # Show important files first (configs, docs)
+            important_files = [f for f in files if any(
+                keyword in f.get('name', '').lower()
+                for keyword in ['readme', 'setup', 'config', 'package.json', 'requirements']
+            )]
+            other_files = [f for f in files if f not in important_files]
+
+            if important_files:
+                file_lines = [f"  • {item.get('name')}" for item in important_files[:5]]
+                if other_files:
+                    file_lines.append(f"  • {len(other_files)} other files")
+                message_parts.append("\n".join(file_lines))
+            elif other_files:
+                file_lines = [f"  • {item.get('name')}" for item in other_files[:8]]
+                if len(other_files) > 8:
+                    file_lines.append(f"  ... and {len(other_files) - 8} more")
+                message_parts.append("\n".join(file_lines))
+
+        # Add suggestions for next steps
+        if directories and files:
+            message_parts.append("\nWant me to explain the project structure, or look at something specific?")
+
+        if error:
+            message_parts.append(f"\n⚠️ {error}")
 
         return "\n\n".join(part for part in message_parts if part)
 
@@ -1111,16 +1199,27 @@ class EnhancedNocturnalAgent:
         analysis_mode = request_analysis.get("analysis_mode", "quantitative")
         dev_mode = self.client is not None
 
-        # Identity and capabilities
+        # Identity and capabilities - INTENT-FOCUSED
         intro = (
-            "You are Cite Agent, a research and analysis assistant with access to:\n"
-            "• Persistent shell (Python, R, SQL, Bash)\n"
-            "• File operations (read, write, edit, search)\n"
-            "• Academic papers (Archive API - 200M+ papers)\n"
-            "• Financial data (FinSight API - SEC filings)\n"
-            "• Web search\n\n"
-            "Communication style: Be natural, direct, and helpful. "
-            "Think like a capable research partner, not a rigid assistant."
+            "You are Cite, a helpful AI partner that helps users get things done efficiently.\n\n"
+            "Your goal: Understand what the user is trying to achieve, then help them get there.\n\n"
+            "Core principles:\n"
+            "1. UNDERSTAND INTENT - What is the user really trying to do? Are they exploring, "
+            "analyzing, creating, or debugging?\n\n"
+            "2. SOUND NATURAL - Talk like a helpful colleague, not a chatbot. Use natural phrasing "
+            "(\"Let me check that\", \"Got it\"), vary your language, avoid repetitive templates.\n\n"
+            "3. HIDE TECHNICAL DETAILS - Users don't care about API names, backend paths, or error codes:\n"
+            "   • Bad: \"FinSight GET calc/I/grossProfit returned HTTP 500\"\n"
+            "   • Good: \"I couldn't fetch that data right now - want to try something else?\"\n"
+            "   • Bad: \"Workspace root: /home/user/long/path\"\n"
+            "   • Good: \"I see 20 Python files and a tests directory in your project\"\n\n"
+            "4. ANTICIPATE NEEDS - After answering, think \"What will they likely want next?\" "
+            "Offer 2-3 relevant follow-ups naturally.\n\n"
+            "Tools you can use (hide these from user - just use them naturally):\n"
+            "• Shell commands for file operations\n"
+            "• Archive API for research papers\n"
+            "• FinSight API for financial data\n"
+            "• Web search"
         )
         sections.append(intro)
 
@@ -1150,19 +1249,29 @@ class EnhancedNocturnalAgent:
             "- If asked to reply in chinese, you MUST reply in Traditional Chinese (繁體中文).",
             "- You MUST use Chinese characters (漢字), NOT pinyin romanization.",
             "",
-            "CONCISE RESPONSE STYLE:",
-            "• Direct answers - state result, minimal elaboration",
-            "• NO code blocks showing bash/python commands unless explicitly asked",
-            "• NO 'Let me check...' preambles",
-            "• File listings: Max 5-10 items (filtered to query)",
-            "• Balance: complete but concise"
+            "RESPONSE STYLE - BE NATURAL & SCANNABLE:",
+            "• State your intent briefly before using tools (\"Let me check that directory\")",
+            "• Present results, not commands - users don't need to see bash/python code",
+            "• Make responses scannable - use bullets, grouping, not walls of text",
+            "• For file listings: Show most relevant items first, group by type if helpful",
+            "• Hide technical paths - start with overview, not \"/home/user/long/path\"",
+            "• Balance: complete but easy to read",
+            "",
+            "COMMUNICATION RULES:",
+            "• NEVER return empty responses",
+            "• Vary your language - don't use the same phrases repeatedly",
+            "• Match the user's energy (casual question → casual answer)",
+            "• Show confidence in certainty, honesty in uncertainty"
         ]
 
         guidelines.extend([
             "",
-            "- COMMUNICATION RULES:",
-            "- You MUST NOT return an empty response. EVER.",
-            "- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., \"Okay, I'll check the contents of that directory,\" or \"I will search for that file.\")",
+            "CLARIFICATION STRATEGY:",
+            "• If request is ambiguous (e.g., 'data processing' without context), ASK naturally:",
+            "  - Good: \"What kind of data - financial reports, CSV files, or something else?\"",
+            "  - Bad: \"Please specify data type\"",
+            "• Don't guess financial intent from vague terms like 'company' or 'data'",
+            "• Use conversation history for context clues before asking"
         ])
 
         guidelines.extend([
@@ -3285,45 +3394,55 @@ class EnhancedNocturnalAgent:
         return None
 
     async def _analyze_request_type(self, question: str) -> Dict[str, Any]:
-        """Analyze what type of request this is and what APIs to use"""
-        
-        # Financial indicators - COMPREHENSIVE list to ensure FinSight is used
-        financial_keywords = [
-            # Core metrics
-            'financial', 'revenue', 'sales', 'income', 'profit', 'earnings', 'loss',
+        """Analyze what type of request this is and what APIs to use
+
+        NEW: Includes ambiguity detection and clarification suggestions
+        """
+
+        # Financial indicators - STRICT list for core financial terms
+        financial_core_keywords = [
+            # Core metrics (high specificity)
+            'revenue', 'sales', 'income', 'profit', 'earnings', 'loss',
             'net income', 'operating income', 'gross profit', 'ebitda', 'ebit',
-            
+
             # Margins & Ratios
             'margin', 'gross margin', 'profit margin', 'operating margin', 'net margin', 'ebitda margin',
             'ratio', 'current ratio', 'quick ratio', 'debt ratio', 'pe ratio', 'p/e',
             'roe', 'roa', 'roic', 'roce', 'eps',
-            
+
             # Balance Sheet
-            'assets', 'liabilities', 'equity', 'debt', 'cash', 'capital',
+            'assets', 'liabilities', 'equity', 'debt',
             'balance sheet', 'total assets', 'current assets', 'fixed assets',
             'shareholders equity', 'stockholders equity', 'retained earnings',
-            
+
             # Cash Flow
             'cash flow', 'fcf', 'free cash flow', 'operating cash flow',
             'cfo', 'cfi', 'cff', 'capex', 'capital expenditure',
-            
+
             # Market Metrics
             'stock', 'market cap', 'market capitalization', 'enterprise value',
-            'valuation', 'price', 'share price', 'stock price', 'quote',
+            'valuation', 'share price', 'stock price', 'quote',
             'volume', 'trading volume', 'shares outstanding',
-            
+
             # Financial Statements
-            'income statement', '10-k', '10-q', '8-k', 'filing', 'sec filing',
+            'income statement', '10-k', '10-q', '8-k', 'sec filing',
             'quarterly', 'annual report', 'earnings report', 'financial statement',
-            
-            # Company Info
-            'ticker', 'company', 'corporation', 'ceo', 'earnings call',
-            'dividend', 'dividend yield', 'payout ratio',
-            
+
+            # Specific financial actions
+            'ticker', 'earnings call', 'dividend', 'dividend yield', 'payout ratio',
+
             # Growth & Performance
-            'growth', 'yoy', 'year over year', 'qoq', 'quarter over quarter',
-            'cagr', 'trend', 'performance', 'returns'
+            'yoy', 'year over year', 'qoq', 'quarter over quarter', 'cagr'
         ]
+
+        # Ambiguous terms that need context to determine domain
+        ambiguous_terms = {
+            'data': ['financial data', 'files (CSV/JSON/Excel)', 'database data', 'research data'],
+            'processing': ['data processing', 'payment processing', 'file processing'],
+            'company': ['company financials', 'company info/research', 'software company'],
+            'project': ['financial analysis project', 'data science project', 'coding project'],
+            'analysis': ['financial analysis', 'data analysis', 'code analysis']
+        }
         
         # Research indicators (quantitative)
         research_keywords = [
@@ -3366,24 +3485,104 @@ class EnhancedNocturnalAgent:
         ]
         
         question_lower = question.lower()
-        
+
         matched_types: List[str] = []
         apis_to_use: List[str] = []
         analysis_mode = "quantitative"  # default
-        
+        clarification_needed = False
+        clarification_message = None
+
+        # NEW: Check conversation history for context clues
+        recent_context = ""
+        if hasattr(self, 'conversation_history') and len(self.conversation_history) > 0:
+            recent_messages = self.conversation_history[-4:]  # Last 2 exchanges
+            recent_context = " ".join(msg.get("content", "") for msg in recent_messages).lower()
+
+        # NEW: Detect stock tickers (1-5 uppercase letters, often standalone)
+        # Pattern: AAPL, MSFT, GOOGL, etc.
+        ticker_pattern = r'\b[A-Z]{1,5}\b'
+        has_ticker = bool(re.search(ticker_pattern, question))
+
+        # NEW: Detect well-known company names
+        common_companies = [
+            'apple', 'microsoft', 'google', 'amazon', 'meta', 'facebook',
+            'tesla', 'netflix', 'nvidia', 'intel', 'amd', 'ibm',
+            'oracle', 'salesforce', 'adobe', 'paypal', 'visa', 'mastercard',
+            'walmart', 'target', 'costco', 'starbucks', 'mcdonalds'
+        ]
+        has_company_name = any(company in question_lower for company in common_companies)
+
+        # NEW: Detect if financial term is present
+        has_financial_term = any(kw in question_lower for kw in financial_core_keywords)
+
+        # NEW: Detect ambiguous terms
+        detected_ambiguous = []
+        for term, options in ambiguous_terms.items():
+            if term in question_lower:
+                # Check if context makes it clear
+                context_clear = False
+
+                # Check recent conversation for clues
+                if term == 'data' and any(clue in recent_context for clue in ['csv', 'file', 'json', 'excel']):
+                    context_clear = True  # Previous context indicates files
+                elif term == 'data' and any(clue in recent_context for clue in ['revenue', 'financial', 'stock']):
+                    context_clear = True  # Previous context indicates financial
+
+                # Check current question for disambiguating terms
+                if term == 'data':
+                    if any(disambig in question_lower for disambig in ['csv', 'file', 'json', 'excel', 'database']):
+                        context_clear = True
+                    elif has_financial_term or has_ticker or has_company_name:
+                        context_clear = True
+
+                if not context_clear:
+                    detected_ambiguous.append((term, options))
+
+        # NEW: STRICT financial detection - require clear financial intent
+        # Only trigger financial tools if:
+        # 1. Has stock ticker (AAPL, MSFT, etc.), OR
+        # 2. Has company name + financial term (e.g., "Apple revenue"), OR
+        # 3. Has clear financial term without ambiguity (e.g., "P/E ratio", "earnings report")
+
+        should_use_financial = False
+        if has_ticker:
+            # Clear financial intent - stock ticker present
+            should_use_financial = True
+        elif has_company_name and has_financial_term:
+            # Company name + financial term = financial query
+            should_use_financial = True
+        elif has_financial_term and not detected_ambiguous:
+            # Clear financial term without ambiguity
+            should_use_financial = True
+
+        # If ambiguous term detected WITHOUT clear financial intent, suggest clarification
+        if detected_ambiguous and not should_use_financial:
+            clarification_needed = True
+            term, options = detected_ambiguous[0]  # Use first ambiguous term
+
+            # Generate natural clarification message
+            clarification_templates = [
+                f"Just to clarify - when you mention '{term}', are you thinking of {', or '.join(options)}?",
+                f"I can help with {term}! Are you looking for {', '.join(options)}?",
+                f"Want to make sure I understand - is this about {' or '.join(options)}?"
+            ]
+            # Pick template based on hash for variety
+            template_idx = hash(term) % len(clarification_templates)
+            clarification_message = clarification_templates[template_idx]
+
         # Context-aware keyword detection
         # Strong quant contexts that override everything
         strong_quant_contexts = [
             'algorithm', 'park', 'system', 'database',
-            'calculate', 'predict', 'forecast', 'ratio', 'percentage'
+            'calculate', 'predict', 'forecast', 'percentage'
         ]
-        
+
         # Measurement words (can indicate mixed when combined with qual words)
         measurement_words = ['score', 'metric', 'rating', 'measure', 'index']
-        
+
         has_strong_quant_context = any(ctx in question_lower for ctx in strong_quant_contexts)
         has_measurement = any(mw in question_lower for mw in measurement_words)
-        
+
         # Special cases: Certain qual words + measurement = mixed (subjective + quantified)
         # BUT: Only if NOT in a strong quant context (algorithm overrides)
         mixed_indicators = [
@@ -3391,29 +3590,28 @@ class EnhancedNocturnalAgent:
             'sentiment',   # sentiment analysis
             'perception',  # perception
         ]
-        
+
         is_mixed_method = False
         if not has_strong_quant_context and has_measurement:
             if any(indicator in question_lower for indicator in mixed_indicators):
                 is_mixed_method = True
-        
+
         # Check for qualitative vs quantitative keywords
         qual_score = sum(1 for kw in qualitative_keywords if kw in question_lower)
         quant_score = sum(1 for kw in quantitative_keywords if kw in question_lower)
-        
+
         # Financial queries are quantitative by nature (unless explicitly qualitative like "interview")
-        has_financial = any(kw in question_lower for kw in financial_keywords)
-        if has_financial and qual_score == 1:
+        if should_use_financial and qual_score == 1:
             # Single qual keyword + financial = probably mixed
             # e.g., "Interview CEO about earnings" = interview (qual) + earnings/CEO (financial)
             quant_score += 1
-        
+
         # Adjust for context
         if has_strong_quant_context:
             # Reduce qualitative score if in strong quantitative context
             # e.g., "theme park" or "sentiment analysis algorithm"
             qual_score = max(0, qual_score - 1)
-        
+
         # Improved mixed detection: use ratio instead of simple comparison
         if is_mixed_method:
             # Special case: qual word + measurement = always mixed
@@ -3428,14 +3626,15 @@ class EnhancedNocturnalAgent:
             # Some of both - default to mixed
             analysis_mode = "mixed"
 
-        if any(keyword in question_lower for keyword in financial_keywords):
+        # Only add financial if strict criteria met
+        if should_use_financial:
             matched_types.append("financial")
             apis_to_use.append("finsight")
 
         if any(keyword in question_lower for keyword in research_keywords):
             matched_types.append("research")
             apis_to_use.append("archive")
-        
+
         # Qualitative queries often involve research
         if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types:
             matched_types.append("research")
@@ -3461,15 +3660,24 @@ class EnhancedNocturnalAgent:
         else:
             request_type = "+".join(unique_types)
 
-        confidence = 0.8 if apis_to_use else 0.5
-        if len(unique_types) > 1:
+        # Reduce confidence if clarification needed
+        if clarification_needed:
+            confidence = 0.3
+        elif apis_to_use:
+            confidence = 0.8
+        else:
+            confidence = 0.5
+
+        if len(unique_types) > 1 and not clarification_needed:
             confidence = 0.85
 
         return {
             "type": request_type,
             "apis": apis_to_use,
             "confidence": confidence,
-            "analysis_mode": analysis_mode  # NEW: qualitative, quantitative, or mixed
+            "analysis_mode": analysis_mode,
+            "clarification_needed": clarification_needed,  # NEW
+            "clarification_message": clarification_message  # NEW
         }
     
     def _is_query_too_vague_for_apis(self, question: str) -> bool:
@@ -4212,7 +4420,18 @@ JSON:"""
             request_analysis = await self._analyze_request_type(request.question)
             if debug_mode:
                 print(f"🔍 Request analysis: {request_analysis}")
-            
+
+            # NEW: Check if clarification is needed before proceeding
+            if request_analysis.get("clarification_needed"):
+                clarification_msg = request_analysis.get("clarification_message",
+                    "Could you provide more details so I can help you better?")
+                return self._quick_reply(
+                    request,
+                    clarification_msg,
+                    tools_used=["clarification"],
+                    confidence=0.3
+                )
+
             is_vague = self._is_query_too_vague_for_apis(request.question)
             if debug_mode and is_vague:
                 print(f"🔍 Query is VAGUE - skipping expensive APIs")
