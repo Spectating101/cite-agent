@@ -1,0 +1,172 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: cite-agent-postgres
+    environment:
+      POSTGRES_DB: cite_agent
+      POSTGRES_USER: cite_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cite_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cite-agent-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: cite-agent-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cite-agent-network
+
+  # Cite-Agent API
+  api:
+    build:
+      context: ./cite-agent-api
+      dockerfile: Dockerfile
+    container_name: cite-agent-api
+    environment:
+      # Database
+      DATABASE_URL: postgresql://cite_agent:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/cite_agent
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+
+      # API Keys (set these in .env file)
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # Service URLs
+      ARCHIVE_API_URL: ${ARCHIVE_API_URL:-https://api.semanticscholar.org}
+      FINSIGHT_API_URL: ${FINSIGHT_API_URL:-https://financialmodelingprep.com/api}
+
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEBUG: ${DEBUG:-0}
+
+      # CORS
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+
+      # Auth
+      JWT_SECRET: ${JWT_SECRET:-change_me_in_production_use_long_random_string}
+
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./cite-agent-api:/app
+      - api_logs:/app/logs
+    networks:
+      - cite-agent-network
+    restart: unless-stopped
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cite-agent-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+    networks:
+      - cite-agent-network
+    restart: unless-stopped
+
+  # Grafana - Metrics Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cite-agent-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - cite-agent-network
+    restart: unless-stopped
+
+  # AlertManager - Alert Routing (Optional)
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: cite-agent-alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/config.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    networks:
+      - cite-agent-network
+    restart: unless-stopped
+    profiles:
+      - monitoring-full
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  api_logs:
+    driver: local
+
+networks:
+  cite-agent-network:
+    driver: bridge
