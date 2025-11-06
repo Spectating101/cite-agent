@@ -1116,6 +1116,32 @@ class EnhancedNocturnalAgent:
             return True
         return normalized in {"pwd", "pwd?"}
 
+    def _is_out_of_scope_request(self, text: str) -> bool:
+        """Detect requests that are clearly outside the agent's domain."""
+        text_lower = text.lower()
+
+        # Physical world requests
+        physical_world = [
+            'make me a sandwich', 'make a sandwich', 'get me', 'bring me',
+            'cook', 'food', 'eat', 'drink', 'coffee', 'pizza'
+        ]
+
+        # Entertainment/social requests
+        entertainment = [
+            'tell me a joke', 'tell a joke', 'sing', 'play a game',
+            'what\'s the weather', 'weather', 'time', 'what time',
+            'chat', 'be my friend'
+        ]
+
+        # General knowledge outside domain
+        outside_domain = [
+            'who won', 'who is', 'define', 'translate',
+            'what is the capital', 'when did', 'history of'
+        ]
+
+        all_out_of_scope = physical_world + entertainment + outside_domain
+        return any(phrase in text_lower for phrase in all_out_of_scope)
+
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
             logger.info("🔍 DEBUG: _format_api_results_for_prompt called with EMPTY api_results")
@@ -3556,18 +3582,24 @@ class EnhancedNocturnalAgent:
         if has_correction and recent_context:
             # Extract what they're correcting TO
             # Patterns like: "Actually it's X", "No, Y", "I meant Z"
-            correction_match = re.search(r'(?:actually|no|instead|rather|i\s+mean[t]?)\s+(?:it\'s|its|it is)?\s*(\w+)', question_lower)
+            # Skip articles (a, an, the) to get the actual value
+            correction_match = re.search(
+                r'(?:actually|no|instead|rather|i\s+mean[t]?)\s+(?:it\'s|its|it is)?\s*(?:a|an|the)?\s*(\w+)',
+                question_lower
+            )
             if correction_match:
                 corrected_value = correction_match.group(1)
-                correction_detected = True
-                # Generate natural acknowledgment
-                acknowledgments = [
-                    f"Got it, {corrected_value} then.",
-                    f"Ah, {corrected_value} - understood!",
-                    f"Thanks for clarifying - {corrected_value} it is.",
-                    f"Noted - switching to {corrected_value}."
-                ]
-                correction_acknowledgment = acknowledgments[hash(question_lower) % len(acknowledgments)]
+                # Only acknowledge if we got a meaningful value (not just articles or common words)
+                if corrected_value not in ['a', 'an', 'the', 'is', 'was', 'be']:
+                    correction_detected = True
+                    # Generate natural acknowledgment
+                    acknowledgments = [
+                        f"Got it, {corrected_value} then.",
+                        f"Ah, {corrected_value} - understood!",
+                        f"Thanks for clarifying - {corrected_value} it is.",
+                        f"Noted - switching to {corrected_value}."
+                    ]
+                    correction_acknowledgment = acknowledgments[hash(question_lower) % len(acknowledgments)]
 
         # NEW: Detect stock tickers (2-5 uppercase letters, not common words)
         # Pattern: AAPL, MSFT, GOOGL, etc. (but not I, A, IT, US, API, etc.)
@@ -3891,6 +3923,15 @@ class EnhancedNocturnalAgent:
                     "Looks like you're just testing. Let me know what you'd like me to dig into and I'll jump on it.",
                     tools_used=["quick_reply"],
                     confidence=0.4,
+                )
+
+            # NEW: Handle out-of-scope requests with helpful redirect
+            if self._is_out_of_scope_request(request.question):
+                return self._quick_reply(
+                    request,
+                    "I focus on financial data, research papers, and exploring codebases. How can I help with one of those?",
+                    tools_used=["quick_reply"],
+                    confidence=0.5,
                 )
 
             if self._is_location_query(request.question):
