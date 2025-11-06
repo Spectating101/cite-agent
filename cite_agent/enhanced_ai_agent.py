@@ -1243,6 +1243,12 @@ class EnhancedNocturnalAgent:
             "   • Good: \"I see 20 Python files and a tests directory in your project\"\n\n"
             "4. ANTICIPATE NEEDS - After answering, think \"What will they likely want next?\" "
             "Offer 2-3 relevant follow-ups naturally.\n\n"
+            "5. BE CONCISE - Most users want quick, actionable answers, not walls of text:\n"
+            "   • Default: 2-4 sentences with key info + offer to expand\n"
+            "   • Bad: 500-word essay explaining everything about LSTM vs GRU\n"
+            "   • Good: 'LSTMs have 3 gates, GRUs have 2. GRUs train faster, LSTMs handle longer sequences better. Which matters for your task?'\n"
+            "   • Only provide detailed explanations when user explicitly asks for them ('tell me more', 'explain in detail', 'why')\n"
+            "   • Think: 'What's the MINIMUM they need to make progress?'\n\n"
             "Tools you can use (hide these from user - just use them naturally):\n"
             "• Shell commands for file operations\n"
             "• Archive API for research papers\n"
@@ -1253,6 +1259,13 @@ class EnhancedNocturnalAgent:
 
         # Behavioral guidelines
         guidelines = [
+            "CONCISENESS RULES:",
+            "• First response: 50-200 words maximum unless user explicitly asks for detail",
+            "• Structure: [Direct answer in 1-2 sentences] + [Key point] + [Follow-up offer]",
+            "• Expand only when user says: 'tell me more', 'explain', 'details', 'why', 'how does it work'",
+            "• Tables/lists OK for comparisons but keep entries short",
+            "• Never info-dump - give them what they need to make the next decision",
+            "",
             "Use tools proactively - search files, run commands, query APIs when needed.",
             "Cite sources: papers (title+authors), files (path:line), API data.",
             "shell_info shows already-executed commands. Present RESULTS concisely - no commands shown.",
@@ -3663,7 +3676,8 @@ class EnhancedNocturnalAgent:
                     elif any(disambig in question_lower for disambig in [
                         'survey', 'likert', 'questionnaire', 'respondent', 'participant',
                         'statistical', 'analysis', 'correlation', 'regression', 'anova',
-                        'sample', 'variable', 'hypothesis', 'research'
+                        'sample', 'variable', 'hypothesis', 'research', 'missing data',
+                        'imputation', 'dropout', 'longitudinal', 'baseline', 'follow-up'
                     ]):
                         context_clear = True
 
@@ -3672,7 +3686,8 @@ class EnhancedNocturnalAgent:
                     if any(keyword in question_lower for keyword in [
                         'research', 'paper', 'study', 'literature', 'academic', 'medical', 'image',
                         'deep learning', 'machine learning', 'nlp', 'natural language', 'text',
-                        'data analysis', 'statistical', 'quantitative', 'qualitative'
+                        'data analysis', 'statistical', 'quantitative', 'qualitative',
+                        'missing', 'imputation', 'survey', 'likert', 'sample'
                     ]):
                         context_clear = True
                     # Financial analysis
