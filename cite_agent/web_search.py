@@ -154,9 +154,17 @@ class WebSearchIntegration:
         """Clean up resources"""
         if self.search_engine:
             try:
-                await self.search_engine.close()
+                # DDGS doesn't have an async close method, but if it has close(), call it
+                if hasattr(self.search_engine, 'close'):
+                    close_method = self.search_engine.close
+                    if asyncio.iscoroutinefunction(close_method):
+                        await close_method()
+                    else:
+                        close_method()
             except Exception as e:
                 logger.error(f"Error closing search engine: {e}")
+        self.search_engine = None
+        self._initialized = False
 
 
 # Convenience function for direct usage
