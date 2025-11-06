@@ -779,8 +779,9 @@ class EnhancedNocturnalAgent:
         if directories and files:
             message_parts.append("\nWant me to explain the project structure, or look at something specific?")
 
-        if error:
-            message_parts.append(f"\n⚠️ {error}")
+        # Hide technical API errors from users - they don't need to know about backend issues
+        # if error:
+        #     message_parts.append(f"\n⚠️ {error}")
 
         return "\n\n".join(part for part in message_parts if part)
 
@@ -895,7 +896,7 @@ class EnhancedNocturnalAgent:
                 inner_inputs = metric_data.get("inputs", {})
                 entry = inner_inputs.get(metric_name) or next(iter(inner_inputs.values()), {})
                 value = entry.get("value")
-            formatted_value = self._format_currency_value(value) if value is not None else "(value unavailable)"
+            formatted_value = self._format_currency_value(value) if value is not None else "(not available)"
             period = metric_data.get("period")
             if not period or (isinstance(period, str) and period.lower().startswith("latest")):
                 inner_inputs = metric_data.get("inputs", {})
@@ -3278,11 +3279,8 @@ class EnhancedNocturnalAgent:
 
     @staticmethod
     def _format_model_error(details: str) -> str:
-        headline = "⚠️ I couldn't finish the reasoning step because the language model call failed."
-        advice = "Please retry shortly or verify your Groq API keys and network connectivity."
-        if details:
-            return f"{headline}\n\nDetails: {details}\n\n{advice}"
-        return f"{headline}\n\n{advice}"
+        # User-friendly error message without technical details
+        return "I'm having trouble processing that right now. Could you try rephrasing or asking something else?"
 
     def _summarize_command_output(
         self,
@@ -3564,14 +3562,24 @@ class EnhancedNocturnalAgent:
             clarification_needed = True
             term, options = detected_ambiguous[0]  # Use first ambiguous term
 
-            # Generate natural clarification message
+            # Generate natural clarification message with better variety
+            # Create more natural option formatting
+            if len(options) == 2:
+                options_str = f"{options[0]} or {options[1]}"
+            elif len(options) == 3:
+                options_str = f"{options[0]}, {options[1]}, or {options[2]}"
+            else:
+                options_str = ', '.join(options[:-1]) + f", or {options[-1]}"
+
             clarification_templates = [
-                f"Just to clarify - when you mention '{term}', are you thinking of {', or '.join(options)}?",
-                f"I can help with {term}! Are you looking for {', '.join(options)}?",
-                f"Want to make sure I understand - is this about {' or '.join(options)}?"
+                f"What kind of {term} are you thinking about? I can help with {options_str}.",
+                f"Just to clarify - is this about {options_str}?",
+                f"I'd love to help! Are you working with {options_str}?",
+                f"Want to make sure I understand - which type of {term}? ({options_str})",
+                f"Could you clarify what kind of {term}? I can assist with {options_str}."
             ]
             # Pick template based on hash for variety
-            template_idx = hash(term) % len(clarification_templates)
+            template_idx = hash(term + question_lower) % len(clarification_templates)
             clarification_message = clarification_templates[template_idx]
 
         # Context-aware keyword detection
