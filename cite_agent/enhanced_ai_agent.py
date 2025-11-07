@@ -27,6 +27,12 @@ from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 
+# Quality improvements - Phase 1
+from .error_handler import GracefulErrorHandler, handle_error_gracefully
+from .response_formatter import ResponseFormatter
+from .quality_gate import ResponseQualityGate, assess_response_quality
+from .response_pipeline import ResponsePipeline
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -1378,12 +1384,15 @@ class EnhancedNocturnalAgent:
         if "fallback" not in tools:
             tools.append("fallback")
 
-        header = "⚠️ Temporary LLM downtime\n\n"
+        # ========================================
+        # PHASE 1 GRACEFUL FALLBACK
+        # User-friendly messaging instead of technical errors
+        # ========================================
 
         if self._is_simple_greeting(request.question):
             body = (
-                "Hi there! I'm currently at my Groq capacity, so I can't craft a full narrative response just yet. "
-                "You're welcome to try again in a little while, or I can still fetch finance and research data for you."
+                "Hi there! I'm running into some temporary limits right now. "
+                "Feel free to try again in a moment, or I can still help with specific data queries."
             )
         else:
             details: List[str] = []
@@ -1421,23 +1430,17 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I pulled the structured data you asked for, but I'm temporarily out of Groq quota to synthesize a full answer. "
-                    "Here are the raw results so you can keep moving:"
+                    "I gathered the data you asked for, but I'm having trouble processing it fully right now. "
+                    "Here's what I found:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
-                    "I'm temporarily out of Groq quota, so I can't compose a full answer. "
-                    "Please try again in a bit, or ask me to queue this work for later."
+                    "I'm running into some temporary limits. "
+                    "Please try again in a moment, and I should be able to help."
                 )
 
-        footer = (
-            "\n\nNext steps:\n"
-            "• Wait for the Groq daily quota to reset (usually within 24 hours).\n"
-            "• Add another API key in your environment for automatic rotation.\n"
-            "• Keep the conversation open—I’ll resume normal replies once capacity returns."
-        )
-
-        message = header + body + footer
+        # Friendly closing without technical details
+        message = body
 
         self.conversation_history.append({"role": "user", "content": request.question})
         self.conversation_history.append({"role": "assistant", "content": message})
@@ -4811,6 +4814,36 @@ JSON:"""
                         final_response = "I searched but found no matches. The search returned no results."
                         logger.warning("🚨 Hallucination prevented: LLM tried to make up results when shell output was empty")
 
+            # ========================================
+            # PHASE 1 QUALITY PIPELINE
+            # Process response through quality improvements
+            # ========================================
+            try:
+                pipeline_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'query_type': request_analysis.get('type'),
+                    'shell_output_type': 'generic'
+                }
+
+                processed = await ResponsePipeline.process(
+                    final_response,
+                    request.question,
+                    pipeline_context,
+                    response_type="generic"
+                )
+
+                final_response = processed.final_response
+
+                # Log quality improvements
+                if processed.improvements_applied:
+                    logger.info(f"✨ Quality improvements: {', '.join(processed.improvements_applied)}")
+                    logger.info(f"📊 Quality score: {processed.quality_score:.2f}")
+
+            except Exception as e:
+                # If pipeline fails, log but continue with original response
+                logger.error(f"Quality pipeline failed: {e}, using original response")
+
             expected_tools: Set[str] = set()
             if "finsight" in request_analysis.get("apis", []):
                 expected_tools.add("finsight_api")
@@ -4846,20 +4879,25 @@ JSON:"""
             
         except Exception as e:
             import traceback
-            details = str(e)
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug_mode:
                 print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()
-            message = (
-                "⚠️ Something went wrong while orchestrating your request, but no actions were performed. "
-                "Please retry, and if the issue persists share this detail with the team: {details}."
-            ).format(details=details)
+
+            # ========================================
+            # PHASE 1 GRACEFUL ERROR HANDLING
+            # Never expose technical details to users
+            # ========================================
+            user_friendly_message = GracefulErrorHandler.create_fallback_response(
+                request.question,
+                e
+            )
+
             return ChatResponse(
-                response=message,
+                response=user_friendly_message,
                 timestamp=datetime.now().isoformat(),
                 confidence_score=0.0,
-                error_message=details
+                error_message=str(e) if debug_mode else None  # Only include technical error in debug mode
             )
     
     async def process_request_streaming(self, request: ChatRequest):
