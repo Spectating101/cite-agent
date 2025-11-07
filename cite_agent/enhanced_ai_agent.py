@@ -1421,10 +1421,11 @@ class EnhancedNocturnalAgent:
             research = api_results.get("research")
             if research:
                 payload_full = json.dumps(research, indent=2)
-                payload = payload_full[:1500]
-                if len(payload_full) > 1500:
+                # Increase limit for literature review - need full abstracts (10000 chars for 5 papers)
+                payload = payload_full[:10000]
+                if len(payload_full) > 10000:
                     payload += "\n…"
-                
+
                 # Check if results are empty and add explicit warning
                 if research.get("results") == [] or not research.get("results"):
                     details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
@@ -1433,6 +1434,7 @@ class EnhancedNocturnalAgent:
                     details.append("🚨 **SAY 'NO PAPERS FOUND' AND STOP - DO NOT HALLUCINATE**")
                 else:
                     details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
+                    details.append("✅ **IMPORTANT: SUMMARIZE THESE PAPERS IN DETAIL - Include key findings, methods, and contributions from abstracts**")
 
             files_context = api_results.get("files_context")
             if files_context:
@@ -4168,16 +4170,14 @@ JSON:"""
             if not is_vague:
                 # Archive API for research
                 if "archive" in request_analysis.get("apis", []):
-                    result = await self.search_academic_papers(request.question, 3)  # Reduced from 5 to save tokens
+                    result = await self.search_academic_papers(request.question, 5)  # Get 5 papers for comprehensive review
                     if "error" not in result:
-                        # Strip abstracts to save tokens - only keep essential fields
+                        # KEEP abstracts for literature review - essential for paper understanding
+                        # Only remove full_text to save tokens
                         if "results" in result:
                             for paper in result["results"]:
-                                # Remove heavy fields
-                                paper.pop("abstract", None)
-                                paper.pop("tldr", None)
-                                paper.pop("full_text", None)
-                                # Keep only: title, authors, year, doi, url
+                                paper.pop("full_text", None)  # Remove only full text, keep abstract & tldr
+                                # Keep: title, authors, year, doi, url, abstract, tldr
                         api_results["research"] = result
                         tools_used.append("archive_api")
                 
