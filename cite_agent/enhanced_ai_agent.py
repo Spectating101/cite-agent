@@ -4565,10 +4565,14 @@ JSON:"""
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    # Include all files, with more lines for comparisons
+                    # Detect comparison queries - include MORE context
+                    is_comparison = len(text_previews) > 1 or any(word in request.question.lower() for word in ['compare', 'difference', 'contrast', 'vs', 'versus'])
+                    line_limit = 200 if is_comparison else 100  # More lines for comparisons
+
+                    # Include all files with appropriate context
                     file_contexts = []
                     for fp in text_previews:
-                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        quoted = "\n".join(fp["preview"].splitlines()[:line_limit])
                         file_contexts.append(f"File: {fp['path']}\n{quoted}")
                     files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
@@ -4685,7 +4689,24 @@ JSON:"""
             # If we have file context, inject it as an additional grounding message
             fc = api_results.get("files_context")
             if fc:
-                messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}\n\nAnswer based strictly on this content when relevant. Do not run shell commands."})
+                # Count how many files are being compared
+                file_count = len([fp for fp in api_results.get("files", []) if fp.get("type") == "text"])
+
+                if file_count > 1:
+                    # Multi-file comparison - make it VERY explicit
+                    comparison_msg = "🚨 MULTIPLE FILES PROVIDED FOR COMPARISON:\n\n"
+                    comparison_msg += fc
+                    comparison_msg += "\n\n🚨 CRITICAL INSTRUCTIONS FOR COMPARISON:\n"
+                    comparison_msg += "1. Read ALL file contents above carefully\n"
+                    comparison_msg += "2. Extract specific data points, numbers, percentages from EACH file\n"
+                    comparison_msg += "3. Compare and contrast the ACTUAL content (not just filenames)\n"
+                    comparison_msg += "4. If asked about differences, cite EXACT lines or values from BOTH files\n"
+                    comparison_msg += "5. Do NOT make general statements - be specific with examples from the files\n"
+                    comparison_msg += "\nAnswer based STRICTLY on the file contents above. Do not run shell commands."
+                    messages.append({"role": "system", "content": comparison_msg})
+                else:
+                    # Single file - normal handling
+                    messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}\n\nAnswer based strictly on this content when relevant. Do not run shell commands."})
             missing = api_results.get("files_missing")
             if missing:
                 messages.append({"role": "system", "content": f"User mentioned file(s) not found: {missing}. Respond explicitly that the file was not found and avoid speculation."})
@@ -5173,10 +5194,14 @@ JSON:"""
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    # Include all files, with more lines for comparisons
+                    # Detect comparison queries - include MORE context
+                    is_comparison = len(text_previews) > 1 or any(word in request.question.lower() for word in ['compare', 'difference', 'contrast', 'vs', 'versus'])
+                    line_limit = 200 if is_comparison else 100  # More lines for comparisons
+
+                    # Include all files with appropriate context
                     file_contexts = []
                     for fp in text_previews:
-                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        quoted = "\n".join(fp["preview"].splitlines()[:line_limit])
                         file_contexts.append(f"File: {fp['path']}\n{quoted}")
                     files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
@@ -5261,7 +5286,24 @@ JSON:"""
 
             fc = api_results.get("files_context")
             if fc:
-                messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}"})
+                # Count how many files are being compared
+                file_count = len([fp for fp in api_results.get("files", []) if fp.get("type") == "text"])
+
+                if file_count > 1:
+                    # Multi-file comparison - make it VERY explicit
+                    comparison_msg = "🚨 MULTIPLE FILES PROVIDED FOR COMPARISON:\n\n"
+                    comparison_msg += fc
+                    comparison_msg += "\n\n🚨 CRITICAL INSTRUCTIONS FOR COMPARISON:\n"
+                    comparison_msg += "1. Read ALL file contents above carefully\n"
+                    comparison_msg += "2. Extract specific data points, numbers, percentages from EACH file\n"
+                    comparison_msg += "3. Compare and contrast the ACTUAL content (not just filenames)\n"
+                    comparison_msg += "4. If asked about differences, cite EXACT lines or values from BOTH files\n"
+                    comparison_msg += "5. Do NOT make general statements - be specific with examples from the files\n"
+                    comparison_msg += "\nAnswer based STRICTLY on the file contents above. Do not run shell commands."
+                    messages.append({"role": "system", "content": comparison_msg})
+                else:
+                    # Single file - normal handling
+                    messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}"})
             
             # Add conversation history (abbreviated - just recent)
             if len(self.conversation_history) > 6:
