@@ -1054,7 +1054,21 @@ class EnhancedNocturnalAgent:
 
             if "error" in shell_info:
                 formatted_parts.append(f"\n❌ Error occurred:")
-                formatted_parts.append(f"{shell_info['error']}")
+                error_msg = shell_info['error']
+
+                # Provide friendlier context for common errors
+                if 'no such file or directory' in error_msg.lower():
+                    formatted_parts.append(f"{error_msg}")
+                    formatted_parts.append(f"\n💡 INSTRUCTION: Respond with a clear, friendly message like 'I couldn't find that file. Please check the filename and try again.' Do not speculate about contents.")
+                elif 'permission denied' in error_msg.lower():
+                    formatted_parts.append(f"{error_msg}")
+                    formatted_parts.append(f"\n💡 INSTRUCTION: Explain that you don't have permission to access that file.")
+                elif 'is a directory' in error_msg.lower():
+                    formatted_parts.append(f"{error_msg}")
+                    formatted_parts.append(f"\n💡 INSTRUCTION: Explain that this is a directory, not a file. Suggest listing its contents with 'ls'.")
+                else:
+                    formatted_parts.append(f"{error_msg}")
+                    formatted_parts.append(f"\n💡 INSTRUCTION: Explain the error in simple terms. Be helpful and concise.")
 
             if "directory_contents" in shell_info:
                 formatted_parts.append(f"\n📂 Directory listing (THIS IS THE RESULT):")
@@ -3571,7 +3585,14 @@ class EnhancedNocturnalAgent:
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
                 'git', 'grep', 'navigate', 'go to', 'change to',
-                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain'
+                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain',
+                # Conceptual keywords for grep-based exploration
+                'authentication', 'auth', 'login', 'credential', 'password', 'session', 'token',
+                'config', 'configuration', 'settings', 'environment', 'setup',
+                'database', 'db', 'connection', 'query', 'sql',
+                'api', 'endpoint', 'route', 'request', 'response',
+                'error', 'exception', 'handling', 'debug', 'logging',
+                'test', 'testing', 'unittest', 'pytest'
             ])
             
             if might_need_shell and self.shell_session:
@@ -3620,7 +3641,9 @@ IMPORTANT RULES:
     - "what does X method do in file.py?" → find . -name 'file.py' -exec grep -A 50 'def X' {{}} \\; 2>/dev/null
     - "explain process_request in agent.py" → find . -name '*agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null
     - If you know exact path, use grep directly: grep -A 50 'def X' path/to/file.py 2>/dev/null
-15. 🚨 FOR COMPARING FILES: Read FIRST file only. The LLM will request the second file after analyzing the first.
+15. 🚨 FOR COMPARING FILES: Read BOTH files at once using compound command to show them side-by-side:
+    - Use: (echo "=== file1 ===" && head -100 file1 && echo -e "\\n=== file2 ===" && head -100 file2) 2>/dev/null
+    - This provides all needed context for comparison in one step
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -3642,9 +3665,14 @@ Examples:
 "what does process_request method do in enhanced_ai_agent.py" → {{"action": "execute", "command": "find . -name '*enhanced_ai_agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null", "reason": "Find file and show method definition with context", "updates_context": false}}
 "explain the initialize method in agent.py" → {{"action": "execute", "command": "find . -name '*agent.py' -exec grep -A 50 'def initialize' {{}} \\; 2>/dev/null", "reason": "Find file and show method", "updates_context": false}}
 "find calculate function in utils.py" → {{"action": "execute", "command": "find . -name 'utils.py' -exec grep -A 30 'def calculate' {{}} \\; 2>/dev/null", "reason": "Find file and show function", "updates_context": false}}
-"compare file1.py and file2.py" → {{"action": "execute", "command": "head -100 file1.py", "reason": "Read first file (will read second in next step)", "updates_context": true}}
+"compare file1.py and file2.py" → {{"action": "execute", "command": "(echo '=== file1.py ===' && head -100 file1.py && echo -e '\\\\n=== file2.py ===' && head -100 file2.py) 2>/dev/null", "reason": "Read both files for comparison", "updates_context": true}}
+"what's different between README.md and ARCHITECTURE.md" → {{"action": "execute", "command": "(echo '=== README.md ===' && head -100 README.md && echo -e '\\\\n=== ARCHITECTURE.md ===' && head -100 ARCHITECTURE.md) 2>/dev/null", "reason": "Read both files for comparison", "updates_context": true}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
+"how does authentication work?" → {{"action": "execute", "command": "grep -rn 'auth\\|login\\|credential' --include='*.py' . 2>/dev/null | head -50", "reason": "Search for authentication-related code", "updates_context": false}}
+"where is authentication logic?" → {{"action": "execute", "command": "grep -rn 'def.*auth\\|class.*Auth' --include='*.py' . 2>/dev/null | head -30", "reason": "Find authentication functions/classes", "updates_context": false}}
+"how is configuration handled?" → {{"action": "execute", "command": "grep -rn 'config\\|settings\\|environment' --include='*.py' . 2>/dev/null | head -50", "reason": "Search for configuration code", "updates_context": false}}
+"where is database connection?" → {{"action": "execute", "command": "grep -rn 'database\\|connection\\|db\\.connect' --include='*.py' . 2>/dev/null | head -40", "reason": "Find database connection code", "updates_context": false}}
 "hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
 "test" → {{"action": "none", "reason": "Ambiguous query, needs clarification"}}
 "thanks" → {{"action": "none", "reason": "Conversational acknowledgment"}}
@@ -4638,7 +4666,9 @@ JSON:"""
                 messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}\n\nAnswer based strictly on this content when relevant. Do not run shell commands."})
             missing = api_results.get("files_missing")
             if missing:
-                messages.append({"role": "system", "content": f"User mentioned file(s) not found: {missing}. Respond explicitly that the file was not found and avoid speculation."})
+                # Provide clear, friendly error message
+                missing_list = ', '.join(missing) if isinstance(missing, list) else str(missing)
+                messages.append({"role": "system", "content": f"IMPORTANT: The file(s) [{missing_list}] could not be found in the workspace. You MUST respond with a clear, friendly message like 'I couldn't find the file \"{missing_list}\". Please check the filename and try again.' Do NOT speculate about file contents or provide made-up information."})
             forbidden = api_results.get("files_forbidden")
             if forbidden:
                 messages.append({"role": "system", "content": f"User mentioned file(s) outside the allowed workspace or sensitive paths: {forbidden}. Refuse to access and explain the restriction succinctly."})
