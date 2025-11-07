@@ -3571,7 +3571,8 @@ class EnhancedNocturnalAgent:
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
                 'git', 'grep', 'navigate', 'go to', 'change to',
-                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain'
+                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain',
+                'how many', 'count', 'lines', 'wc -l', 'number of'
             ])
             
             if might_need_shell and self.shell_session:
@@ -4543,13 +4544,16 @@ JSON:"""
             if file_previews:
                 api_results["files"] = file_previews
                 tools_used.append("read_file")  # Track that files were read
-                # Build grounded context from first text preview
+                # Build grounded context from ALL text previews (for comparisons)
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    fp = text_previews[0]
-                    quoted = "\n".join(fp["preview"].splitlines()[:20])
-                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
+                    # Include all files, with more lines for comparisons
+                    file_contexts = []
+                    for fp in text_previews:
+                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
+                    files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
             elif mentioned:
                 # Mentioned files but none found
@@ -5100,12 +5104,16 @@ JSON:"""
             if file_previews:
                 api_results["files"] = file_previews
                 tools_used.append("read_file")  # Track that files were read
+                # Build grounded context from ALL text previews (for comparisons)
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    fp = text_previews[0]
-                    quoted = "\n".join(fp["preview"].splitlines()[:20])
-                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
+                    # Include all files, with more lines for comparisons
+                    file_contexts = []
+                    for fp in text_previews:
+                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
+                    files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
             elif mentioned:
                 api_results["files_missing"] = mentioned
