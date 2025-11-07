@@ -4485,8 +4485,11 @@ JSON:"""
                 return workflow_response
             
             # Call appropriate APIs based on request type
-            api_results = {}
-            tools_used = []
+            # Preserve shell execution data if already populated (from earlier in function)
+            if 'api_results' not in locals() or not api_results:
+                api_results = {}
+            if 'tools_used' not in locals() or not tools_used:
+                tools_used = []
 
             # Auto file-reading: detect filenames in the prompt and attach previews
             def _extract_filenames(text: str) -> List[str]:
