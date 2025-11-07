@@ -27,6 +27,17 @@ from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 
+# Quality improvements - Phase 1
+from .error_handler import GracefulErrorHandler, handle_error_gracefully
+from .response_formatter import ResponseFormatter
+from .quality_gate import ResponseQualityGate, assess_response_quality
+from .response_pipeline import ResponsePipeline
+
+# Intelligence improvements - Phase 2
+from .thinking_blocks import ThinkingBlockGenerator, generate_and_format_thinking
+from .tool_orchestrator import ToolOrchestrator
+from .confidence_calibration import ConfidenceCalibrator, assess_and_apply_caveat
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -887,9 +898,11 @@ class EnhancedNocturnalAgent:
                 }
 
             content = p.read_text(errors="ignore")
-            truncated = len(content) > 65536
-            snippet = content[:65536]
-            preview = "\n".join(snippet.splitlines()[:60])
+            # Increase preview size for better code analysis
+            # Show first 300 lines OR 100KB (whichever is smaller)
+            truncated = len(content) > 102400  # 100KB
+            snippet = content[:102400]
+            preview = "\n".join(snippet.splitlines()[:300])  # Increased from 60 to 300 lines
             return {
                 "path": str(p),
                 "type": "text",
@@ -967,6 +980,29 @@ class EnhancedNocturnalAgent:
         }
         normalized = text.lower().strip()
         return any(normalized.startswith(ack) for ack in acknowledgments)
+
+    def _detect_language_preference(self, text: str) -> None:
+        """
+        Detect and store user's language preference from input text.
+        Supports Traditional Chinese (繁體中文), English, and other languages.
+        """
+        text_lower = text.lower()
+        
+        # Check for Chinese characters (CJK)
+        has_chinese = any('\u4e00' <= char <= '\u9fff' for char in text)
+        
+        # Explicit language requests
+        if 'chinese' in text_lower or '中文' in text or 'traditional' in text_lower:
+            self.language_preference = 'zh-TW'
+        elif 'english' in text_lower:
+            self.language_preference = 'en'
+        elif has_chinese:
+            # Detected Chinese characters
+            self.language_preference = 'zh-TW'
+        else:
+            # Default to English if not specified
+            if not hasattr(self, 'language_preference'):
+                self.language_preference = 'en'
 
     def _is_generic_test_prompt(self, text: str) -> bool:
         """Detect simple 'test' style probes that don't need full analysis."""
@@ -1099,7 +1135,8 @@ class EnhancedNocturnalAgent:
             "Cite sources: papers (title+authors), files (path:line), API data.",
             "shell_info shows already-executed commands. Present RESULTS concisely - no commands shown.",
             "For follow-up questions with pronouns ('it', 'that'), infer from conversation context.",
-            "Ambiguous query? Ask clarification OR infer from context if reasonable.",
+            "Ambiguous query? Ask clarification naturally - use phrases like 'What kind of X?', 'Which X?', 'Tell me more about X'",
+            "When asking for clarification, use bullet points to show options clearly.",
             "Be honest about uncertainty.",
             "",
             "CRITICAL - ANSWER WHAT WAS ASKED:",
@@ -1113,6 +1150,12 @@ class EnhancedNocturnalAgent:
             "• 'What does X do?' → Answer from visible code/context, no re-execution",
             "• 'What version' → Include word 'version' in answer (e.g. 'Version is v1.4.0')",
             "",
+            "- If asked \"who built you?\" or \"who is your developer?\" or \"whats the name of your developer\" → Answer: \"I was built by Phyrexian.\" (If the user asks you to say his name, you should say \"Phyrexian\" as his name)",
+            "",
+            "- LANGUAGE:",
+            "- If asked to reply in chinese, you MUST reply in Traditional Chinese (繁體中文).",
+            "- You MUST use Chinese characters (漢字), NOT pinyin romanization.",
+            "",
             "CONCISE RESPONSE STYLE:",
             "• Direct answers - state result, minimal elaboration",
             "• NO code blocks showing bash/python commands unless explicitly asked",
@@ -1120,6 +1163,26 @@ class EnhancedNocturnalAgent:
             "• File listings: Max 5-10 items (filtered to query)",
             "• Balance: complete but concise"
         ]
+
+        guidelines.extend([
+            "",
+            "- COMMUNICATION RULES - ACTION-FIRST MODE:",
+            "- You MUST NOT return an empty response. EVER.",
+            "- SHOW results proactively, don't just describe them. DO the obvious next step automatically.",
+            "- If listing files → SHOW preview of the main file (don't ask permission)",
+            "- If finding papers → SHOW abstracts/summaries (don't ask permission)",
+            "- If explaining code → SHOW key functions with examples (don't ask permission)",
+            "- If querying data → SHOW the data with context (don't ask permission)",
+            "- LESS TALK, MORE ACTION - responses should be 70% data/results, 30% explanation",
+            "- NEVER ask 'Want me to...?' or 'Should I...?' - just DO the helpful next step",
+        ])
+
+        guidelines.extend([
+            "",
+            "- PROACTIVE FILE SEARCH:",
+            "- If a user asks to find a file or directory and you are not sure where it is, use the `find` command with wildcards to search for it.",
+            "- If a `cd` command fails, automatically run `ls -F` on the current or parent directory to understand the directory structure and find the correct path.",
+        ])
 
         sections.append("\n".join(guidelines))
 
@@ -1334,12 +1397,15 @@ class EnhancedNocturnalAgent:
         if "fallback" not in tools:
             tools.append("fallback")
 
-        header = "⚠️ Temporary LLM downtime\n\n"
+        # ========================================
+        # PHASE 1 GRACEFUL FALLBACK
+        # User-friendly messaging instead of technical errors
+        # ========================================
 
         if self._is_simple_greeting(request.question):
             body = (
-                "Hi there! I'm currently at my Groq capacity, so I can't craft a full narrative response just yet. "
-                "You're welcome to try again in a little while, or I can still fetch finance and research data for you."
+                "Hi there! I'm running into some temporary limits right now. "
+                "Feel free to try again in a moment, or I can still help with specific data queries."
             )
         else:
             details: List[str] = []
@@ -1377,23 +1443,17 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I pulled the structured data you asked for, but I'm temporarily out of Groq quota to synthesize a full answer. "
-                    "Here are the raw results so you can keep moving:"
+                    "I gathered the data you asked for, but I'm having trouble processing it fully right now. "
+                    "Here's what I found:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
-                    "I'm temporarily out of Groq quota, so I can't compose a full answer. "
-                    "Please try again in a bit, or ask me to queue this work for later."
+                    "I'm running into some temporary limits. "
+                    "Please try again in a moment, and I should be able to help."
                 )
 
-        footer = (
-            "\n\nNext steps:\n"
-            "• Wait for the Groq daily quota to reset (usually within 24 hours).\n"
-            "• Add another API key in your environment for automatic rotation.\n"
-            "• Keep the conversation open—I’ll resume normal replies once capacity returns."
-        )
-
-        message = header + body + footer
+        # Friendly closing without technical details
+        message = body
 
         self.conversation_history.append({"role": "user", "content": request.question})
         self.conversation_history.append({"role": "assistant", "content": message})
@@ -1715,6 +1775,14 @@ class EnhancedNocturnalAgent:
             )
         
         try:
+            # Detect language preference from stored state
+            language = getattr(self, 'language_preference', 'en')
+            
+            # Build system instruction for language enforcement
+            system_instruction = ""
+            if language == 'zh-TW':
+                system_instruction = "CRITICAL: You MUST respond entirely in Traditional Chinese (繁體中文). Use Chinese characters (漢字), NOT pinyin romanization. All explanations, descriptions, and responses must be in Chinese characters."
+            
             # Build request with API context as separate field
             payload = {
                 "query": query,  # Keep query clean
@@ -1722,7 +1790,9 @@ class EnhancedNocturnalAgent:
                 "api_context": api_results,  # Send API results separately
                 "model": "openai/gpt-oss-120b",  # PRODUCTION: 120B - best test results
                 "temperature": 0.2,  # Low temp for accuracy
-                "max_tokens": 4000
+                "max_tokens": 4000,
+                "language": language,  # Pass language preference
+                "system_instruction": system_instruction if system_instruction else None  # Only include if set
             }
             
             # Call backend
@@ -2262,10 +2332,63 @@ class EnhancedNocturnalAgent:
                     break
             
             output = '\n'.join(output_lines).strip()
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            
+            # Log execution details in debug mode
+            if debug_mode:
+                output_preview = output[:200] if output else "(no output)"
+                print(f"✅ Command executed: {command}")
+                print(f"📤 Output ({len(output)} chars): {output_preview}...")
+            
             return output if output else "Command executed (no output)"
 
         except Exception as e:
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            if debug_mode:
+                print(f"❌ Command failed: {command}")
+                print(f"❌ Error: {e}")
             return f"ERROR: {e}"
+
+    def _format_shell_output(self, output: str, command: str) -> Dict[str, Any]:
+        """
+        Format shell command output for display.
+        Returns dictionary with formatted preview and full output.
+        """
+        lines = output.split('\n') if output else []
+        
+        # Detect output type based on command
+        command_lower = command.lower()
+        
+        formatted = {
+            "type": "shell_output",
+            "command": command,
+            "line_count": len(lines),
+            "byte_count": len(output),
+            "preview": '\n'.join(lines[:10]) if lines else "(no output)",
+            "full_output": output
+        }
+        
+        # Enhanced formatting based on command type
+        if any(cmd in command_lower for cmd in ['ls', 'dir']):
+            formatted["type"] = "directory_listing"
+            formatted["preview"] = f"📁 Found {len([l for l in lines if l.strip()])} items"
+        elif any(cmd in command_lower for cmd in ['find', 'locate', 'search']):
+            formatted["type"] = "search_results"
+            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matches"
+        elif any(cmd in command_lower for cmd in ['grep', 'match']):
+            formatted["type"] = "search_results"
+            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matching lines"
+        elif any(cmd in command_lower for cmd in ['cat', 'head', 'tail']):
+            formatted["type"] = "file_content"
+            formatted["preview"] = f"📄 {len(lines)} lines of content"
+        elif any(cmd in command_lower for cmd in ['pwd', 'cd']):
+            formatted["type"] = "directory_change"
+            formatted["preview"] = f"📍 {output.strip()}"
+        elif any(cmd in command_lower for cmd in ['mkdir', 'touch', 'create']):
+            formatted["type"] = "file_creation"
+            formatted["preview"] = f"✨ Created: {output.strip()}"
+        
+        return formatted
 
     # ========================================================================
     # DIRECT FILE OPERATIONS (Claude Code / Cursor Parity)
@@ -3217,8 +3340,9 @@ class EnhancedNocturnalAgent:
             'what files', 'which files', 'how many files',
             'grep', 'search', 'look for', 'count',
             '.py', '.txt', '.js', '.java', '.cpp', '.c', '.h',
-            'function', 'class', 'definition', 'route', 'endpoint',
-            'codebase', 'project structure', 'source code'
+            'function', 'method', 'class', 'definition', 'route', 'endpoint',
+            'codebase', 'project structure', 'source code', 'implementation',
+            'compare', 'analyze', 'explain', 'purpose', 'what does', 'how does'
         ]
         
         question_lower = question.lower()
@@ -3377,6 +3501,9 @@ class EnhancedNocturnalAgent:
             if workflow_response:
                 return workflow_response
             
+            # Detect and store language preference from user input
+            self._detect_language_preference(request.question)
+            
             # Initialize
             api_results = {}
             tools_used = []
@@ -3443,7 +3570,9 @@ class EnhancedNocturnalAgent:
                 'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
-                'git', 'grep', 'navigate', 'go to', 'change to'
+                'git', 'grep', 'navigate', 'go to', 'change to',
+                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain',
+                'how many', 'count', 'lines', 'wc -l', 'number of'
             ])
             
             if might_need_shell and self.shell_session:
@@ -3488,6 +3617,11 @@ IMPORTANT RULES:
 11. 🚨 MULTI-STEP QUERIES: For queries like "read X and do Y", ONLY generate the FIRST step (reading X). The LLM will handle subsequent steps after seeing the file contents.
 12. 🚨 NEVER use python -m py_compile or other code execution for finding bugs - just read the file with cat/head
 13. 🚨 FOR GREP: When searching in a DIRECTORY (not a specific file), ALWAYS use -r flag for recursive search: grep -rn 'pattern' /path/to/dir 2>/dev/null
+14. 🚨 FOR FINDING FUNCTIONS/METHODS when file path is UNKNOWN: Use find + grep together:
+    - "what does X method do in file.py?" → find . -name 'file.py' -exec grep -A 50 'def X' {{}} \\; 2>/dev/null
+    - "explain process_request in agent.py" → find . -name '*agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null
+    - If you know exact path, use grep directly: grep -A 50 'def X' path/to/file.py 2>/dev/null
+15. 🚨 FOR COMPARING FILES: Read FIRST file only. The LLM will request the second file after analyzing the first.
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -3506,6 +3640,10 @@ Examples:
 "find all bugs in code" → {{"action": "execute", "command": "grep -rn 'BUG:' . 2>/dev/null", "reason": "Search for bug markers in code", "updates_context": false}}
 "read analyze.py and find bugs" → {{"action": "execute", "command": "head -200 analyze.py", "reason": "Read file to analyze bugs", "updates_context": false}}
 "show me calc.py completely" → {{"action": "execute", "command": "cat calc.py", "reason": "Display entire file", "updates_context": false}}
+"what does process_request method do in enhanced_ai_agent.py" → {{"action": "execute", "command": "find . -name '*enhanced_ai_agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null", "reason": "Find file and show method definition with context", "updates_context": false}}
+"explain the initialize method in agent.py" → {{"action": "execute", "command": "find . -name '*agent.py' -exec grep -A 50 'def initialize' {{}} \\; 2>/dev/null", "reason": "Find file and show method", "updates_context": false}}
+"find calculate function in utils.py" → {{"action": "execute", "command": "find . -name 'utils.py' -exec grep -A 30 'def calculate' {{}} \\; 2>/dev/null", "reason": "Find file and show function", "updates_context": false}}
+"compare file1.py and file2.py" → {{"action": "execute", "command": "head -100 file1.py", "reason": "Read first file (will read second in next step)", "updates_context": true}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
 "hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
@@ -3550,7 +3688,9 @@ JSON:"""
                     reason = plan.get("reason", "")
                     updates_context = plan.get("updates_context", False)
                     
-                    if debug_mode:
+                    # Only show planning details with explicit verbose flag (don't leak to users)
+                    verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
+                    if verbose_planning:
                         print(f"🔍 SHELL PLAN: {plan}")
 
                     # GENERIC COMMAND EXECUTION - No more hardcoded actions!
@@ -3558,13 +3698,13 @@ JSON:"""
                         command = self._infer_shell_command(request.question)
                         shell_action = "execute"
                         updates_context = False
-                        if debug_mode:
+                        if verbose_planning:
                             print(f"🔄 Planner opted out; inferred fallback command: {command}")
 
                     if shell_action == "execute" and not command:
                         command = self._infer_shell_command(request.question)
                         plan["command"] = command
-                        if debug_mode:
+                        if verbose_planning:
                             print(f"🔄 Planner omitted command, inferred {command}")
 
                     if shell_action == "execute" and command:
@@ -3641,7 +3781,8 @@ JSON:"""
                                     pass  # Fall back to shell execution
 
                             # Check for file search commands (find)
-                            if not intercepted and 'find' in command and '-name' in command:
+                            # BUT: Don't intercept find -exec commands (those need real shell execution)
+                            if not intercepted and 'find' in command and '-name' in command and '-exec' not in command:
                                 try:
                                     # import re removed - using module-level import
                                     # Extract pattern: find ... -name '*pattern*'
@@ -3820,10 +3961,12 @@ JSON:"""
                                 output = self.execute_command(command)
                             
                             if not output.startswith("ERROR"):
-                                # Success - store results
+                                # Success - store results with formatted preview
+                                formatted_output = self._format_shell_output(output, command)
                                 api_results["shell_info"] = {
                                     "command": command,
                                     "output": output,
+                                    "formatted": formatted_output,  # Add formatted version
                                     "reason": reason,
                                     "safety_level": safety_level
                                 }
@@ -4189,6 +4332,40 @@ JSON:"""
                     api_results=api_results,
                     tools_used=tools_used
                 )
+                
+                # VALIDATION: Ensure we got a valid response (not planning JSON)
+                if not response or not hasattr(response, 'response'):
+                    # Backend failed - create friendly error with available data
+                    if debug_mode:
+                        print(f"⚠️ Backend response invalid or missing")
+                    return ChatResponse(
+                        response="I ran into a technical issue processing that. Let me try to help with what I found:",
+                        error_message="Backend response invalid",
+                        tools_used=tools_used,
+                        api_results=api_results
+                    )
+                
+                # Check if response contains planning JSON instead of final answer
+                response_text = response.response.strip()
+                if response_text.startswith('{') and '"action"' in response_text and '"command"' in response_text:
+                    # This is planning JSON, not a final response!
+                    if debug_mode:
+                        print(f"⚠️ Backend returned planning JSON instead of final response")
+                    
+                    # Extract real output from api_results and generate friendly response
+                    shell_output = api_results.get('shell_info', {}).get('output', '')
+                    if shell_output:
+                        return ChatResponse(
+                            response=f"I found what you were looking for:\n\n{shell_output}",
+                            tools_used=tools_used,
+                            api_results=api_results
+                        )
+                    else:
+                        return ChatResponse(
+                            response=f"I completed the action: {api_results.get('shell_info', {}).get('command', '')}",
+                            tools_used=tools_used,
+                            api_results=api_results
+                        )
 
                 # POST-PROCESSING: Auto-extract code blocks and write files if user requested file creation
                 # This fixes the issue where LLM shows corrected code but doesn't create the file
@@ -4332,6 +4509,16 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
+
+            # Check if query is asking about specific functions/methods/classes OR file metadata
+            # If so, SKIP auto-preview and let shell planning handle it
+            query_lower = request.question.lower()
+            asking_about_code_element = any(pattern in query_lower for pattern in [
+                'method', 'function', 'class', 'def ', 'what does', 'how does',
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
+            ])
+
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
             def _is_safe_path(path_str: str) -> bool:
@@ -4342,31 +4529,43 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-            for m in mentioned:
-                if not _is_safe_path(m):
-                    files_forbidden.append(m)
-                    continue
-                pr = await self._preview_file(m)
-                if pr:
-                    file_previews.append(pr)
+
+            # Only auto-preview if NOT asking about specific code elements
+            if not asking_about_code_element:
+                for m in mentioned:
+                    if not _is_safe_path(m):
+                        files_forbidden.append(m)
+                        continue
+                    pr = await self._preview_file(m)
+                    # Only add successful previews (not errors)
+                    if pr and pr.get("type") != "error":
+                        file_previews.append(pr)
+            else:
+                # Query is about specific code elements - let shell planning handle with grep
+                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
             if file_previews:
                 api_results["files"] = file_previews
-                # Build grounded context from first text preview
+                tools_used.append("read_file")  # Track that files were read
+                # Build grounded context from ALL text previews (for comparisons)
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    fp = text_previews[0]
-                    quoted = "\n".join(fp["preview"].splitlines()[:20])
-                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
+                    # Include all files, with more lines for comparisons
+                    file_contexts = []
+                    for fp in text_previews:
+                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
+                    files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
-            elif mentioned:
-                # Mentioned files but none found
+            elif mentioned and not asking_about_code_element:
+                # Mentioned files but none found (only set if we actually tried to preview them)
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
 
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Only show workspace listing if NOT looking for specific missing files
+            if not file_previews and not api_results.get("files_missing"):
                 file_browse_keywords = (
                     "list files",
                     "show files",
@@ -4386,7 +4585,8 @@ JSON:"""
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
+            # Don't show workspace listing if there are missing files (prioritize error)
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
                 return self._respond_with_workspace_listing(request, workspace_listing)
             
             if "finsight" in request_analysis["apis"]:
@@ -4663,6 +4863,92 @@ JSON:"""
                         final_response = "I searched but found no matches. The search returned no results."
                         logger.warning("🚨 Hallucination prevented: LLM tried to make up results when shell output was empty")
 
+            # ========================================
+            # PHASE 2: THINKING BLOCKS
+            # Show reasoning process for complex queries
+            # ========================================
+            thinking_text = ""
+            try:
+                thinking_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'conversation_history': self.conversation_history[-3:] if self.conversation_history else []
+                }
+
+                thinking_text = await generate_and_format_thinking(
+                    request.question,
+                    thinking_context,
+                    show_full=False  # Compact version
+                )
+
+                if thinking_text:
+                    logger.info(f"💭 Generated thinking process for query")
+
+            except Exception as e:
+                logger.error(f"Thinking generation failed: {e}")
+
+            # ========================================
+            # PHASE 1 QUALITY PIPELINE
+            # Process response through quality improvements
+            # ========================================
+            try:
+                pipeline_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'query_type': request_analysis.get('type'),
+                    'shell_output_type': 'generic'
+                }
+
+                processed = await ResponsePipeline.process(
+                    final_response,
+                    request.question,
+                    pipeline_context,
+                    response_type="generic"
+                )
+
+                final_response = processed.final_response
+
+                # Log quality improvements
+                if processed.improvements_applied:
+                    logger.info(f"✨ Quality improvements: {', '.join(processed.improvements_applied)}")
+                    logger.info(f"📊 Quality score: {processed.quality_score:.2f}")
+
+            except Exception as e:
+                # If pipeline fails, log but continue with original response
+                logger.error(f"Quality pipeline failed: {e}, using original response")
+
+            # ========================================
+            # PHASE 2: CONFIDENCE CALIBRATION
+            # Assess confidence and add caveats if needed
+            # ========================================
+            try:
+                confidence_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'query_type': request_analysis.get('type')
+                }
+
+                final_response, confidence_assessment = assess_and_apply_caveat(
+                    final_response,
+                    request.question,
+                    confidence_context
+                )
+
+                logger.info(
+                    f"🎯 Confidence: {confidence_assessment.confidence_level} "
+                    f"({confidence_assessment.confidence_score:.2f})"
+                )
+
+                if confidence_assessment.should_add_caveat:
+                    logger.info(f"⚠️ Added caveat due to low confidence")
+
+            except Exception as e:
+                logger.error(f"Confidence calibration failed: {e}")
+
+            # Prepend thinking blocks if generated
+            if thinking_text:
+                final_response = thinking_text + "\n\n" + final_response
+
             expected_tools: Set[str] = set()
             if "finsight" in request_analysis.get("apis", []):
                 expected_tools.add("finsight_api")
@@ -4698,20 +4984,25 @@ JSON:"""
             
         except Exception as e:
             import traceback
-            details = str(e)
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug_mode:
                 print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()
-            message = (
-                "⚠️ Something went wrong while orchestrating your request, but no actions were performed. "
-                "Please retry, and if the issue persists share this detail with the team: {details}."
-            ).format(details=details)
+
+            # ========================================
+            # PHASE 1 GRACEFUL ERROR HANDLING
+            # Never expose technical details to users
+            # ========================================
+            user_friendly_message = GracefulErrorHandler.create_fallback_response(
+                request.question,
+                e
+            )
+
             return ChatResponse(
-                response=message,
+                response=user_friendly_message,
                 timestamp=datetime.now().isoformat(),
                 confidence_score=0.0,
-                error_message=details
+                error_message=str(e) if debug_mode else None  # Only include technical error in debug mode
             )
     
     async def process_request_streaming(self, request: ChatRequest):
@@ -4794,9 +5085,19 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
+
+            # Check if query is asking about specific functions/methods/classes OR file metadata
+            # If so, SKIP auto-preview and let shell planning handle it
+            query_lower = request.question.lower()
+            asking_about_code_element = any(pattern in query_lower for pattern in [
+                'method', 'function', 'class', 'def ', 'what does', 'how does',
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
+            ])
+
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
-            
+
             def _is_safe_path(path_str: str) -> bool:
                 try:
                     rp = Path(path_str).resolve()
@@ -4805,39 +5106,53 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-                    
-            for m in mentioned:
-                if not _is_safe_path(m):
-                    files_forbidden.append(m)
-                    continue
-                pr = await self._preview_file(m)
-                if pr:
-                    file_previews.append(pr)
-                    
+
+            # Only auto-preview if NOT asking about specific code elements or metadata
+            if not asking_about_code_element:
+                for m in mentioned:
+                    if not _is_safe_path(m):
+                        files_forbidden.append(m)
+                        continue
+                    pr = await self._preview_file(m)
+                    # Only add successful previews (not errors)
+                    if pr and pr.get("type") != "error":
+                        file_previews.append(pr)
+            else:
+                # Query is about specific code elements - let shell planning handle with grep/wc
+                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
+
             if file_previews:
                 api_results["files"] = file_previews
+                tools_used.append("read_file")  # Track that files were read
+                # Build grounded context from ALL text previews (for comparisons)
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    fp = text_previews[0]
-                    quoted = "\n".join(fp["preview"].splitlines()[:20])
-                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
+                    # Include all files, with more lines for comparisons
+                    file_contexts = []
+                    for fp in text_previews:
+                        quoted = "\n".join(fp["preview"].splitlines()[:100])  # Increased from 20 to 100
+                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
+                    files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
-            elif mentioned:
+            elif mentioned and not asking_about_code_element:
+                # Mentioned files but none found (only set if we actually tried to preview them)
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
 
             # Workspace listing
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Only show workspace listing if NOT looking for specific missing files
+            if not file_previews and not api_results.get("files_missing"):
                 file_browse_keywords = ("list files", "show files", "what files")
                 describe_files = ("file" in question_lower or "directory" in question_lower)
                 if any(keyword in question_lower for keyword in file_browse_keywords) or describe_files:
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
+            # Don't show workspace listing if there are missing files (prioritize error)
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
                 result = self._respond_with_workspace_listing(request, workspace_listing)
                 async def workspace_gen():
                     yield result.response
