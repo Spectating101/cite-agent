@@ -34,19 +34,19 @@ def assess_style_improvements():
             'name': 'Plain list → Elegant bullets',
             'input': 'Found files: main.py, utils.py, test.py',
             'query': 'Show me Python files',
-            'expected_improvements': ['•', 'Want me to'],
+            'expected_improvements': ['•'],  # No asking phrases in action-first mode
         },
         {
             'name': 'Cold thank you → Warm response',
             'input': 'You are welcome.',
             'query': 'Thanks!',
-            'expected_improvements': ['Happy to help', 'Let me know'],
+            'expected_improvements': ['Happy to help'],  # Warm but no asking in action-first
         },
         {
-            'name': 'Explanation without offer → Anticipatory',
+            'name': 'Explanation (action-first mode)',
             'input': 'This function processes data by validating input and saving to database.',
             'query': 'What does this code do?',
-            'expected_improvements': ['Want me to', 'walk through'],
+            'expected_improvements': [],  # Agent would show code automatically in action-first mode
         },
     ]
 
