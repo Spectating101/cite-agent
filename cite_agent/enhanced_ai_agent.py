@@ -4510,12 +4510,13 @@ JSON:"""
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
 
-            # Check if query is asking about specific functions/methods/classes
-            # If so, SKIP auto-preview and let shell planning use grep instead
+            # Check if query is asking about specific functions/methods/classes OR file metadata
+            # If so, SKIP auto-preview and let shell planning handle it
             query_lower = request.question.lower()
             asking_about_code_element = any(pattern in query_lower for pattern in [
                 'method', 'function', 'class', 'def ', 'what does', 'how does',
-                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of'
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
             ])
 
             base_dir = Path.cwd().resolve()
@@ -5081,9 +5082,19 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
+
+            # Check if query is asking about specific functions/methods/classes OR file metadata
+            # If so, SKIP auto-preview and let shell planning handle it
+            query_lower = request.question.lower()
+            asking_about_code_element = any(pattern in query_lower for pattern in [
+                'method', 'function', 'class', 'def ', 'what does', 'how does',
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
+            ])
+
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
-            
+
             def _is_safe_path(path_str: str) -> bool:
                 try:
                     rp = Path(path_str).resolve()
@@ -5092,14 +5103,19 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-                    
-            for m in mentioned:
-                if not _is_safe_path(m):
-                    files_forbidden.append(m)
-                    continue
-                pr = await self._preview_file(m)
-                if pr:
-                    file_previews.append(pr)
+
+            # Only auto-preview if NOT asking about specific code elements or metadata
+            if not asking_about_code_element:
+                for m in mentioned:
+                    if not _is_safe_path(m):
+                        files_forbidden.append(m)
+                        continue
+                    pr = await self._preview_file(m)
+                    if pr:
+                        file_previews.append(pr)
+            else:
+                # Query is about specific code elements - let shell planning handle with grep/wc
+                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
 
             if file_previews:
                 api_results["files"] = file_previews
