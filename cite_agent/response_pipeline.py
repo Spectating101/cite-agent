@@ -15,6 +15,7 @@ from .quality_gate import ResponseQualityGate, QualityAssessment
 from .response_enhancer import ResponseEnhancer
 from .response_style_enhancer import ResponseStyleEnhancer
 from .action_first_mode import ActionFirstMode
+from .auto_expander import AutoExpander
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,14 @@ class ResponsePipeline:
             notes.append("Removed asking phrases - agent shows results proactively")
             formatted_response = action_first_response
 
+        # Step 4.9: AUTO-EXPANSION CHECK - Detect if response needs more detail
+        # This is a quality check - if it detects expansion needed, it means
+        # the LLM didn't follow action-first guidelines properly
+        checked_response = AutoExpander.expand(formatted_response, query, context)
+        # (This currently just logs warnings if expansion is detected as needed)
+
         # Step 5: Final safety check
-        final_response = GracefulErrorHandler.wrap_response_with_error_handling(formatted_response)
+        final_response = GracefulErrorHandler.wrap_response_with_error_handling(checked_response)
 
         return ProcessedResponse(
             final_response=final_response,

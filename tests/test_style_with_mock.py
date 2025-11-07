@@ -32,21 +32,21 @@ async def test_style_on_various_responses():
             'mock_llm_response': 'I have analyzed the directory and located the following files: main.py, utils.py, test.py, config.py',
             'query': 'List Python files',
             'response_type': 'file_list',
-            'expected_style_markers': ['found', '•', 'want me to'],
+            'expected_style_markers': ['found', '•'],  # Natural language + formatting (NO asking phrases in action-first mode)
         },
         {
             'scenario': 'Code Explanation',
             'mock_llm_response': 'This code defines a function that processes user data by validating inputs and storing in the database.',
             'query': 'What does this function do?',
             'response_type': 'code',
-            'expected_style_markers': ['want me to', 'walk through'],
+            'expected_style_markers': [],  # Short explanation is fine in action-first mode (would show code automatically)
         },
         {
             'scenario': 'Thank You Response',
             'mock_llm_response': 'You are welcome.',
             'query': 'Thanks!',
             'response_type': 'acknowledgment',
-            'expected_style_markers': ['happy to help', 'let me know'],
+            'expected_style_markers': ['happy to help'],  # Warm response (no asking in action-first mode)
         },
         {
             'scenario': 'Data Query Response',
@@ -54,7 +54,6 @@ async def test_style_on_various_responses():
             'query': "What was Apple's revenue in 2022?",
             'response_type': 'generic',
             'expected_style_markers': ['found'],  # Natural language
-            'anticipatory_check': True,  # Should have ANY anticipatory phrase
         },
         {
             'scenario': 'Research Response',
@@ -62,7 +61,6 @@ async def test_style_on_various_responses():
             'query': 'Find papers on quantum computing',
             'response_type': 'generic',
             'expected_style_markers': ['found'],  # Natural language
-            'anticipatory_check': True,  # Should have ANY anticipatory phrase
         },
     ]
 
