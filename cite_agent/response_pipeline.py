@@ -13,6 +13,7 @@ from .error_handler import GracefulErrorHandler
 from .response_formatter import ResponseFormatter
 from .quality_gate import ResponseQualityGate, QualityAssessment
 from .response_enhancer import ResponseEnhancer
+from .response_style_enhancer import ResponseStyleEnhancer
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class ResponsePipeline:
                 notes.append(f"Improved quality: {new_assessment.overall_score:.2f}")
                 assessment = new_assessment
 
-        # Step 4.5: ENHANCE to push quality even higher (NEW)
+        # Step 4.5: ENHANCE to push quality even higher
         if assessment.overall_score < 0.80:
             enhanced_response = ResponseEnhancer.enhance(
                 formatted_response,
@@ -119,6 +120,19 @@ class ResponsePipeline:
                 final_assessment = ResponseQualityGate.assess(enhanced_response, query, context)
                 notes.append(f"Enhanced quality: {final_assessment.overall_score:.2f}")
                 assessment = final_assessment
+
+        # Step 4.7: STYLE ENHANCEMENT - Make responses pleasant and stylish (NEW!)
+        # This is what makes responses ACTUALLY GOOD, not just functional
+        styled_response = ResponseStyleEnhancer.enhance(
+            formatted_response,
+            query,
+            context
+        )
+
+        if styled_response != formatted_response:
+            improvements.append("Enhanced style to be pleasant and friendly")
+            notes.append("Applied style enhancements: warm, natural, anticipatory")
+            formatted_response = styled_response
 
         # Step 5: Final safety check
         final_response = GracefulErrorHandler.wrap_response_with_error_handling(formatted_response)

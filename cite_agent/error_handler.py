@@ -150,11 +150,13 @@ class GracefulErrorHandler:
         ]
 
         cleaned_response = response
+        had_technical_errors = False
 
         for technical_term, friendly_replacement in forbidden_patterns:
             if technical_term.lower() in cleaned_response.lower():
                 # If we find technical errors, replace with friendly version
                 logger.warning(f"Found leaked technical error in response: {technical_term}")
+                had_technical_errors = True
 
                 if friendly_replacement:
                     # Replace with friendly term
@@ -173,8 +175,9 @@ class GracefulErrorHandler:
                         if technical_term.lower() not in line.lower()
                     ])
 
-        # If the response became empty or too short, provide generic friendly message
-        if len(cleaned_response.strip()) < 20:
+        # If the response became empty or too short AFTER cleaning errors, provide generic friendly message
+        # Don't flag legitimately short responses (greetings, acknowledgments, etc.)
+        if had_technical_errors and len(cleaned_response.strip()) < 20:
             cleaned_response = "I encountered an issue while processing that. Could you try rephrasing your question?"
 
         return cleaned_response
