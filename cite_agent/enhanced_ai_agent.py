@@ -3679,6 +3679,9 @@ Examples:
 "where is authentication logic?" → {{"action": "execute", "command": "grep -rn 'def.*auth\\|class.*Auth' --include='*.py' . 2>/dev/null | head -30", "reason": "Find authentication functions/classes", "updates_context": false}}
 "how is configuration handled?" → {{"action": "execute", "command": "grep -rn 'config\\|settings\\|environment' --include='*.py' . 2>/dev/null | head -50", "reason": "Search for configuration code", "updates_context": false}}
 "where is database connection?" → {{"action": "execute", "command": "grep -rn 'database\\|connection\\|db\\.connect' --include='*.py' . 2>/dev/null | head -40", "reason": "Find database connection code", "updates_context": false}}
+"how many lines in enhanced_ai_agent.py?" → {{"action": "execute", "command": "wc -l cite_agent/enhanced_ai_agent.py", "reason": "Count lines in file", "updates_context": false}}
+"how many lines are in the main file?" → {{"action": "execute", "command": "wc -l cite_agent/enhanced_ai_agent.py 2>/dev/null || wc -l main.py 2>/dev/null", "reason": "Count lines in main file", "updates_context": false}}
+"count lines in all python files" → {{"action": "execute", "command": "wc -l **/*.py 2>/dev/null | tail -1", "reason": "Count total lines in all Python files", "updates_context": false}}
 "hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
 "test" → {{"action": "none", "reason": "Ambiguous query, needs clarification"}}
 "thanks" → {{"action": "none", "reason": "Conversational acknowledgment"}}
