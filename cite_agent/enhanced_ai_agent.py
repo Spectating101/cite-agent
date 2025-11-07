@@ -2920,10 +2920,14 @@ class EnhancedNocturnalAgent:
         
         # WRITE: Redirection operations (echo > file, cat > file)
         if '>' in cmd or '>>' in cmd:
-            # Allow redirection to regular files, block to devices
+            # Allow redirection to regular files and /dev/null, block to actual devices
             if '/dev/' not in cmd_lower:
                 return 'WRITE'
+            elif '/dev/null' in cmd_lower or '/dev/zero' in cmd_lower:
+                # /dev/null and /dev/zero are safe for redirection (stderr suppression, testing)
+                return 'SAFE'
             else:
+                # Actual device files (like /dev/sda) are blocked
                 return 'BLOCKED'
         
         # DANGEROUS: Deletion and permission changes
@@ -3586,6 +3590,7 @@ class EnhancedNocturnalAgent:
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
                 'git', 'grep', 'navigate', 'go to', 'change to',
                 'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain',
+                'compare', 'difference', 'diff', 'versus', 'vs',  # File comparison keywords
                 # Conceptual keywords for grep-based exploration
                 'authentication', 'auth', 'login', 'credential', 'password', 'session', 'token',
                 'config', 'configuration', 'settings', 'environment', 'setup',
@@ -4543,12 +4548,13 @@ JSON:"""
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
 
-            # Check if query is asking about specific functions/methods/classes
-            # If so, SKIP auto-preview and let shell planning use grep instead
+            # Check if query is asking about specific functions/methods/classes OR comparing files
+            # If so, SKIP auto-preview and let shell planning handle it
             query_lower = request.question.lower()
             asking_about_code_element = any(pattern in query_lower for pattern in [
                 'method', 'function', 'class', 'def ', 'what does', 'how does',
-                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of'
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'compare', 'difference between', 'diff between', 'what\'s different'
             ])
 
             base_dir = Path.cwd().resolve()
