@@ -33,6 +33,11 @@ from .response_formatter import ResponseFormatter
 from .quality_gate import ResponseQualityGate, assess_response_quality
 from .response_pipeline import ResponsePipeline
 
+# Intelligence improvements - Phase 2
+from .thinking_blocks import ThinkingBlockGenerator, generate_and_format_thinking
+from .tool_orchestrator import ToolOrchestrator
+from .confidence_calibration import ConfidenceCalibrator, assess_and_apply_caveat
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -4815,6 +4820,30 @@ JSON:"""
                         logger.warning("🚨 Hallucination prevented: LLM tried to make up results when shell output was empty")
 
             # ========================================
+            # PHASE 2: THINKING BLOCKS
+            # Show reasoning process for complex queries
+            # ========================================
+            thinking_text = ""
+            try:
+                thinking_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'conversation_history': self.conversation_history[-3:] if self.conversation_history else []
+                }
+
+                thinking_text = await generate_and_format_thinking(
+                    request.question,
+                    thinking_context,
+                    show_full=False  # Compact version
+                )
+
+                if thinking_text:
+                    logger.info(f"💭 Generated thinking process for query")
+
+            except Exception as e:
+                logger.error(f"Thinking generation failed: {e}")
+
+            # ========================================
             # PHASE 1 QUALITY PIPELINE
             # Process response through quality improvements
             # ========================================
@@ -4843,6 +4872,38 @@ JSON:"""
             except Exception as e:
                 # If pipeline fails, log but continue with original response
                 logger.error(f"Quality pipeline failed: {e}, using original response")
+
+            # ========================================
+            # PHASE 2: CONFIDENCE CALIBRATION
+            # Assess confidence and add caveats if needed
+            # ========================================
+            try:
+                confidence_context = {
+                    'tools_used': tools_used,
+                    'api_results': api_results,
+                    'query_type': request_analysis.get('type')
+                }
+
+                final_response, confidence_assessment = assess_and_apply_caveat(
+                    final_response,
+                    request.question,
+                    confidence_context
+                )
+
+                logger.info(
+                    f"🎯 Confidence: {confidence_assessment.confidence_level} "
+                    f"({confidence_assessment.confidence_score:.2f})"
+                )
+
+                if confidence_assessment.should_add_caveat:
+                    logger.info(f"⚠️ Added caveat due to low confidence")
+
+            except Exception as e:
+                logger.error(f"Confidence calibration failed: {e}")
+
+            # Prepend thinking blocks if generated
+            if thinking_text:
+                final_response = thinking_text + "\n\n" + final_response
 
             expected_tools: Set[str] = set()
             if "finsight" in request_analysis.get("apis", []):
