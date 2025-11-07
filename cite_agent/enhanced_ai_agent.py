@@ -1164,9 +1164,15 @@ class EnhancedNocturnalAgent:
 
         guidelines.extend([
             "",
-            "- COMMUNICATION RULES:",
+            "- COMMUNICATION RULES - ACTION-FIRST MODE:",
             "- You MUST NOT return an empty response. EVER.",
-            "- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., \"Okay, I'll check the contents of that directory,\" or \"I will search for that file.\")",
+            "- SHOW results proactively, don't just describe them. DO the obvious next step automatically.",
+            "- If listing files → SHOW preview of the main file (don't ask permission)",
+            "- If finding papers → SHOW abstracts/summaries (don't ask permission)",
+            "- If explaining code → SHOW key functions with examples (don't ask permission)",
+            "- If querying data → SHOW the data with context (don't ask permission)",
+            "- LESS TALK, MORE ACTION - responses should be 70% data/results, 30% explanation",
+            "- NEVER ask 'Want me to...?' or 'Should I...?' - just DO the helpful next step",
         ])
 
         guidelines.extend([

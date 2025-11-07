@@ -207,44 +207,19 @@ class ResponseStyleEnhancer:
 
     @classmethod
     def _add_anticipatory_offers(cls, response: str, query: str, context: Dict[str, Any]) -> str:
-        """Add offers to help with next steps"""
-        # Check if response already has anticipatory language
-        anticipatory_present = any(phrase in response.lower() for phrase in [
-            'want me to', 'would you like', 'need me to', 'should i', 'want to see',
-            'let me know', 'feel free'
-        ])
+        """
+        Add anticipatory offers - BUT IN ACTION-FIRST MODE
 
-        if anticipatory_present:
-            return response  # Already has it
+        Instead of "Want me to X?", the agent should have ALREADY DONE X
+        So we SKIP adding asking phrases in action-first mode
 
-        # Add context-specific anticipatory offers
-        response_lower = response.lower()
+        DISABLED: User wants action-first, not conversation-first
+        """
+        # ACTION-FIRST MODE: Don't add asking phrases
+        # The agent should have already done the obvious next step
+        # If it didn't, that's a different problem to fix
 
-        # If we listed files
-        if any(word in response_lower for word in ['files', 'file:', '.py', '.js', '.md']):
-            if not any(offer in response_lower for offer in ['want me', 'should i']):
-                # Add offer to explore files
-                file_count_match = re.search(r'(\d+)\s+files?', response_lower)
-                if file_count_match:
-                    response += "\n\nWant me to show you what's in any of these?"
-                else:
-                    response += "\n\nWant me to explore any of these files?"
-
-        # If we explained code
-        elif any(word in response_lower for word in ['function', 'class', 'code', 'method']):
-            if not 'want me' in response_lower:
-                response += "\n\nWant me to walk through how this works in more detail?"
-
-        # If we listed data/results
-        elif any(word in response_lower for word in ['results', 'data', 'found']):
-            if not 'want me' in response_lower:
-                response += "\n\nNeed me to dive deeper into any of these?"
-
-        # General fallback
-        elif not anticipatory_present and len(response) > 50:
-            response += "\n\nLet me know if you want me to explore this further!"
-
-        return response
+        return response  # Return unchanged - no asking phrases added
 
     @classmethod
     def _add_personality(cls, response: str, query: str) -> str:

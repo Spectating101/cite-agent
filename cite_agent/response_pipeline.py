@@ -14,6 +14,7 @@ from .response_formatter import ResponseFormatter
 from .quality_gate import ResponseQualityGate, QualityAssessment
 from .response_enhancer import ResponseEnhancer
 from .response_style_enhancer import ResponseStyleEnhancer
+from .action_first_mode import ActionFirstMode
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ class ResponsePipeline:
                 notes.append(f"Enhanced quality: {final_assessment.overall_score:.2f}")
                 assessment = final_assessment
 
-        # Step 4.7: STYLE ENHANCEMENT - Make responses pleasant and stylish (NEW!)
+        # Step 4.7: STYLE ENHANCEMENT - Make responses pleasant and stylish
         # This is what makes responses ACTUALLY GOOD, not just functional
         styled_response = ResponseStyleEnhancer.enhance(
             formatted_response,
@@ -131,8 +132,21 @@ class ResponsePipeline:
 
         if styled_response != formatted_response:
             improvements.append("Enhanced style to be pleasant and friendly")
-            notes.append("Applied style enhancements: warm, natural, anticipatory")
+            notes.append("Applied style enhancements: warm, natural")
             formatted_response = styled_response
+
+        # Step 4.8: ACTION-FIRST MODE - Remove asking phrases, prioritize action over talk
+        # User wants agent to DO things, not ask permission
+        action_first_response = ActionFirstMode.make_action_first(
+            formatted_response,
+            query,
+            context
+        )
+
+        if action_first_response != formatted_response:
+            improvements.append("Transformed to action-first mode")
+            notes.append("Removed asking phrases - agent shows results proactively")
+            formatted_response = action_first_response
 
         # Step 5: Final safety check
         final_response = GracefulErrorHandler.wrap_response_with_error_handling(formatted_response)
