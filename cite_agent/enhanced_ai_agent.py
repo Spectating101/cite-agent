@@ -1175,6 +1175,14 @@ class EnhancedNocturnalAgent:
             "- If querying data → SHOW the data with context (don't ask permission)",
             "- LESS TALK, MORE ACTION - responses should be 70% data/results, 30% explanation",
             "- NEVER ask 'Want me to...?' or 'Should I...?' - just DO the helpful next step",
+            "",
+            "🚨 CRITICAL: RESEARCH PAPERS - If you see 'Research API snapshot' below:",
+            "- The papers have ALREADY been found - DO NOT say 'we will search' or 'attempting search'",
+            "- The abstracts are PROVIDED - READ THEM and SUMMARIZE THE KEY FINDINGS",
+            "- You MUST write at least 500 words synthesizing the papers",
+            "- Include: paper titles, key methods, findings, and contributions from the abstracts",
+            "- Compare and contrast the approaches across papers",
+            "- DO NOT just list titles - EXPLAIN what each paper discovered",
         ])
 
         guidelines.extend([
@@ -4644,6 +4652,36 @@ JSON:"""
             messages = [
                 {"role": "system", "content": system_prompt}
             ]
+
+            # CRITICAL: Inject research papers IMMEDIATELY after system prompt (highest priority)
+            research_data = api_results.get("research")
+            if research_data and research_data.get("results"):
+                papers_text = "🚨 PAPERS ALREADY FOUND - SYNTHESIZE THESE NOW:\n\n"
+                papers_text += "DO NOT say 'we will search' - the search is COMPLETE.\n"
+                papers_text += "DO NOT say 'attempting' - papers are ALREADY HERE.\n"
+                papers_text += "YOUR JOB: Synthesize these papers into a comprehensive literature review (500+ words).\n\n"
+
+                for i, paper in enumerate(research_data["results"][:5], 1):
+                    papers_text += f"\n═══ PAPER {i} ═══\n"
+                    papers_text += f"Title: {paper.get('title', 'No title')}\n"
+                    papers_text += f"Authors: {', '.join(paper.get('authors', [])[:3])}\n"
+                    papers_text += f"Year: {paper.get('year', 'N/A')}\n"
+                    if paper.get('abstract'):
+                        papers_text += f"\nAbstract:\n{paper['abstract']}\n"
+                    if paper.get('tldr'):
+                        papers_text += f"\nTL;DR: {paper['tldr']}\n"
+                    papers_text += "\n"
+
+                papers_text += "\n🚨 SYNTHESIZE THESE PAPERS NOW - Include:\n"
+                papers_text += "- Overview of the research area\n"
+                papers_text += "- Key findings from each paper's abstract\n"
+                papers_text += "- Methods and approaches used\n"
+                papers_text += "- Comparison and contrast of different approaches\n"
+                papers_text += "- Implications and future directions\n"
+                papers_text += "\nMINIMUM 500 WORDS. Use the abstracts above."
+
+                messages.append({"role": "system", "content": papers_text})
+
             # If we have file context, inject it as an additional grounding message
             fc = api_results.get("files_context")
             if fc:
@@ -5191,7 +5229,36 @@ JSON:"""
             # Build messages
             system_prompt = self._build_system_prompt(request_analysis, memory_context, api_results)
             messages = [{"role": "system", "content": system_prompt}]
-            
+
+            # CRITICAL: Inject research papers IMMEDIATELY after system prompt (highest priority)
+            research_data = api_results.get("research")
+            if research_data and research_data.get("results"):
+                papers_text = "🚨 PAPERS ALREADY FOUND - SYNTHESIZE THESE NOW:\n\n"
+                papers_text += "DO NOT say 'we will search' - the search is COMPLETE.\n"
+                papers_text += "DO NOT say 'attempting' - papers are ALREADY HERE.\n"
+                papers_text += "YOUR JOB: Synthesize these papers into a comprehensive literature review (500+ words).\n\n"
+
+                for i, paper in enumerate(research_data["results"][:5], 1):
+                    papers_text += f"\n═══ PAPER {i} ═══\n"
+                    papers_text += f"Title: {paper.get('title', 'No title')}\n"
+                    papers_text += f"Authors: {', '.join(paper.get('authors', [])[:3])}\n"
+                    papers_text += f"Year: {paper.get('year', 'N/A')}\n"
+                    if paper.get('abstract'):
+                        papers_text += f"\nAbstract:\n{paper['abstract']}\n"
+                    if paper.get('tldr'):
+                        papers_text += f"\nTL;DR: {paper['tldr']}\n"
+                    papers_text += "\n"
+
+                papers_text += "\n🚨 SYNTHESIZE THESE PAPERS NOW - Include:\n"
+                papers_text += "- Overview of the research area\n"
+                papers_text += "- Key findings from each paper's abstract\n"
+                papers_text += "- Methods and approaches used\n"
+                papers_text += "- Comparison and contrast of different approaches\n"
+                papers_text += "- Implications and future directions\n"
+                papers_text += "\nMINIMUM 500 WORDS. Use the abstracts above."
+
+                messages.append({"role": "system", "content": papers_text})
+
             fc = api_results.get("files_context")
             if fc:
                 messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}"})
