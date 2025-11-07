@@ -3641,9 +3641,10 @@ IMPORTANT RULES:
     - "what does X method do in file.py?" → find . -name 'file.py' -exec grep -A 50 'def X' {{}} \\; 2>/dev/null
     - "explain process_request in agent.py" → find . -name '*agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null
     - If you know exact path, use grep directly: grep -A 50 'def X' path/to/file.py 2>/dev/null
-15. 🚨 FOR COMPARING FILES: Read BOTH files at once using compound command to show them side-by-side:
-    - Use: (echo "=== file1 ===" && head -100 file1 && echo -e "\\n=== file2 ===" && head -100 file2) 2>/dev/null
+15. 🚨 FOR COMPARING FILES: Read BOTH files at once using compound command with existence check:
+    - Use: (test -f file1 && test -f file2 && (echo "=== file1 ===" && head -100 file1 && echo -e "\\n=== file2 ===" && head -100 file2) || echo "ERROR: One or both files not found") 2>/dev/null
     - This provides all needed context for comparison in one step
+    - If files don't exist, the LLM will see the error message and can inform the user
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -3665,8 +3666,8 @@ Examples:
 "what does process_request method do in enhanced_ai_agent.py" → {{"action": "execute", "command": "find . -name '*enhanced_ai_agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null", "reason": "Find file and show method definition with context", "updates_context": false}}
 "explain the initialize method in agent.py" → {{"action": "execute", "command": "find . -name '*agent.py' -exec grep -A 50 'def initialize' {{}} \\; 2>/dev/null", "reason": "Find file and show method", "updates_context": false}}
 "find calculate function in utils.py" → {{"action": "execute", "command": "find . -name 'utils.py' -exec grep -A 30 'def calculate' {{}} \\; 2>/dev/null", "reason": "Find file and show function", "updates_context": false}}
-"compare file1.py and file2.py" → {{"action": "execute", "command": "(echo '=== file1.py ===' && head -100 file1.py && echo -e '\\\\n=== file2.py ===' && head -100 file2.py) 2>/dev/null", "reason": "Read both files for comparison", "updates_context": true}}
-"what's different between README.md and ARCHITECTURE.md" → {{"action": "execute", "command": "(echo '=== README.md ===' && head -100 README.md && echo -e '\\\\n=== ARCHITECTURE.md ===' && head -100 ARCHITECTURE.md) 2>/dev/null", "reason": "Read both files for comparison", "updates_context": true}}
+"compare file1.py and file2.py" → {{"action": "execute", "command": "(test -f file1.py && test -f file2.py && (echo '=== file1.py ===' && head -100 file1.py && echo -e '\\\\n=== file2.py ===' && head -100 file2.py) || echo 'ERROR: One or both files not found') 2>/dev/null", "reason": "Read both files for comparison with existence check", "updates_context": true}}
+"what's different between README.md and ARCHITECTURE.md" → {{"action": "execute", "command": "(test -f README.md && test -f ARCHITECTURE.md && (echo '=== README.md ===' && head -100 README.md && echo -e '\\\\n=== ARCHITECTURE.md ===' && head -100 ARCHITECTURE.md) || echo 'ERROR: One or both files not found') 2>/dev/null", "reason": "Read both files for comparison with existence check", "updates_context": true}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
 "how does authentication work?" → {{"action": "execute", "command": "grep -rn 'auth\\|login\\|credential' --include='*.py' . 2>/dev/null | head -50", "reason": "Search for authentication-related code", "updates_context": false}}
@@ -4513,10 +4514,12 @@ JSON:"""
                 return workflow_response
             
             # Call appropriate APIs based on request type
-            # Preserve shell execution data if already populated (from earlier in function)
-            if 'api_results' not in locals() or not api_results:
+            # Preserve shell execution data if already populated (from shell planner above)
+            # Note: api_results and tools_used are initialized at line 3522-3523
+            # If shell execution ran, they will have data; only reset if empty
+            if not api_results:
                 api_results = {}
-            if 'tools_used' not in locals() or not tools_used:
+            if not tools_used:
                 tools_used = []
 
             # Auto file-reading: detect filenames in the prompt and attach previews
