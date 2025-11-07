@@ -4537,7 +4537,8 @@ JSON:"""
                         files_forbidden.append(m)
                         continue
                     pr = await self._preview_file(m)
-                    if pr:
+                    # Only add successful previews (not errors)
+                    if pr and pr.get("type") != "error":
                         file_previews.append(pr)
             else:
                 # Query is about specific code elements - let shell planning handle with grep
@@ -4563,7 +4564,8 @@ JSON:"""
                 api_results["files_forbidden"] = files_forbidden
 
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Only show workspace listing if NOT looking for specific missing files
+            if not file_previews and not api_results.get("files_missing"):
                 file_browse_keywords = (
                     "list files",
                     "show files",
@@ -4583,7 +4585,8 @@ JSON:"""
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
+            # Don't show workspace listing if there are missing files (prioritize error)
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
                 return self._respond_with_workspace_listing(request, workspace_listing)
             
             if "finsight" in request_analysis["apis"]:
@@ -5111,7 +5114,8 @@ JSON:"""
                         files_forbidden.append(m)
                         continue
                     pr = await self._preview_file(m)
-                    if pr:
+                    # Only add successful previews (not errors)
+                    if pr and pr.get("type") != "error":
                         file_previews.append(pr)
             else:
                 # Query is about specific code elements - let shell planning handle with grep/wc
@@ -5139,14 +5143,16 @@ JSON:"""
 
             # Workspace listing
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Only show workspace listing if NOT looking for specific missing files
+            if not file_previews and not api_results.get("files_missing"):
                 file_browse_keywords = ("list files", "show files", "what files")
                 describe_files = ("file" in question_lower or "directory" in question_lower)
                 if any(keyword in question_lower for keyword in file_browse_keywords) or describe_files:
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
+            # Don't show workspace listing if there are missing files (prioritize error)
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
                 result = self._respond_with_workspace_listing(request, workspace_listing)
                 async def workspace_gen():
                     yield result.response
