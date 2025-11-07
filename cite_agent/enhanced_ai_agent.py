@@ -4598,7 +4598,9 @@ JSON:"""
                 api_results["files_forbidden"] = files_forbidden
 
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Don't fetch workspace listing if specific files were requested but missing
+            # (let the error message be the focus, not the workspace structure)
+            if not file_previews and not mentioned:
                 file_browse_keywords = (
                     "list files",
                     "show files",
@@ -5119,9 +5121,19 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
+
+            # Check if query is asking about specific functions/methods/classes OR comparing files
+            # If so, SKIP auto-preview and let shell planning handle it (matches PRODUCTION MODE logic)
+            query_lower = request.question.lower()
+            asking_about_code_element = any(pattern in query_lower for pattern in [
+                'method', 'function', 'class', 'def ', 'what does', 'how does',
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
+                'compare', 'difference between', 'diff between', 'what\'s different'
+            ])
+
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
-            
+
             def _is_safe_path(path_str: str) -> bool:
                 try:
                     rp = Path(path_str).resolve()
@@ -5130,14 +5142,19 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-                    
-            for m in mentioned:
-                if not _is_safe_path(m):
-                    files_forbidden.append(m)
-                    continue
-                pr = await self._preview_file(m)
-                if pr:
-                    file_previews.append(pr)
+
+            # Only auto-preview if NOT asking about specific code elements
+            if not asking_about_code_element:
+                for m in mentioned:
+                    if not _is_safe_path(m):
+                        files_forbidden.append(m)
+                        continue
+                    pr = await self._preview_file(m)
+                    if pr:
+                        file_previews.append(pr)
+            else:
+                # Query is about specific code elements - let shell planning handle with grep
+                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
 
             if file_previews:
                 api_results["files"] = file_previews
@@ -5155,8 +5172,10 @@ JSON:"""
                 api_results["files_forbidden"] = files_forbidden
 
             # Workspace listing
+            # Don't fetch workspace listing if specific files were requested but missing
+            # (let the error message be the focus, not the workspace structure)
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            if not file_previews and not mentioned:
                 file_browse_keywords = ("list files", "show files", "what files")
                 describe_files = ("file" in question_lower or "directory" in question_lower)
                 if any(keyword in question_lower for keyword in file_browse_keywords) or describe_files:
