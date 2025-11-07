@@ -3342,7 +3342,9 @@ class EnhancedNocturnalAgent:
             '.py', '.txt', '.js', '.java', '.cpp', '.c', '.h',
             'function', 'method', 'class', 'definition', 'route', 'endpoint',
             'codebase', 'project structure', 'source code', 'implementation',
-            'compare', 'analyze', 'explain', 'purpose', 'what does', 'how does'
+            'compare', 'analyze', 'explain', 'purpose', 'what does', 'how does',
+            'this codebase', 'this repo', 'this repository', 'this project',
+            'our codebase', 'our repo', 'local code', 'local files'
         ]
         
         question_lower = question.lower()
@@ -3412,12 +3414,17 @@ class EnhancedNocturnalAgent:
             matched_types.append("financial")
             apis_to_use.append("finsight")
 
-        if any(keyword in question_lower for keyword in research_keywords):
+        # Check for explicit local/codebase indicators FIRST (highest priority)
+        local_indicators = ['this codebase', 'this repo', 'this repository', 'this project',
+                          'our codebase', 'our repo', 'local code', 'local files']
+        is_local_query = any(indicator in question_lower for indicator in local_indicators)
+
+        if any(keyword in question_lower for keyword in research_keywords) and not is_local_query:
             matched_types.append("research")
             apis_to_use.append("archive")
-        
+
         # Qualitative queries often involve research
-        if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types:
+        if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types and not is_local_query:
             matched_types.append("research")
             if "archive" not in apis_to_use:
                 apis_to_use.append("archive")
