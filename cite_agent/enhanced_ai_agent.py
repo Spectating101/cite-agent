@@ -4556,8 +4556,8 @@ JSON:"""
                         file_contexts.append(f"File: {fp['path']}\n{quoted}")
                     files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
-            elif mentioned:
-                # Mentioned files but none found
+            elif mentioned and not asking_about_code_element:
+                # Mentioned files but none found (only set if we actually tried to preview them)
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
@@ -5131,7 +5131,8 @@ JSON:"""
                         file_contexts.append(f"File: {fp['path']}\n{quoted}")
                     files_context = "\n\n---\n\n".join(file_contexts)
                 api_results["files_context"] = files_context
-            elif mentioned:
+            elif mentioned and not asking_about_code_element:
+                # Mentioned files but none found (only set if we actually tried to preview them)
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
