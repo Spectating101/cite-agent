@@ -898,9 +898,11 @@ class EnhancedNocturnalAgent:
                 }
 
             content = p.read_text(errors="ignore")
-            truncated = len(content) > 65536
-            snippet = content[:65536]
-            preview = "\n".join(snippet.splitlines()[:60])
+            # Increase preview size for better code analysis
+            # Show first 300 lines OR 100KB (whichever is smaller)
+            truncated = len(content) > 102400  # 100KB
+            snippet = content[:102400]
+            preview = "\n".join(snippet.splitlines()[:300])  # Increased from 60 to 300 lines
             return {
                 "path": str(p),
                 "type": "text",
@@ -3338,8 +3340,9 @@ class EnhancedNocturnalAgent:
             'what files', 'which files', 'how many files',
             'grep', 'search', 'look for', 'count',
             '.py', '.txt', '.js', '.java', '.cpp', '.c', '.h',
-            'function', 'class', 'definition', 'route', 'endpoint',
-            'codebase', 'project structure', 'source code'
+            'function', 'method', 'class', 'definition', 'route', 'endpoint',
+            'codebase', 'project structure', 'source code', 'implementation',
+            'compare', 'analyze', 'explain', 'purpose', 'what does', 'how does'
         ]
         
         question_lower = question.lower()
@@ -3567,7 +3570,8 @@ class EnhancedNocturnalAgent:
                 'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
-                'git', 'grep', 'navigate', 'go to', 'change to'
+                'git', 'grep', 'navigate', 'go to', 'change to',
+                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain'
             ])
             
             if might_need_shell and self.shell_session:
@@ -3612,6 +3616,11 @@ IMPORTANT RULES:
 11. 🚨 MULTI-STEP QUERIES: For queries like "read X and do Y", ONLY generate the FIRST step (reading X). The LLM will handle subsequent steps after seeing the file contents.
 12. 🚨 NEVER use python -m py_compile or other code execution for finding bugs - just read the file with cat/head
 13. 🚨 FOR GREP: When searching in a DIRECTORY (not a specific file), ALWAYS use -r flag for recursive search: grep -rn 'pattern' /path/to/dir 2>/dev/null
+14. 🚨 FOR FINDING FUNCTIONS/METHODS when file path is UNKNOWN: Use find + grep together:
+    - "what does X method do in file.py?" → find . -name 'file.py' -exec grep -A 50 'def X' {{}} \\; 2>/dev/null
+    - "explain process_request in agent.py" → find . -name '*agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null
+    - If you know exact path, use grep directly: grep -A 50 'def X' path/to/file.py 2>/dev/null
+15. 🚨 FOR COMPARING FILES: Read FIRST file only. The LLM will request the second file after analyzing the first.
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -3630,6 +3639,10 @@ Examples:
 "find all bugs in code" → {{"action": "execute", "command": "grep -rn 'BUG:' . 2>/dev/null", "reason": "Search for bug markers in code", "updates_context": false}}
 "read analyze.py and find bugs" → {{"action": "execute", "command": "head -200 analyze.py", "reason": "Read file to analyze bugs", "updates_context": false}}
 "show me calc.py completely" → {{"action": "execute", "command": "cat calc.py", "reason": "Display entire file", "updates_context": false}}
+"what does process_request method do in enhanced_ai_agent.py" → {{"action": "execute", "command": "find . -name '*enhanced_ai_agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null", "reason": "Find file and show method definition with context", "updates_context": false}}
+"explain the initialize method in agent.py" → {{"action": "execute", "command": "find . -name '*agent.py' -exec grep -A 50 'def initialize' {{}} \\; 2>/dev/null", "reason": "Find file and show method", "updates_context": false}}
+"find calculate function in utils.py" → {{"action": "execute", "command": "find . -name 'utils.py' -exec grep -A 30 'def calculate' {{}} \\; 2>/dev/null", "reason": "Find file and show function", "updates_context": false}}
+"compare file1.py and file2.py" → {{"action": "execute", "command": "head -100 file1.py", "reason": "Read first file (will read second in next step)", "updates_context": true}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
 "hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
@@ -3767,7 +3780,8 @@ JSON:"""
                                     pass  # Fall back to shell execution
 
                             # Check for file search commands (find)
-                            if not intercepted and 'find' in command and '-name' in command:
+                            # BUT: Don't intercept find -exec commands (those need real shell execution)
+                            if not intercepted and 'find' in command and '-name' in command and '-exec' not in command:
                                 try:
                                     # import re removed - using module-level import
                                     # Extract pattern: find ... -name '*pattern*'
@@ -4494,6 +4508,15 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
+
+            # Check if query is asking about specific functions/methods/classes
+            # If so, SKIP auto-preview and let shell planning use grep instead
+            query_lower = request.question.lower()
+            asking_about_code_element = any(pattern in query_lower for pattern in [
+                'method', 'function', 'class', 'def ', 'what does', 'how does',
+                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of'
+            ])
+
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
             def _is_safe_path(path_str: str) -> bool:
@@ -4504,15 +4527,22 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-            for m in mentioned:
-                if not _is_safe_path(m):
-                    files_forbidden.append(m)
-                    continue
-                pr = await self._preview_file(m)
-                if pr:
-                    file_previews.append(pr)
+
+            # Only auto-preview if NOT asking about specific code elements
+            if not asking_about_code_element:
+                for m in mentioned:
+                    if not _is_safe_path(m):
+                        files_forbidden.append(m)
+                        continue
+                    pr = await self._preview_file(m)
+                    if pr:
+                        file_previews.append(pr)
+            else:
+                # Query is about specific code elements - let shell planning handle with grep
+                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
             if file_previews:
                 api_results["files"] = file_previews
+                tools_used.append("read_file")  # Track that files were read
                 # Build grounded context from first text preview
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
@@ -5066,9 +5096,10 @@ JSON:"""
                 pr = await self._preview_file(m)
                 if pr:
                     file_previews.append(pr)
-                    
+
             if file_previews:
                 api_results["files"] = file_previews
+                tools_used.append("read_file")  # Track that files were read
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
