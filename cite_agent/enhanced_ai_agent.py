@@ -2135,6 +2135,14 @@ class EnhancedNocturnalAgent:
     
     async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search academic papers using Archive API with resilient fallbacks."""
+        # Try cache first
+        from cite_agent.cache import get_cache
+        cache = get_cache()
+        cached_result = cache.get("academic_search", query=query, limit=limit)
+        if cached_result is not None:
+            logger.info(f"📦 Cache HIT for query: {query[:50]}...")
+            return cached_result
+
         source_sets: List[List[str]] = [
             ["semantic_scholar", "openalex"],
             ["semantic_scholar"],
@@ -2185,6 +2193,21 @@ class EnhancedNocturnalAgent:
             )
             aggregated_payload["EMPTY_RESULTS"] = True
             aggregated_payload["warning"] = "DO NOT GENERATE FAKE PAPERS - API returned zero results"
+        else:
+            # Deduplicate results
+            from cite_agent.deduplication import deduplicate_papers
+            original_count = len(aggregated_payload["results"])
+            aggregated_payload["results"] = deduplicate_papers(aggregated_payload["results"])
+            dedup_count = len(aggregated_payload["results"])
+            if original_count != dedup_count:
+                logger.info(f"🔍 Deduplicated: {original_count} → {dedup_count} papers ({original_count - dedup_count} removed)")
+                aggregated_payload["deduplicated"] = True
+                aggregated_payload["duplicates_removed"] = original_count - dedup_count
+
+        # Cache the result
+        if aggregated_payload["results"]:
+            cache.set("academic_search", aggregated_payload, ttl_hours=24, query=query, limit=limit)
+            logger.debug(f"💾 Cached results for: {query[:50]}...")
 
         return aggregated_payload
     
