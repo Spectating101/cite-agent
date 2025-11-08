@@ -2209,8 +2209,27 @@ class EnhancedNocturnalAgent:
             cache.set("academic_search", aggregated_payload, ttl_hours=24, query=query, limit=limit)
             logger.debug(f"💾 Cached results for: {query[:50]}...")
 
+            # Quietly read papers in background (no info dump)
+            try:
+                from cite_agent.paper_knowledge import quietly_read_papers, get_knowledge_base
+                kb = get_knowledge_base()
+
+                # Remember these papers for "first paper", "second paper" references
+                dois = [p.get('doi') for p in aggregated_payload["results"] if p.get('doi')]
+                kb.remember_search(dois)
+
+                # Read PDFs in background (if available)
+                # This runs quietly - no output unless user asks about papers
+                import asyncio
+                asyncio.create_task(quietly_read_papers(self, aggregated_payload["results"]))
+
+            except ImportError:
+                pass  # PDF reading not available
+            except Exception as e:
+                logger.debug(f"Background PDF reading failed: {e}")
+
         return aggregated_payload
-    
+
     async def synthesize_research(self, paper_ids: List[str], max_words: int = 500) -> Dict[str, Any]:
         """Synthesize research papers using Archive API"""
         data = {
