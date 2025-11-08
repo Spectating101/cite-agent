@@ -147,6 +147,11 @@ class PaperSummarizer:
             # Call LLM
             response = await self._call_llm(prompt)
 
+            # If LLM failed or unavailable, fall back to rule-based
+            if response is None:
+                logger.info("LLM not available, using rule-based extraction")
+                return self._summarize_rule_based(extracted, doi, authors, year)
+
             # Parse structured response
             summary = self._parse_llm_response(response)
 
@@ -260,22 +265,46 @@ Be concise. Extract ONLY what's explicitly stated, do not infer."""
         return prompt
 
     async def _call_llm(self, prompt: str) -> str:
-        """Call LLM client (Groq, OpenAI, etc.)"""
-        # This will be implemented based on which LLM client is available
-        # For now, placeholder
-        if hasattr(self.llm_client, 'chat'):
-            response = await self.llm_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": "You are a research assistant that summarizes academic papers. Be concise and accurate."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=1000
-            )
-            return response.choices[0].message.content
-        else:
-            raise NotImplementedError("LLM client not configured")
+        """Call LLM client (Groq, OpenAI, Anthropic, etc.)"""
+        if self.llm_client is None:
+            logger.warning("No LLM client available, will use rule-based extraction")
+            return None
+
+        try:
+            # Try Groq/OpenAI-compatible API
+            if hasattr(self.llm_client, 'chat'):
+                response = await self.llm_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "You are a research assistant that summarizes academic papers. Be concise and accurate."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2,
+                    max_tokens=1000
+                )
+                return response.choices[0].message.content
+
+            # Try Anthropic API
+            elif hasattr(self.llm_client, 'messages'):
+                response = await self.llm_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=1000,
+                    temperature=0.2,
+                    messages=[
+                        {"role": "user", "content": f"You are a research assistant that summarizes academic papers. Be concise and accurate.\n\n{prompt}"}
+                    ]
+                )
+                return response.content[0].text
+
+            else:
+                logger.warning(f"LLM client type not recognized: {type(self.llm_client).__name__}")
+                logger.info("Falling back to rule-based extraction")
+                return None
+
+        except Exception as e:
+            logger.warning(f"LLM call failed: {e}")
+            logger.info("Falling back to rule-based extraction")
+            return None
 
     def _parse_llm_response(self, response: str) -> PaperSummary:
         """Parse structured JSON from LLM"""
