@@ -14,7 +14,8 @@ def test_offline_credentials():
     """Test that offline credentials don't include api_key"""
     print("🧪 Testing offline credential generation...")
 
-    client = AccountClient()
+    # Force offline mode by passing base_url=None
+    client = AccountClient(base_url=None)
     email = "test@university.edu"
     password = "testpassword123"
 

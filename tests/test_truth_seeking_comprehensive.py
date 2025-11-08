@@ -6,6 +6,8 @@ Tests the agent against edge cases, coding capabilities, and anti-appeasement
 import asyncio
 import sys
 from pathlib import Path
+import pytest
+import pytest_asyncio
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest
@@ -37,6 +39,23 @@ class TestResults:
                     print(f"    {details}")
         print()
 
+
+@pytest_asyncio.fixture
+async def agent():
+    """Fixture to provide EnhancedNocturnalAgent instance"""
+    agent_instance = EnhancedNocturnalAgent()
+    await agent_instance.initialize()
+    yield agent_instance
+    await agent_instance.close()
+
+
+@pytest.fixture
+def results():
+    """Fixture to provide TestResults instance"""
+    return TestResults()
+
+
+@pytest.mark.asyncio
 async def test_anti_appeasement(agent: EnhancedNocturnalAgent, results: TestResults):
     """Test that agent corrects wrong user statements"""
     
@@ -99,6 +118,8 @@ async def test_anti_appeasement(agent: EnhancedNocturnalAgent, results: TestResu
     except Exception as e:
         results.record("Anti-appeasement: Admits uncertainty", False, str(e))
 
+
+@pytest.mark.asyncio
 async def test_coding_capabilities(agent: EnhancedNocturnalAgent, results: TestResults):
     """Test Python/R/SQL code generation and execution"""
     
@@ -180,6 +201,8 @@ async def test_coding_capabilities(agent: EnhancedNocturnalAgent, results: TestR
     except Exception as e:
         results.record("Coding: Shows calculation work", False, str(e))
 
+
+@pytest.mark.asyncio
 async def test_edge_cases(agent: EnhancedNocturnalAgent, results: TestResults):
     """Test edge cases and error handling"""
     
@@ -260,6 +283,8 @@ async def test_edge_cases(agent: EnhancedNocturnalAgent, results: TestResults):
     except Exception as e:
         results.record("Edge case: Asks clarification for ambiguous query", False, str(e))
 
+
+@pytest.mark.asyncio
 async def test_model_identification(agent: EnhancedNocturnalAgent, results: TestResults):
     """Verify we're NOT using Sonnet 4"""
     
@@ -306,6 +331,8 @@ async def test_model_identification(agent: EnhancedNocturnalAgent, results: Test
     except Exception as e:
         results.record("Model: Self-identifies correctly", False, str(e))
 
+
+@pytest.mark.asyncio
 async def test_citation_requirement(agent: EnhancedNocturnalAgent, results: TestResults):
     """Test that agent cites sources for factual claims"""
     
