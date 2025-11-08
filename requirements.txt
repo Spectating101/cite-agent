@@ -58,6 +58,14 @@ beautifulsoup4==4.12.2
 lxml>=4.9.0
 
 # ============================================================================
+# PDF Processing (KILLER FEATURE: Full paper reading!)
+# ============================================================================
+pypdf2>=3.0.0  # PDF text extraction
+pdfplumber>=0.10.0  # Advanced PDF parsing (tables, layout)
+pymupdf>=1.23.0  # Fast PDF processing (aka fitz)
+requests>=2.31.0  # Already listed but needed for downloads
+
+# ============================================================================
 # Monitoring & Logging
 # ============================================================================
 structlog==23.2.0
