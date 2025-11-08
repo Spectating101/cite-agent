@@ -1397,19 +1397,39 @@ class EnhancedNocturnalAgent:
 
             research = api_results.get("research")
             if research:
-                payload_full = json.dumps(research, indent=2)
-                payload = payload_full[:1500]
-                if len(payload_full) > 1500:
-                    payload += "\n…"
-                
-                # Check if results are empty and add explicit warning
-                if research.get("results") == [] or not research.get("results"):
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
-                    details.append("🚨 **CRITICAL: API RETURNED EMPTY RESULTS - DO NOT GENERATE ANY PAPER DETAILS**")
-                    details.append("🚨 **DO NOT PROVIDE AUTHORS, TITLES, DOIs, OR ANY PAPER INFORMATION**")
-                    details.append("🚨 **SAY 'NO PAPERS FOUND' AND STOP - DO NOT HALLUCINATE**")
+                # Format research results conversationally (no JSON dump)
+                results = research.get("results", [])
+
+                if not results:
+                    details.append("📚 No papers found for your query. Try different search terms or broader keywords.")
                 else:
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
+                    # Create conversational paper list
+                    paper_list = []
+                    for i, paper in enumerate(results[:10], 1):
+                        title = paper.get("title", "Untitled")
+                        authors = paper.get("authors", [])
+                        author_str = ", ".join([a.get("name", "") for a in authors[:2]])
+                        if len(authors) > 2:
+                            author_str += f" et al."
+                        year = paper.get("year", "n.d.")
+                        citations = paper.get("citationCount", 0)
+
+                        paper_entry = f"{i}. **{title}**"
+                        if author_str:
+                            paper_entry += f"\n   Authors: {author_str}"
+                        paper_entry += f"\n   Year: {year} | Citations: {citations:,}"
+
+                        # Add abstract preview if available
+                        abstract = paper.get("abstract", "")
+                        if abstract:
+                            preview = abstract[:150].strip()
+                            if len(abstract) > 150:
+                                preview += "..."
+                            paper_entry += f"\n   {preview}"
+
+                        paper_list.append(paper_entry)
+
+                    details.append(f"📚 **Found {len(results)} papers:**\n\n" + "\n\n".join(paper_list))
 
             files_context = api_results.get("files_context")
             if files_context:
@@ -1420,8 +1440,8 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I pulled the structured data you asked for, but I'm temporarily out of Groq quota to synthesize a full answer. "
-                    "Here are the raw results so you can keep moving:"
+                    "I've gathered the information you requested. While I'm temporarily at Groq capacity for detailed analysis, "
+                    "here's what I found:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
