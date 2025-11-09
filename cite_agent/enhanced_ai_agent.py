@@ -3822,91 +3822,13 @@ class EnhancedNocturnalAgent:
         """
         Process request with full AI capabilities and API integration
 
-        This is the public interface - wraps the internal processor with:
-        - Request queue (intelligent load management)
-        - Circuit breaker (fail-fast on backend issues)
-        - Observability (metrics and logging)
-        - Self-healing (automatic error recovery)
+        NOTE: Infrastructure integration (request queue, circuit breaker, etc.)
+        is initialized but not yet fully wired due to interface complexity.
+        Using core processor directly for now.
         """
-        request_id = hashlib.md5(f"{request.user_id}:{request.question}:{time.time()}".encode()).hexdigest()[:12]
-
-        # Log request
-        self._log_event(
-            "request_received",
-            user_id=request.user_id,
-            request_id=request_id,
-            question_length=len(request.question)
-        )
-
-        start_time = time.time()
-
-        try:
-            # Check circuit breaker first - fail fast if backend is down
-            if not self._circuit_breaker_can_execute():
-                self._log_event(
-                    "request_rejected_circuit_open",
-                    user_id=request.user_id,
-                    request_id=request_id
-                )
-                return ChatResponse(
-                    response="⚠️ Service temporarily unavailable. We're experiencing high load. Please try again in a moment.",
-                    error_message="Circuit breaker open",
-                    tools_used=["circuit_breaker"]
-                )
-
-            # Queue the request for intelligent load management
-            response = await self.request_queue.enqueue_request(
-                request_id=request_id,
-                user_id=request.user_id,
-                priority=RequestPriority.NORMAL,
-                callback=self._process_request_internal,
-                args=(request,)
-            )
-
-            # Log success
-            latency = time.time() - start_time
-            self._log_event(
-                "request_completed",
-                user_id=request.user_id,
-                request_id=request_id,
-                latency=latency,
-                success=True
-            )
-            self._circuit_breaker_record_success()
-
-            return response
-
-        except Exception as e:
-            # Log failure
-            latency = time.time() - start_time
-            self._log_event(
-                "request_failed",
-                user_id=request.user_id,
-                request_id=request_id,
-                latency=latency,
-                error=str(e)
-            )
-            self._circuit_breaker_record_failure()
-
-            # Try self-healing
-            healing_response = await self.self_healing.handle_error(
-                error=e,
-                context={
-                    "request_id": request_id,
-                    "user_id": request.user_id,
-                    "question": request.question
-                }
-            )
-
-            if healing_response:
-                return healing_response
-
-            # Fallback response
-            return ChatResponse(
-                response=f"❌ Error processing request: {str(e)}",
-                error_message=str(e),
-                tools_used=["error_handler"]
-            )
+        # For now, call internal processor directly
+        # TODO: Wire infrastructure wrapper once interfaces are fully aligned
+        return await self._process_request_internal(request)
 
     async def _process_request_internal(self, request: ChatRequest) -> ChatResponse:
         """Internal request processor - called by request queue"""
