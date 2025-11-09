@@ -27,6 +27,14 @@ from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 
+# Phase 1 & 2 Infrastructure (Production-Grade)
+from .request_queue import IntelligentRequestQueue, RequestPriority, QueuedRequest
+from .circuit_breaker import CircuitBreaker
+from .observability import ObservabilityLayer
+from .adaptive_providers import AdaptiveProviderSelector
+from .execution_safety import ExecutionSafetyLayer
+from .self_healing import SelfHealingAgent
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
