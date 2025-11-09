@@ -325,9 +325,11 @@ class EnhancedNocturnalAgent:
         execution = CommandExecution(
             command=command,
             planned_hash=plan.get_hash(),
-            actual_hash=plan.get_hash(),
-            output=output[:500] if output else "",  # Truncate long outputs
-            success=success,
+            executed_hash=plan.get_hash(),
+            classification=plan.classification,
+            status="success" if success else "failure",
+            exit_code=0 if success else 1,
+            output=output[:500] if output else "",
             timestamp=datetime.now()
         )
 
