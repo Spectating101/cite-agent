@@ -213,7 +213,7 @@ Agent: [Full context] "Tesla +18.8% YoY vs MSFT +11.2%"
 | **BibTeX Export** | ✅ Yes | ❌ No |
 | **Library Management** | ✅ Local database | ❌ No |
 | **Project Detection** | ✅ R/Python/Jupyter | ❌ No |
-| **LLM Quality** | ⚠️ Cerebras 70B | ✅ GPT-4 |
+| **LLM Quality** | ✅ Cerebras GPT-OSS 120B | ✅ GPT-4 |
 | **Price** | 300 NTD | 600 NTD |
 
 **For Research Workflows: Cite-Agent Wins**

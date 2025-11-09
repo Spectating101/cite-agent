@@ -118,7 +118,7 @@ cite-agent "Summarize the Attention Is All You Need paper"
 
 3. **Provider Selection**
    - Bypassed AdaptiveProviderSelector (interface mismatch)
-   - Using default cerebras/llama-3.3-70b
+   - Using default cerebras/gpt-oss-120b
    - Can be wired up later without breaking functionality
 
 ---

@@ -31,7 +31,7 @@
 
 ### 2. Provider Selection (BYPASSED)
 **Problem:** `_classify_query_type()` returns string, but `select_provider()` expects QueryType enum  
-**Solution:** Bypassed AdaptiveProviderSelector, using default cerebras/llama-3.3-70b  
+**Solution:** Bypassed AdaptiveProviderSelector, using default cerebras/gpt-oss-120b  
 **Result:** ✅ LLM queries working  
 **Note:** Infrastructure present but interfaces need alignment
 
@@ -255,7 +255,7 @@ provider_recommendation = self.provider_selector.select_provider(
 # NEW (working)
 # Infrastructure loaded but bypassed - interfaces need alignment
 selected_provider = "cerebras"
-selected_model = "llama-3.3-70b"
+selected_model = "gpt-oss-120b"
 ```
 
 **Change 2: Performance Tracking (Bypassed)**
