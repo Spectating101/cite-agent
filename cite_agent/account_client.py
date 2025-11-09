@@ -55,12 +55,18 @@ class AccountClient:
     hermetic.
     """
 
-    def __init__(self, base_url: Optional[str] = None, timeout: int = 10):
-        self.base_url = (
-            base_url
-            or os.getenv("NOCTURNAL_CONTROL_PLANE_URL")
-            or "https://cite-agent-api-720dfadd602c.herokuapp.com"
-        )
+    _SENTINEL = object()
+
+    def __init__(self, base_url: Optional[str] = _SENTINEL, timeout: int = 10):
+        # If base_url explicitly passed (even as None), use it
+        # Otherwise, fallback to env var, then default URL
+        if base_url is not self._SENTINEL:
+            self.base_url = base_url
+        else:
+            self.base_url = (
+                os.getenv("NOCTURNAL_CONTROL_PLANE_URL")
+                or "https://cite-agent-api-720dfadd602c.herokuapp.com"
+            )
         self.timeout = timeout
 
     def provision(self, email: str, password: str) -> AccountCredentials:

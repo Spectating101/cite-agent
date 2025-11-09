@@ -1405,19 +1405,39 @@ class EnhancedNocturnalAgent:
 
             research = api_results.get("research")
             if research:
-                payload_full = json.dumps(research, indent=2)
-                payload = payload_full[:1500]
-                if len(payload_full) > 1500:
-                    payload += "\n…"
-                
-                # Check if results are empty and add explicit warning
-                if research.get("results") == [] or not research.get("results"):
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
-                    details.append("🚨 **CRITICAL: API RETURNED EMPTY RESULTS - DO NOT GENERATE ANY PAPER DETAILS**")
-                    details.append("🚨 **DO NOT PROVIDE AUTHORS, TITLES, DOIs, OR ANY PAPER INFORMATION**")
-                    details.append("🚨 **SAY 'NO PAPERS FOUND' AND STOP - DO NOT HALLUCINATE**")
+                # Format research results conversationally (no JSON dump)
+                results = research.get("results", [])
+
+                if not results:
+                    details.append("📚 No papers found for your query. Try different search terms or broader keywords.")
                 else:
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
+                    # Create conversational paper list
+                    paper_list = []
+                    for i, paper in enumerate(results[:10], 1):
+                        title = paper.get("title", "Untitled")
+                        authors = paper.get("authors", [])
+                        author_str = ", ".join([a.get("name", "") for a in authors[:2]])
+                        if len(authors) > 2:
+                            author_str += f" et al."
+                        year = paper.get("year", "n.d.")
+                        citations = paper.get("citationCount", 0)
+
+                        paper_entry = f"{i}. **{title}**"
+                        if author_str:
+                            paper_entry += f"\n   Authors: {author_str}"
+                        paper_entry += f"\n   Year: {year} | Citations: {citations:,}"
+
+                        # Add abstract preview if available
+                        abstract = paper.get("abstract", "")
+                        if abstract:
+                            preview = abstract[:150].strip()
+                            if len(abstract) > 150:
+                                preview += "..."
+                            paper_entry += f"\n   {preview}"
+
+                        paper_list.append(paper_entry)
+
+                    details.append(f"📚 **Found {len(results)} papers:**\n\n" + "\n\n".join(paper_list))
 
             files_context = api_results.get("files_context")
             if files_context:
@@ -1428,8 +1448,8 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I pulled the structured data you asked for, but I'm temporarily out of Groq quota to synthesize a full answer. "
-                    "Here are the raw results so you can keep moving:"
+                    "I've gathered the information you requested. While I'm temporarily at Groq capacity for detailed analysis, "
+                    "here's what I found:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
@@ -2143,6 +2163,14 @@ class EnhancedNocturnalAgent:
     
     async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search academic papers using Archive API with resilient fallbacks."""
+        # Try cache first
+        from cite_agent.cache import get_cache
+        cache = get_cache()
+        cached_result = cache.get("academic_search", query=query, limit=limit)
+        if cached_result is not None:
+            logger.info(f"📦 Cache HIT for query: {query[:50]}...")
+            return cached_result
+
         source_sets: List[List[str]] = [
             ["semantic_scholar", "openalex"],
             ["semantic_scholar"],
@@ -2193,9 +2221,43 @@ class EnhancedNocturnalAgent:
             )
             aggregated_payload["EMPTY_RESULTS"] = True
             aggregated_payload["warning"] = "DO NOT GENERATE FAKE PAPERS - API returned zero results"
+        else:
+            # Deduplicate results
+            from cite_agent.deduplication import deduplicate_papers
+            original_count = len(aggregated_payload["results"])
+            aggregated_payload["results"] = deduplicate_papers(aggregated_payload["results"])
+            dedup_count = len(aggregated_payload["results"])
+            if original_count != dedup_count:
+                logger.info(f"🔍 Deduplicated: {original_count} → {dedup_count} papers ({original_count - dedup_count} removed)")
+                aggregated_payload["deduplicated"] = True
+                aggregated_payload["duplicates_removed"] = original_count - dedup_count
+
+        # Cache the result
+        if aggregated_payload["results"]:
+            cache.set("academic_search", aggregated_payload, ttl_hours=24, query=query, limit=limit)
+            logger.debug(f"💾 Cached results for: {query[:50]}...")
+
+            # Quietly read papers in background (no info dump)
+            try:
+                from cite_agent.paper_knowledge import quietly_read_papers, get_knowledge_base
+                kb = get_knowledge_base()
+
+                # Remember these papers for "first paper", "second paper" references
+                dois = [p.get('doi') for p in aggregated_payload["results"] if p.get('doi')]
+                kb.remember_search(dois)
+
+                # Read PDFs in background (if available)
+                # This runs quietly - no output unless user asks about papers
+                import asyncio
+                asyncio.create_task(quietly_read_papers(self, aggregated_payload["results"]))
+
+            except ImportError:
+                pass  # PDF reading not available
+            except Exception as e:
+                logger.debug(f"Background PDF reading failed: {e}")
 
         return aggregated_payload
-    
+
     async def synthesize_research(self, paper_ids: List[str], max_words: int = 500) -> Dict[str, Any]:
         """Synthesize research papers using Archive API"""
         data = {

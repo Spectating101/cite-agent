@@ -1,6 +1,6 @@
 # Cite-Agent: AI Research Assistant
 
-[![Version](https://img.shields.io/badge/version-1.2.6-blue.svg)](https://pypi.org/project/cite-agent/)
+[![Version](https://img.shields.io/badge/version-1.4.1-blue.svg)](https://pypi.org/project/cite-agent/)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
@@ -10,9 +10,11 @@
 
 ### 🔬 **Academic Research**
 - Search academic papers across multiple databases
+- **Full PDF reading and summarization** (NEW!)
 - Citation verification and quality scoring
 - DOI resolution and metadata extraction
 - Multi-source verification (Semantic Scholar, OpenAlex, PubMed)
+- Automatic access to paywalled papers via Unpaywall
 
 ### 💰 **Financial Data**
 - Real-time stock market data via FinSight API

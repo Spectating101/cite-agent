@@ -912,7 +912,13 @@ Examples:
         metavar='TAG',
         help='Filter library by tag'
     )
-    
+
+    parser.add_argument(
+        '--doctor',
+        action='store_true',
+        help='Run health check diagnostics'
+    )
+
     args = parser.parse_args()
     
     # Handle version
@@ -926,6 +932,13 @@ Examples:
         cli = NocturnalCLI()
         cli.show_presets()
         return
+
+    # Handle doctor
+    if args.doctor:
+        import asyncio
+        from cite_agent.doctor import run_doctor
+        exit_code = asyncio.run(run_doctor())
+        sys.exit(exit_code)
 
     if args.metrics:
         cli = NocturnalCLI()

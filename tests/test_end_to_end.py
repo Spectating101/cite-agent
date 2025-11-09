@@ -10,11 +10,51 @@ import json
 import requests
 import time
 from pathlib import Path
+import pytest
 
 # Test configuration
 BACKEND_URL = "https://cite-agent-api-720dfadd602c.herokuapp.com"
 TEST_EMAIL = f"test_user_{int(time.time())}@example.com"
 TEST_PASSWORD = "TestPassword123!"
+
+
+@pytest.fixture
+def email():
+    """Provide test email"""
+    return TEST_EMAIL
+
+
+@pytest.fixture
+def password():
+    """Provide test password"""
+    return TEST_PASSWORD
+
+
+@pytest.fixture
+def token(email, password):
+    """Provide authentication token by registering/logging in"""
+    # Try registration first
+    response = requests.post(
+        f"{BACKEND_URL}/api/auth/register",
+        json={"email": email, "password": password},
+        timeout=30
+    )
+
+    if response.status_code == 201:
+        return response.json().get('access_token')
+
+    # If already registered, try login
+    response = requests.post(
+        f"{BACKEND_URL}/api/auth/login",
+        json={"email": email, "password": password},
+        timeout=30
+    )
+
+    if response.status_code == 200:
+        return response.json().get('access_token')
+
+    pytest.skip(f"Could not authenticate: {response.status_code}")
+
 
 def test_registration():
     """Test user registration"""
