@@ -30,9 +30,9 @@ from .conversation_archive import ConversationArchive
 # Phase 1 & 2 Infrastructure (Production-Grade)
 from .request_queue import IntelligentRequestQueue, RequestPriority, QueuedRequest
 from .circuit_breaker import CircuitBreaker
-from .observability import ObservabilityLayer
+from .observability import ObservabilitySystem
 from .adaptive_providers import AdaptiveProviderSelector
-from .execution_safety import ExecutionSafetyLayer
+from .execution_safety import CommandExecutionValidator
 from .self_healing import SelfHealingAgent
 
 # Suppress noise
@@ -173,15 +173,13 @@ class EnhancedNocturnalAgent:
         )
 
         # Observability - Comprehensive metrics and logging
-        self.observability = ObservabilityLayer()
+        self.observability = ObservabilitySystem()
 
         # Adaptive Provider Selection - Learn best provider per task
         self.provider_selector = AdaptiveProviderSelector()
 
         # Execution Safety - Command validation and audit
-        self.execution_safety = ExecutionSafetyLayer(
-            audit_level="enforced"  # strict, permissive, or enforced
-        )
+        self.execution_safety = CommandExecutionValidator()
 
         # Self-Healing - Automatic error recovery
         self.self_healing = SelfHealingAgent(
