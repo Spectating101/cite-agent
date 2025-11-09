@@ -159,17 +159,21 @@ class EnhancedNocturnalAgent:
 
         # Request Queue - Intelligent load management
         self.request_queue = IntelligentRequestQueue(
-            max_concurrent=10,  # Max concurrent requests globally
-            max_per_user=3,     # Max concurrent per user
-            max_queue_depth=50  # Queue size limit
+            max_concurrent_global=10,      # Max concurrent requests globally
+            max_concurrent_per_user=3,     # Max concurrent per user
+            queue_size_limit=50            # Queue size limit
         )
 
         # Circuit Breaker - Fail-fast for each backend service
+        from .circuit_breaker import CircuitBreakerConfig
         self.backend_breaker = CircuitBreaker(
             name="backend_api",
-            failure_threshold=5,    # Open after 5 failures
-            recovery_timeout=30.0,  # Try recovery after 30s
-            half_open_attempts=3    # Test 3 requests during recovery
+            config=CircuitBreakerConfig(
+                failure_threshold=0.5,          # Open when 50% fail
+                min_requests_for_decision=5,    # Need 5 requests before deciding
+                open_timeout=30.0,              # Try recovery after 30s
+                half_open_max_calls=3           # Test 3 requests during recovery
+            )
         )
 
         # Observability - Comprehensive metrics and logging
@@ -182,10 +186,7 @@ class EnhancedNocturnalAgent:
         self.execution_safety = CommandExecutionValidator()
 
         # Self-Healing - Automatic error recovery
-        self.self_healing = SelfHealingAgent(
-            observability=self.observability,
-            provider_selector=self.provider_selector
-        )
+        self.self_healing = SelfHealingAgent()
 
     def _classify_query_type(self, query: str) -> str:
         """
@@ -216,6 +217,110 @@ class EnhancedNocturnalAgent:
             return "code"
 
         return "general"
+
+    # ========================================================================
+    # INFRASTRUCTURE ADAPTER METHODS
+    # These wrap the complex infrastructure interfaces with simple methods
+    # ========================================================================
+
+    def _log_event(self, event_name: str, **kwargs):
+        """
+        Adapter: Log an event to the observability system
+
+        Wraps ObservabilitySystem.record_event() with a simpler interface
+        """
+        from .observability import ObservableEvent, EventType
+
+        # Map simple event names to EventType enum
+        event_type_map = {
+            "request_received": EventType.REQUEST_QUEUED,
+            "request_completed": EventType.REQUEST_COMPLETED,
+            "request_failed": EventType.REQUEST_FAILED,
+            "request_rejected_circuit_open": EventType.CIRCUIT_BREAKER_STATE_CHANGE,
+            "command_executing": EventType.REQUEST_STARTED,
+            "command_completed": EventType.REQUEST_COMPLETED,
+            "command_failed": EventType.REQUEST_FAILED,
+            "command_blocked": EventType.REQUEST_FAILED,
+            "provider_selected": EventType.PROVIDER_SWITCH,
+        }
+
+        event_type = event_type_map.get(event_name, EventType.REQUEST_STARTED)
+
+        event = ObservableEvent(
+            event_type=event_type,
+            user_id=kwargs.get("user_id"),
+            request_id=kwargs.get("request_id"),
+            duration_ms=kwargs.get("latency", 0) * 1000 if kwargs.get("latency") else None,
+            status="success" if kwargs.get("success") else "failure" if "error" in kwargs else None,
+            provider=kwargs.get("provider"),
+            error_message=kwargs.get("error"),
+            metadata=kwargs
+        )
+
+        self.observability.record_event(event)
+
+    def _validate_command_safety(self, command: str) -> dict:
+        """
+        Adapter: Validate command safety
+
+        Wraps CommandExecutionValidator.validate_plan() with simpler interface
+        Returns: {"safe": bool, "reason": str, "classification": str}
+        """
+        from .execution_safety import CommandPlan, CommandClassification
+
+        # Classify command
+        if any(dangerous in command.lower() for dangerous in ['rm -rf', 'format', 'dd if=', '> /dev/']):
+            classification = CommandClassification.BLOCKED
+        elif any(write in command.lower() for write in ['>', '>>', 'write', 'mv', 'cp', 'touch', 'mkdir']):
+            classification = CommandClassification.WRITE
+        else:
+            classification = CommandClassification.SAFE
+
+        plan = CommandPlan(
+            command=command,
+            classification=classification,
+            reason=f"Command classified as {classification.value}"
+        )
+
+        is_valid, error_msg = self.execution_safety.validate_plan(plan)
+
+        return {
+            "safe": is_valid,
+            "reason": error_msg if error_msg else "Command approved",
+            "classification": classification.value
+        }
+
+    def _audit_command_execution(self, command: str, output: str, success: bool):
+        """
+        Adapter: Audit command execution
+
+        Wraps CommandExecutionValidator audit logging
+        """
+        from .execution_safety import CommandExecution, CommandPlan, CommandClassification
+
+        # Create minimal plan for audit
+        plan = CommandPlan(
+            command=command,
+            classification=CommandClassification.SAFE,
+            reason="Executed command"
+        )
+
+        execution = CommandExecution(
+            command=command,
+            planned_hash=plan.get_hash(),
+            actual_hash=plan.get_hash(),
+            output=output[:500] if output else "",  # Truncate long outputs
+            success=success,
+            timestamp=datetime.now()
+        )
+
+        # Log to observability as well
+        self._log_event(
+            "command_completed" if success else "command_failed",
+            command=command,
+            output_length=len(output) if output else 0,
+            success=success
+        )
 
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
@@ -1867,7 +1972,7 @@ class EnhancedNocturnalAgent:
             selected_provider = provider_recommendation["provider"]
             selected_model = provider_recommendation["model"]
 
-            self.observability.log_event(
+            self._log_event(
                 "provider_selected",
                 provider=selected_provider,
                 model=selected_model,
@@ -2438,11 +2543,11 @@ class EnhancedNocturnalAgent:
             # ========================================================================
             # EXECUTION SAFETY: Pre-execution validation
             # ========================================================================
-            safety_check = self.execution_safety.validate_command(command)
+            safety_check = self._validate_command_safety(command)
 
             if not safety_check["safe"]:
                 error_msg = f"⛔ Command blocked by safety layer: {safety_check['reason']}"
-                self.observability.log_event(
+                self._log_event(
                     "command_blocked",
                     command=command,
                     reason=safety_check["reason"],
@@ -2451,7 +2556,7 @@ class EnhancedNocturnalAgent:
                 return f"ERROR: {error_msg}"
 
             # Log command execution
-            self.observability.log_event(
+            self._log_event(
                 "command_executing",
                 command=command,
                 classification=safety_check.get("classification")
@@ -2512,13 +2617,13 @@ class EnhancedNocturnalAgent:
             # ========================================================================
             # EXECUTION SAFETY: Post-execution audit
             # ========================================================================
-            self.execution_safety.audit_execution(
+            self._audit_command_execution(
                 command=command,
                 output=output,
                 success=True
             )
 
-            self.observability.log_event(
+            self._log_event(
                 "command_completed",
                 command=command,
                 output_length=len(output),
@@ -2535,13 +2640,13 @@ class EnhancedNocturnalAgent:
 
         except Exception as e:
             # Log failure
-            self.execution_safety.audit_execution(
+            self._audit_command_execution(
                 command=command,
                 output=str(e),
                 success=False
             )
 
-            self.observability.log_event(
+            self._log_event(
                 "command_failed",
                 command=command,
                 error=str(e)
@@ -3709,7 +3814,7 @@ class EnhancedNocturnalAgent:
         request_id = hashlib.md5(f"{request.user_id}:{request.question}:{time.time()}".encode()).hexdigest()[:12]
 
         # Log request
-        self.observability.log_event(
+        self._log_event(
             "request_received",
             user_id=request.user_id,
             request_id=request_id,
@@ -3721,7 +3826,7 @@ class EnhancedNocturnalAgent:
         try:
             # Check circuit breaker first - fail fast if backend is down
             if not self.backend_breaker.can_execute():
-                self.observability.log_event(
+                self._log_event(
                     "request_rejected_circuit_open",
                     user_id=request.user_id,
                     request_id=request_id
@@ -3743,7 +3848,7 @@ class EnhancedNocturnalAgent:
 
             # Log success
             latency = time.time() - start_time
-            self.observability.log_event(
+            self._log_event(
                 "request_completed",
                 user_id=request.user_id,
                 request_id=request_id,
@@ -3757,7 +3862,7 @@ class EnhancedNocturnalAgent:
         except Exception as e:
             # Log failure
             latency = time.time() - start_time
-            self.observability.log_event(
+            self._log_event(
                 "request_failed",
                 user_id=request.user_id,
                 request_id=request_id,
