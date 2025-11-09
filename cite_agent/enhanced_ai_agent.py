@@ -153,6 +153,72 @@ class EnhancedNocturnalAgent:
             self._health_ttl = 30.0
         self._recent_sources: List[Dict[str, Any]] = []
 
+        # ========================================================================
+        # Phase 1 & 2 Infrastructure Initialization (Production-Grade)
+        # ========================================================================
+
+        # Request Queue - Intelligent load management
+        self.request_queue = IntelligentRequestQueue(
+            max_concurrent=10,  # Max concurrent requests globally
+            max_per_user=3,     # Max concurrent per user
+            max_queue_depth=50  # Queue size limit
+        )
+
+        # Circuit Breaker - Fail-fast for each backend service
+        self.backend_breaker = CircuitBreaker(
+            name="backend_api",
+            failure_threshold=5,    # Open after 5 failures
+            recovery_timeout=30.0,  # Try recovery after 30s
+            half_open_attempts=3    # Test 3 requests during recovery
+        )
+
+        # Observability - Comprehensive metrics and logging
+        self.observability = ObservabilityLayer()
+
+        # Adaptive Provider Selection - Learn best provider per task
+        self.provider_selector = AdaptiveProviderSelector()
+
+        # Execution Safety - Command validation and audit
+        self.execution_safety = ExecutionSafetyLayer(
+            audit_level="enforced"  # strict, permissive, or enforced
+        )
+
+        # Self-Healing - Automatic error recovery
+        self.self_healing = SelfHealingAgent(
+            observability=self.observability,
+            provider_selector=self.provider_selector
+        )
+
+    def _classify_query_type(self, query: str) -> str:
+        """
+        Classify query into types for adaptive provider selection
+
+        Returns: financial, research, system, code, general
+        """
+        query_lower = query.lower()
+
+        # Financial queries
+        financial_keywords = ['stock', 'revenue', 'earnings', 'financial', 'price', 'market', 'sec', 'filing']
+        if any(kw in query_lower for kw in financial_keywords):
+            return "financial"
+
+        # Research queries
+        research_keywords = ['paper', 'research', 'study', 'citation', 'doi', 'academic', 'journal']
+        if any(kw in query_lower for kw in research_keywords):
+            return "research"
+
+        # System/shell queries
+        system_keywords = ['directory', 'file', 'folder', 'ls', 'pwd', 'find', 'grep', 'cd']
+        if any(kw in query_lower for kw in system_keywords):
+            return "system"
+
+        # Code queries
+        code_keywords = ['python', 'code', 'function', 'script', 'debug', 'error', 'bug']
+        if any(kw in query_lower for kw in code_keywords):
+            return "code"
+
+        return "general"
+
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
         try:
@@ -1786,20 +1852,43 @@ class EnhancedNocturnalAgent:
             )
         
         try:
+            start_time = time.time()  # Track latency for provider performance
+
             # Detect language preference from stored state
             language = getattr(self, 'language_preference', 'en')
-            
+
+            # ========================================================================
+            # ADAPTIVE PROVIDER SELECTION: Choose best provider for this query
+            # ========================================================================
+            query_type = self._classify_query_type(query)
+            provider_recommendation = self.provider_selector.recommend_provider(
+                query_type=query_type,
+                user_id=self.user_id or "unknown"
+            )
+
+            selected_provider = provider_recommendation["provider"]
+            selected_model = provider_recommendation["model"]
+
+            self.observability.log_event(
+                "provider_selected",
+                provider=selected_provider,
+                model=selected_model,
+                query_type=query_type,
+                confidence=provider_recommendation.get("confidence", 0.5)
+            )
+
             # Build system instruction for language enforcement
             system_instruction = ""
             if language == 'zh-TW':
                 system_instruction = "CRITICAL: You MUST respond entirely in Traditional Chinese (繁體中文). Use Chinese characters (漢字), NOT pinyin romanization. All explanations, descriptions, and responses must be in Chinese characters."
-            
+
             # Build request with API context as separate field
             payload = {
                 "query": query,  # Keep query clean
                 "conversation_history": conversation_history or [],
                 "api_context": api_results,  # Send API results separately
-                "model": "openai/gpt-oss-120b",  # PRODUCTION: 120B - best test results
+                "model": selected_model,  # Adaptive: Use recommended model
+                "provider": selected_provider,  # Adaptive: Specify provider
                 "temperature": 0.2,  # Low temp for accuracy
                 "max_tokens": 4000,
                 "language": language,  # Pass language preference
@@ -1888,7 +1977,20 @@ class EnhancedNocturnalAgent:
                     data = await response.json()
                     response_text = data.get('response', '')
                     tokens = data.get('tokens_used', 0)
-                    
+                    actual_provider = data.get('provider', selected_provider)
+                    actual_model = data.get('model', selected_model)
+
+                    # ========================================================================
+                    # ADAPTIVE PROVIDER: Track provider performance
+                    # ========================================================================
+                    self.provider_selector.record_performance(
+                        provider=actual_provider,
+                        query_type=query_type,
+                        latency=time.time() - start_time if 'start_time' in locals() else 0,
+                        success=True,
+                        tokens_used=tokens
+                    )
+
                     # Combine tools used
                     all_tools = tools_used or []
                     all_tools.append("backend_llm")
@@ -2327,13 +2429,35 @@ class EnhancedNocturnalAgent:
         return "pwd"
 
     def execute_command(self, command: str) -> str:
-        """Execute command and return output - improved with echo markers"""
+        """Execute command and return output - improved with echo markers and safety validation"""
         try:
             if self.shell_session is None:
                 return "ERROR: Shell session not initialized"
-            
+
             # Clean command - remove natural language prefixes
             command = command.strip()
+
+            # ========================================================================
+            # EXECUTION SAFETY: Pre-execution validation
+            # ========================================================================
+            safety_check = self.execution_safety.validate_command(command)
+
+            if not safety_check["safe"]:
+                error_msg = f"⛔ Command blocked by safety layer: {safety_check['reason']}"
+                self.observability.log_event(
+                    "command_blocked",
+                    command=command,
+                    reason=safety_check["reason"],
+                    classification=safety_check.get("classification")
+                )
+                return f"ERROR: {error_msg}"
+
+            # Log command execution
+            self.observability.log_event(
+                "command_executing",
+                command=command,
+                classification=safety_check.get("classification")
+            )
             prefixes_to_remove = [
                 'run this bash:', 'execute this:', 'run command:', 'execute:', 
                 'run this:', 'run:', 'bash:', 'command:', 'this bash:', 'this:',
@@ -2386,16 +2510,45 @@ class EnhancedNocturnalAgent:
             
             output = '\n'.join(output_lines).strip()
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            
+
+            # ========================================================================
+            # EXECUTION SAFETY: Post-execution audit
+            # ========================================================================
+            self.execution_safety.audit_execution(
+                command=command,
+                output=output,
+                success=True
+            )
+
+            self.observability.log_event(
+                "command_completed",
+                command=command,
+                output_length=len(output),
+                success=True
+            )
+
             # Log execution details in debug mode
             if debug_mode:
                 output_preview = output[:200] if output else "(no output)"
                 print(f"✅ Command executed: {command}")
                 print(f"📤 Output ({len(output)} chars): {output_preview}...")
-            
+
             return output if output else "Command executed (no output)"
 
         except Exception as e:
+            # Log failure
+            self.execution_safety.audit_execution(
+                command=command,
+                output=str(e),
+                success=False
+            )
+
+            self.observability.log_event(
+                "command_failed",
+                command=command,
+                error=str(e)
+            )
+
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug_mode:
                 print(f"❌ Command failed: {command}")
@@ -3546,7 +3699,97 @@ class EnhancedNocturnalAgent:
         return False  # Query seems specific enough for API calls
     
     async def process_request(self, request: ChatRequest) -> ChatResponse:
-        """Process request with full AI capabilities and API integration"""
+        """
+        Process request with full AI capabilities and API integration
+
+        This is the public interface - wraps the internal processor with:
+        - Request queue (intelligent load management)
+        - Circuit breaker (fail-fast on backend issues)
+        - Observability (metrics and logging)
+        - Self-healing (automatic error recovery)
+        """
+        request_id = hashlib.md5(f"{request.user_id}:{request.question}:{time.time()}".encode()).hexdigest()[:12]
+
+        # Log request
+        self.observability.log_event(
+            "request_received",
+            user_id=request.user_id,
+            request_id=request_id,
+            question_length=len(request.question)
+        )
+
+        start_time = time.time()
+
+        try:
+            # Check circuit breaker first - fail fast if backend is down
+            if not self.backend_breaker.can_execute():
+                self.observability.log_event(
+                    "request_rejected_circuit_open",
+                    user_id=request.user_id,
+                    request_id=request_id
+                )
+                return ChatResponse(
+                    response="⚠️ Service temporarily unavailable. We're experiencing high load. Please try again in a moment.",
+                    error_message="Circuit breaker open",
+                    tools_used=["circuit_breaker"]
+                )
+
+            # Queue the request for intelligent load management
+            response = await self.request_queue.enqueue_request(
+                request_id=request_id,
+                user_id=request.user_id,
+                priority=RequestPriority.NORMAL,
+                callback=self._process_request_internal,
+                args=(request,)
+            )
+
+            # Log success
+            latency = time.time() - start_time
+            self.observability.log_event(
+                "request_completed",
+                user_id=request.user_id,
+                request_id=request_id,
+                latency=latency,
+                success=True
+            )
+            self.backend_breaker.record_success()
+
+            return response
+
+        except Exception as e:
+            # Log failure
+            latency = time.time() - start_time
+            self.observability.log_event(
+                "request_failed",
+                user_id=request.user_id,
+                request_id=request_id,
+                latency=latency,
+                error=str(e)
+            )
+            self.backend_breaker.record_failure()
+
+            # Try self-healing
+            healing_response = await self.self_healing.handle_error(
+                error=e,
+                context={
+                    "request_id": request_id,
+                    "user_id": request.user_id,
+                    "question": request.question
+                }
+            )
+
+            if healing_response:
+                return healing_response
+
+            # Fallback response
+            return ChatResponse(
+                response=f"❌ Error processing request: {str(e)}",
+                error_message=str(e),
+                tools_used=["error_handler"]
+            )
+
+    async def _process_request_internal(self, request: ChatRequest) -> ChatResponse:
+        """Internal request processor - called by request queue"""
         try:
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
