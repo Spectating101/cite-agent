@@ -1980,7 +1980,7 @@ class EnhancedNocturnalAgent:
             language = getattr(self, 'language_preference', 'en')
 
             # ========================================================================
-            # PROVIDER SELECTION (Infrastructure loaded but bypassed)
+            # PROVIDER SELECTION (Infrastructure loaded but bypassed - see commit message)
             # ========================================================================
             # Infrastructure present and working, but interfaces need alignment
             # Using default provider for now until interfaces are properly connected
