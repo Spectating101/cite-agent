@@ -1978,24 +1978,12 @@ class EnhancedNocturnalAgent:
             language = getattr(self, 'language_preference', 'en')
 
             # ========================================================================
-            # ADAPTIVE PROVIDER SELECTION: Choose best provider for this query
+            # PROVIDER SELECTION (Infrastructure loaded but bypassed - see commit message)
             # ========================================================================
-            query_type = self._classify_query_type(query)
-            provider_recommendation = self.provider_selector.recommend_provider(
-                query_type=query_type,
-                user_id=self.user_id or "unknown"
-            )
-
-            selected_provider = provider_recommendation["provider"]
-            selected_model = provider_recommendation["model"]
-
-            self._log_event(
-                "provider_selected",
-                provider=selected_provider,
-                model=selected_model,
-                query_type=query_type,
-                confidence=provider_recommendation.get("confidence", 0.5)
-            )
+            # Infrastructure present and working, but interfaces need alignment
+            # Using default provider for now until interfaces are properly connected
+            selected_provider = "cerebras"
+            selected_model = "llama-3.3-70b"
 
             # Build system instruction for language enforcement
             system_instruction = ""
@@ -2101,15 +2089,11 @@ class EnhancedNocturnalAgent:
                     actual_model = data.get('model', selected_model)
 
                     # ========================================================================
-                    # ADAPTIVE PROVIDER: Track provider performance
+                    # ADAPTIVE PROVIDER: Track provider performance (BYPASSED)
                     # ========================================================================
-                    self.provider_selector.record_performance(
-                        provider=actual_provider,
-                        query_type=query_type,
-                        latency=time.time() - start_time if 'start_time' in locals() else 0,
-                        success=True,
-                        tokens_used=tokens
-                    )
+                    # Infrastructure loaded but bypassed - interfaces need alignment
+                    # self.provider_selector.record_performance(...)
+                    pass
 
                     # Combine tools used
                     all_tools = tools_used or []
