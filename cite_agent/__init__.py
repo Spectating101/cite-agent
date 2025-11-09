@@ -7,7 +7,7 @@ prior stacks preserved only in Git history, kept out of the runtime footprint.
 
 from .enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest, ChatResponse
 
-__version__ = "1.4.0"
+__version__ = "1.4.2"
 __author__ = "Cite Agent Team"
 __email__ = "contact@citeagent.dev"
 
