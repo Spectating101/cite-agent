@@ -223,6 +223,23 @@ class EnhancedNocturnalAgent:
     # These wrap the complex infrastructure interfaces with simple methods
     # ========================================================================
 
+    def _circuit_breaker_can_execute(self) -> bool:
+        """
+        Adapter: Check if circuit breaker allows execution
+
+        Returns: True if circuit is closed (can execute), False if open
+        """
+        from .circuit_breaker import CircuitState
+        return self.backend_breaker.state == CircuitState.CLOSED or self.backend_breaker.state == CircuitState.HALF_OPEN
+
+    def _circuit_breaker_record_success(self):
+        """Adapter: Record successful call to circuit breaker"""
+        self.backend_breaker._on_success()
+
+    def _circuit_breaker_record_failure(self):
+        """Adapter: Record failed call to circuit breaker"""
+        self.backend_breaker._on_failure("Request failed", 0)
+
     def _log_event(self, event_name: str, **kwargs):
         """
         Adapter: Log an event to the observability system
@@ -3825,7 +3842,7 @@ class EnhancedNocturnalAgent:
 
         try:
             # Check circuit breaker first - fail fast if backend is down
-            if not self.backend_breaker.can_execute():
+            if not self._circuit_breaker_can_execute():
                 self._log_event(
                     "request_rejected_circuit_open",
                     user_id=request.user_id,
@@ -3855,7 +3872,7 @@ class EnhancedNocturnalAgent:
                 latency=latency,
                 success=True
             )
-            self.backend_breaker.record_success()
+            self._circuit_breaker_record_success()
 
             return response
 
@@ -3869,7 +3886,7 @@ class EnhancedNocturnalAgent:
                 latency=latency,
                 error=str(e)
             )
-            self.backend_breaker.record_failure()
+            self._circuit_breaker_record_failure()
 
             # Try self-healing
             healing_response = await self.self_healing.handle_error(
