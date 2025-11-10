@@ -196,7 +196,6 @@ class AuthManager:
         users[email] = {
             "user_id": user_id,
             "password_hash": password_hash,
-            "license_key": license_key,
             "daily_limit": 25,
             "created_at": datetime.now().isoformat()
         }
