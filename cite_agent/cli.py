@@ -14,7 +14,7 @@ import time
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from rich import box
 from rich.console import Console
@@ -1338,7 +1338,6 @@ Examples:
 
     # Handle doctor
     if args.doctor:
-        import asyncio
         from cite_agent.doctor import run_doctor
         exit_code = asyncio.run(run_doctor())
         sys.exit(exit_code)
