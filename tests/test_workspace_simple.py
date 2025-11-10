@@ -3,6 +3,9 @@
 Simple test script for workspace inspection functionality (no pandas required)
 """
 
+import sys
+sys.path.insert(0, '/home/user/cite-agent')
+
 from cite_agent import EnhancedNocturnalAgent
 
 # Create some sample data in Python workspace
