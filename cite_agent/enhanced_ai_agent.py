@@ -34,6 +34,7 @@ from .observability import ObservabilitySystem
 from .adaptive_providers import AdaptiveProviderSelector
 from .execution_safety import CommandExecutionValidator
 from .self_healing import SelfHealingAgent
+from .workspace_inspector import MultiPlatformWorkspaceManager
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -187,6 +188,9 @@ class EnhancedNocturnalAgent:
 
         # Self-Healing - Automatic error recovery
         self.self_healing = SelfHealingAgent()
+
+        # Workspace Inspector - Multi-platform in-memory data access
+        self.workspace_manager = MultiPlatformWorkspaceManager()
 
     def _classify_query_type(self, query: str) -> str:
         """
@@ -3058,6 +3062,247 @@ class EnhancedNocturnalAgent:
             return {
                 "error": f"{type(e).__name__}: {e}"
             }
+
+    # ========================================================================
+    # WORKSPACE INSPECTION (In-Memory Data Access for R, Stata, Python, etc.)
+    # ========================================================================
+
+    def list_workspace_objects(self, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        List objects in workspace/environment (dataframes, variables, etc.)
+
+        Args:
+            platform: Optional platform name ("R", "Stata", "Python")
+                     If None, auto-detects the current environment
+
+        Returns:
+            {
+                "platform": str,
+                "objects": [
+                    {
+                        "name": str,
+                        "type": str,
+                        "class": str,
+                        "size": int,
+                        "dimensions": tuple,
+                        "columns": List[str]
+                    },
+                    ...
+                ],
+                "total_objects": int
+            }
+        """
+        try:
+            # Get appropriate inspector
+            if platform:
+                inspector = self.workspace_manager.get_inspector(platform)
+                if not inspector:
+                    return {
+                        "error": f"Platform '{platform}' not available or not supported",
+                        "available_platforms": [
+                            insp.platform_name
+                            for insp in self.workspace_manager.get_available_inspectors()
+                        ]
+                    }
+            else:
+                inspector = self.workspace_manager.auto_detect_inspector()
+                if not inspector:
+                    return {
+                        "error": "No workspace environment detected",
+                        "available_platforms": [
+                            insp.platform_name
+                            for insp in self.workspace_manager.get_available_inspectors()
+                        ]
+                    }
+
+            # List objects
+            objects = inspector.list_objects()
+
+            return {
+                "platform": inspector.platform_name,
+                "objects": [
+                    {
+                        "name": obj.name,
+                        "type": obj.type,
+                        "class": obj.class_name,
+                        "size": obj.size,
+                        "dimensions": obj.dimensions,
+                        "columns": obj.columns
+                    }
+                    for obj in objects
+                ],
+                "total_objects": len(objects)
+            }
+
+        except Exception as e:
+            logger.error(f"Error listing workspace objects: {e}")
+            return {
+                "error": f"{type(e).__name__}: {e}"
+            }
+
+    def inspect_workspace_object(self, name: str, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get detailed information about a specific workspace object
+
+        Args:
+            name: Name of the object (e.g., "my_dataframe", "results", "data")
+            platform: Optional platform name ("R", "Stata", "Python")
+
+        Returns:
+            {
+                "name": str,
+                "type": str,
+                "class": str,
+                "size": int,
+                "dimensions": tuple,
+                "columns": List[str],
+                "column_types": Dict[str, str],
+                "preview": str
+            }
+        """
+        try:
+            # Get appropriate inspector
+            if platform:
+                inspector = self.workspace_manager.get_inspector(platform)
+                if not inspector:
+                    return {"error": f"Platform '{platform}' not available"}
+            else:
+                inspector = self.workspace_manager.auto_detect_inspector()
+                if not inspector:
+                    return {"error": "No workspace environment detected"}
+
+            # Get object info
+            obj = inspector.get_object_info(name)
+            if not obj:
+                return {"error": f"Object '{name}' not found in workspace"}
+
+            result = {
+                "name": obj.name,
+                "type": obj.type,
+                "class": obj.class_name,
+                "size": obj.size,
+                "dimensions": obj.dimensions,
+                "columns": obj.columns,
+                "preview": obj.preview
+            }
+
+            if obj.metadata:
+                result["metadata"] = obj.metadata
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error inspecting workspace object: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def get_workspace_data(self, name: str, limit: int = 100, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get actual data from a workspace object
+
+        Args:
+            name: Name of the object
+            limit: Maximum number of rows/elements to return
+            platform: Optional platform name
+
+        Returns:
+            {
+                "type": "dataframe" | "vector" | "list" | "other",
+                "data": [...],
+                "total_rows": int,
+                "shown_rows": int,
+                "truncated": bool
+            }
+        """
+        try:
+            # Get appropriate inspector
+            if platform:
+                inspector = self.workspace_manager.get_inspector(platform)
+                if not inspector:
+                    return {"error": f"Platform '{platform}' not available"}
+            else:
+                inspector = self.workspace_manager.auto_detect_inspector()
+                if not inspector:
+                    return {"error": "No workspace environment detected"}
+
+            # Get data
+            data = inspector.get_object_data(name, limit)
+            if not data:
+                return {"error": f"Could not retrieve data for object '{name}'"}
+
+            return data
+
+        except Exception as e:
+            logger.error(f"Error getting workspace data: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def describe_workspace(self, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get summary of entire workspace
+
+        Args:
+            platform: Optional platform name. If None, returns all available workspaces.
+
+        Returns:
+            {
+                "platform": str,
+                "total_objects": int,
+                "total_size_mb": float,
+                "objects": [...],
+                "environment_name": str
+            }
+            OR (if platform is None):
+            {
+                "R": {...},
+                "Python": {...},
+                "Stata": {...}
+            }
+        """
+        try:
+            if platform:
+                inspector = self.workspace_manager.get_inspector(platform)
+                if not inspector:
+                    return {"error": f"Platform '{platform}' not available"}
+
+                workspace_info = inspector.describe_workspace()
+                return {
+                    "platform": workspace_info.platform,
+                    "total_objects": workspace_info.total_objects,
+                    "total_size_mb": workspace_info.total_size_mb,
+                    "objects": [
+                        {
+                            "name": obj.name,
+                            "type": obj.type,
+                            "class": obj.class_name,
+                            "size": obj.size
+                        }
+                        for obj in workspace_info.objects
+                    ],
+                    "environment_name": workspace_info.environment_name
+                }
+            else:
+                # Return all available workspaces
+                all_workspaces = self.workspace_manager.list_all_workspaces()
+                result = {}
+                for platform_name, workspace_info in all_workspaces.items():
+                    result[platform_name] = {
+                        "total_objects": workspace_info.total_objects,
+                        "total_size_mb": workspace_info.total_size_mb,
+                        "objects": [
+                            {
+                                "name": obj.name,
+                                "type": obj.type,
+                                "class": obj.class_name,
+                                "size": obj.size
+                            }
+                            for obj in workspace_info.objects
+                        ],
+                        "environment_name": workspace_info.environment_name
+                    }
+                return result
+
+        except Exception as e:
+            logger.error(f"Error describing workspace: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
 
     async def batch_edit_files(self, edits: List[Dict[str, str]]) -> Dict[str, Any]:
         """

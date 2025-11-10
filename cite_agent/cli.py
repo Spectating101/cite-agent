@@ -74,6 +74,9 @@ class NocturnalCLI:
             "Hit [bold]Ctrl+C[/] to stop a long-running call; the agent will clean up gracefully.",
             "Remember the sandbox: prefix shell commands with [bold]![/] to execute safe utilities only.",
             "If you see an auto-update notice, the CLI will restart itself to load the latest build.",
+            "Type [bold]workspace[/] to see all data objects in your R, Python, or Stata environment.",
+            "Use [bold]inspect <object_name>[/] to see details about a dataframe or variable in memory.",
+            "Type [bold]view <object_name>[/] to preview the actual data from your workspace objects.",
         ]
         self._default_artifacts = Path("artifacts_autonomy.json")
 
@@ -423,6 +426,19 @@ class NocturnalCLI:
                         self.export_library_markdown()
                         continue
 
+                    # Handle workspace inspection commands
+                    if user_input.lower() in ['workspace', 'list workspace', 'show workspace']:
+                        self.show_workspace()
+                        continue
+                    if user_input.lower().startswith('inspect '):
+                        obj_name = user_input[8:].strip()
+                        self.inspect_object(obj_name)
+                        continue
+                    if user_input.lower().startswith('view '):
+                        obj_name = user_input[5:].strip()
+                        self.view_object_data(obj_name)
+                        continue
+
                     if not user_input:
                         continue
                 except (EOFError, KeyboardInterrupt):
@@ -661,6 +677,203 @@ class NocturnalCLI:
             table.add_row(time_str, query_str, tools_str)
         
         self.console.print(table)
+
+    def show_workspace(self):
+        """Show workspace objects (R, Python, Stata data in memory)"""
+        try:
+            result = self.agent.describe_workspace()
+
+            if 'error' in result:
+                self.console.print(f"[warning]⚠️  {result['error']}[/warning]")
+                if 'available_platforms' in result:
+                    self.console.print(f"[dim]Available platforms: {', '.join(result['available_platforms'])}[/dim]")
+                return
+
+            # Check if we have multiple platforms
+            if not any(key in result for key in ['platform', 'total_objects']):
+                # Multiple platforms
+                for platform_name, platform_data in result.items():
+                    self._display_platform_workspace(platform_name, platform_data)
+            else:
+                # Single platform
+                self._display_platform_workspace(result['platform'], result)
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def _display_platform_workspace(self, platform: str, data: Dict[str, Any]):
+        """Display workspace info for a single platform"""
+        from rich.table import Table
+        from rich import box
+
+        total = data.get('total_objects', 0)
+        size_mb = data.get('total_size_mb')
+        env_name = data.get('environment_name', '')
+
+        if total == 0:
+            self.console.print(f"[dim]📦 {platform} workspace ({env_name}): Empty[/dim]")
+            return
+
+        title = f"📦 {platform} Workspace"
+        if env_name:
+            title += f" ({env_name})"
+        if size_mb:
+            title += f" - {size_mb:.2f} MB"
+
+        table = Table(title=title, box=box.ROUNDED)
+        table.add_column("Name", style="bold cyan")
+        table.add_column("Type", style="yellow")
+        table.add_column("Class", style="green")
+        table.add_column("Size/Dimensions", style="magenta")
+
+        objects = data.get('objects', [])
+        for obj in objects[:20]:  # Limit to first 20
+            name = obj.get('name', 'unknown')
+            obj_type = obj.get('type', 'unknown')
+            obj_class = obj.get('class', 'unknown')
+
+            # Format size/dimensions
+            if obj.get('dimensions'):
+                dims = obj['dimensions']
+                size_str = f"{dims[0]}×{dims[1]}" if len(dims) == 2 else str(dims)
+            elif obj.get('size'):
+                size_str = str(obj['size'])
+            else:
+                size_str = '-'
+
+            table.add_row(name, obj_type, obj_class, size_str)
+
+        if len(objects) > 20:
+            table.caption = f"Showing 20 of {len(objects)} objects"
+
+        self.console.print(table)
+        self.console.print()
+
+    def inspect_object(self, name: str):
+        """Inspect a specific workspace object"""
+        try:
+            result = self.agent.inspect_workspace_object(name)
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            from rich.panel import Panel
+
+            info_lines = [
+                f"[bold cyan]Name:[/bold cyan] {result.get('name', 'unknown')}",
+                f"[bold yellow]Type:[/bold yellow] {result.get('type', 'unknown')}",
+                f"[bold green]Class:[/bold green] {result.get('class', 'unknown')}",
+            ]
+
+            if result.get('dimensions'):
+                dims = result['dimensions']
+                dims_str = f"{dims[0]}×{dims[1]}" if len(dims) == 2 else str(dims)
+                info_lines.append(f"[bold magenta]Dimensions:[/bold magenta] {dims_str}")
+
+            if result.get('size'):
+                info_lines.append(f"[bold magenta]Size:[/bold magenta] {result['size']}")
+
+            if result.get('columns'):
+                cols = result['columns']
+                cols_str = ', '.join(cols[:10])
+                if len(cols) > 10:
+                    cols_str += f", ... ({len(cols)} total)"
+                info_lines.append(f"[bold blue]Columns:[/bold blue] {cols_str}")
+
+            if result.get('metadata') and 'column_types' in result['metadata']:
+                col_types = result['metadata']['column_types']
+                types_preview = list(col_types.items())[:5]
+                types_str = ', '.join([f"{k}: {v}" for k, v in types_preview])
+                if len(col_types) > 5:
+                    types_str += "..."
+                info_lines.append(f"[bold dim]Column Types:[/bold dim] {types_str}")
+
+            panel_content = '\n'.join(info_lines)
+
+            if result.get('preview'):
+                panel_content += f"\n\n[bold]Preview:[/bold]\n[dim]{result['preview']}[/dim]"
+
+            panel = Panel(
+                panel_content,
+                title=f"🔍 Object: {name}",
+                border_style="cyan"
+            )
+
+            self.console.print(panel)
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def view_object_data(self, name: str, limit: int = 20):
+        """View actual data from a workspace object"""
+        try:
+            result = self.agent.get_workspace_data(name, limit=limit)
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            data_type = result.get('type', 'unknown')
+
+            if data_type == 'dataframe':
+                self._display_dataframe(name, result)
+            elif data_type in ['vector', 'list']:
+                self._display_vector(name, result)
+            else:
+                # Other types - just show preview
+                self.console.print(f"[bold cyan]Object:[/bold cyan] {name}")
+                self.console.print(result.get('preview', '(no preview available)'))
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def _display_dataframe(self, name: str, data: Dict[str, Any]):
+        """Display dataframe data"""
+        from rich.table import Table
+        from rich import box
+
+        df_data = data.get('data', [])
+        total_rows = data.get('total_rows', 0)
+        shown_rows = data.get('shown_rows', 0)
+        truncated = data.get('truncated', False)
+
+        title = f"📊 {name}"
+        if truncated:
+            title += f" (showing {shown_rows} of {total_rows} rows)"
+
+        table = Table(title=title, box=box.SIMPLE)
+
+        if df_data and len(df_data) > 0:
+            # Add columns from first row
+            for col_name in df_data[0].keys():
+                table.add_column(str(col_name), style="cyan")
+
+            # Add rows
+            for row in df_data[:20]:  # Limit display to 20 rows
+                table.add_row(*[str(v) for v in row.values()])
+
+        self.console.print(table)
+
+    def _display_vector(self, name: str, data: Dict[str, Any]):
+        """Display vector/list data"""
+        vector_data = data.get('data', [])
+        total_length = data.get('total_length', 0)
+        shown_length = data.get('shown_length', 0)
+        truncated = data.get('truncated', False)
+
+        title = f"📋 {name}"
+        if truncated:
+            title += f" (showing {shown_length} of {total_length} elements)"
+
+        self.console.print(f"[bold]{title}[/bold]")
+
+        # Display as formatted list
+        preview = ', '.join([str(v) for v in vector_data[:50]])
+        if len(vector_data) > 50:
+            preview += ", ..."
+
+        self.console.print(f"[dim]{preview}[/dim]")
 
     def search_library_interactive(self, query: str):
         """Search papers in library"""
