@@ -500,7 +500,107 @@ class EnhancedNocturnalAgent:
             "daily_query_limit": self.daily_query_limit,
             "per_user_query_limit": self.per_user_query_limit,
         }
-    
+
+    def get_available_tools(self) -> Dict[str, Any]:
+        """
+        Dynamically discover and return all available tools/capabilities.
+
+        This allows the agent to be self-aware of its capabilities without
+        hardcoding tool names in prompts.
+
+        Returns:
+            Dict with tool categories and their methods
+        """
+        tools = {
+            "workspace_inspection": {
+                "description": "Access and inspect in-memory data objects (R, Python, Stata)",
+                "methods": [
+                    "list_workspace_objects(platform=None) - List all data objects in workspace",
+                    "inspect_workspace_object(name, platform=None) - Get detailed info about an object",
+                    "get_workspace_data(name, limit=100, platform=None) - Get actual data from object",
+                    "describe_workspace(platform=None) - Get workspace summary",
+                ],
+                "use_when": "User asks about their data, dataframes, variables in memory"
+            },
+            "statistical_analysis": {
+                "description": "Generate statistical summaries and detect data quality issues",
+                "methods": [
+                    "summarize_data(object_name, platform=None) - Comprehensive statistical summary",
+                ],
+                "use_when": "User asks for statistics, descriptive stats, data summary, quality checks"
+            },
+            "smart_search": {
+                "description": "Search for columns, data, and patterns across workspace",
+                "methods": [
+                    "search_columns(pattern, platform=None) - Find columns by name",
+                    "find_numeric_columns(platform=None) - Find all numeric data",
+                ],
+                "use_when": "User asks which dataframe has X, find columns, search for data"
+            },
+            "code_templates": {
+                "description": "Generate ready-to-use code for statistical analyses",
+                "methods": [
+                    "list_code_templates(language=None) - List available templates",
+                    "get_code_template(template_name, **params) - Get filled template",
+                ],
+                "use_when": "User asks how to run a test, needs code for analysis"
+            },
+            "method_detection": {
+                "description": "Detect statistical methods from code and suggest citations",
+                "methods": [
+                    "detect_methods_from_code(code) - Identify methods and get citations",
+                ],
+                "use_when": "User shares code and wants citations, asks what to cite"
+            },
+            "academic_formatting": {
+                "description": "Format statistical results in APA/academic style",
+                "methods": [
+                    "format_statistical_result(result, test_type='auto') - Format in APA style",
+                ],
+                "use_when": "User has results and needs APA formatting"
+            },
+            "file_operations": {
+                "description": "Read, write, edit files; search file system",
+                "methods": [
+                    "read_file(path, offset=0, limit=2000) - Read file with line numbers",
+                    "write_file(path, content) - Write/overwrite file",
+                    "edit_file(path, old_string, new_string, replace_all=False) - Edit file",
+                    "glob_search(pattern, path='.') - Find files by pattern",
+                    "grep_search(pattern, path='.', ...) - Search file contents",
+                ],
+                "use_when": "User asks to read, write, search, or edit files"
+            },
+            "academic_research": {
+                "description": "Search academic papers and manage library",
+                "methods": [
+                    "search_academic_papers(query, limit=10) - Search 200M+ papers",
+                    "workflow.save_paper(paper) - Save to library",
+                    "workflow.export_to_bibtex() - Export citations",
+                ],
+                "use_when": "User needs papers, citations, literature review"
+            },
+            "financial_data": {
+                "description": "Query financial metrics for companies",
+                "methods": [
+                    "get_financial_data(ticker, metric) - Get financial metrics",
+                ],
+                "use_when": "User asks about company financials, revenue, metrics"
+            },
+            "shell_execution": {
+                "description": "Execute shell commands safely",
+                "methods": [
+                    "execute_command(command) - Run shell commands",
+                ],
+                "use_when": "User needs system operations, git, file management"
+            }
+        }
+
+        return {
+            "total_categories": len(tools),
+            "tools": tools,
+            "note": "Agent can discover these dynamically - no need to hardcode in prompts"
+        }
+
     async def close(self):
         """Cleanly close resources (HTTP session and shell)."""
         lock = self._get_init_lock()
@@ -3991,6 +4091,182 @@ class EnhancedNocturnalAgent:
 
         return formatted, 0
     
+    async def _handle_data_analysis_query(self, request: ChatRequest) -> Optional[ChatResponse]:
+        """
+        Intelligently detect and handle data analysis queries.
+        Automatically calls appropriate tools based on query intent.
+        """
+        question_lower = request.question.lower()
+        tools_used = []
+
+        # Pattern 1: Statistical summary requests
+        # "summarize my data", "what are the statistics for df", "describe sales_data"
+        summary_patterns = [
+            r"(?:summarize|summary|describe|statistics|stats|descriptive stats).*?(?:for |of )?(\w+)",
+            r"what (?:are|is) (?:the )?(?:statistics|stats|descriptive stats).*?(?:for |of )?(\w+)",
+            r"give me (?:a )?(?:summary|statistics|stats).*?(?:for |of )?(\w+)",
+            r"(\w+).*?(?:summary|statistics|stats|descriptive)",
+        ]
+
+        for pattern in summary_patterns:
+            match = re.search(pattern, question_lower)
+            if match:
+                object_name = match.group(1)
+                # Verify it's likely a data object
+                if object_name not in ['the', 'my', 'this', 'that', 'a', 'an']:
+                    try:
+                        result = self.summarize_data(object_name)
+                        tools_used.append("data_analyzer")
+
+                        if 'error' not in result:
+                            # Format response naturally
+                            response_parts = []
+                            response_parts.append(f"Here's the statistical summary for {result['name']}:")
+                            response_parts.append(f"\n{result['stats_table']}\n")
+
+                            if result['quality_issues']:
+                                response_parts.append(f"\nI found {len(result['quality_issues'])} data quality issue(s):")
+                                for issue in result['quality_issues'][:3]:
+                                    response_parts.append(f"• {issue['description']}")
+                                    if issue['suggestion']:
+                                        response_parts.append(f"  → {issue['suggestion']}")
+
+                            response_parts.append(f"\n{result['methods_text']}")
+
+                            return self._quick_reply(
+                                request,
+                                "\n".join(response_parts),
+                                tools_used=tools_used,
+                                confidence=0.95
+                            )
+                    except Exception as e:
+                        logger.error(f"Error in statistical summary: {e}")
+
+        # Pattern 2: Column search
+        # "find columns with revenue", "which dataframes have sales", "search for price columns"
+        column_search_patterns = [
+            r"(?:find|search|locate|which|what).*?columns?.*?(?:with|containing|matching|named|called) (\w+)",
+            r"(?:which|what).*?(?:dataframes?|datasets?).*?(?:have|contain|with) (\w+)",
+            r"(?:does|do).*?(?:any|my).*?(?:dataframes?|datasets?).*?(?:have|contain) (\w+)",
+        ]
+
+        for pattern in column_search_patterns:
+            match = re.search(pattern, question_lower)
+            if match:
+                column_pattern = match.group(1)
+                try:
+                    result = self.search_columns(column_pattern)
+                    tools_used.append("smart_search")
+
+                    if 'error' not in result:
+                        if result['total_matches'] == 0:
+                            return self._quick_reply(
+                                request,
+                                f"I didn't find any columns matching '{column_pattern}' in your workspace.",
+                                tools_used=tools_used,
+                                confidence=0.9
+                            )
+                        else:
+                            response_parts = [f"I found {result['total_matches']} column(s) matching '{column_pattern}':"]
+                            for match_result in result['results'][:5]:
+                                dims = match_result.get('dimensions')
+                                dims_str = f" ({dims[0]}×{dims[1]})" if dims else ""
+                                response_parts.append(f"• {match_result['object']}.{match_result['column']}{dims_str}")
+
+                            if result['total_matches'] > 5:
+                                response_parts.append(f"...and {result['total_matches'] - 5} more.")
+
+                            return self._quick_reply(
+                                request,
+                                "\n".join(response_parts),
+                                tools_used=tools_used,
+                                confidence=0.95
+                            )
+                except Exception as e:
+                    logger.error(f"Error in column search: {e}")
+
+        # Pattern 3: Code template requests
+        # "how do I run a t-test", "show me code for ANOVA", "regression template"
+        template_patterns = [
+            r"(?:how (?:do i|to)|show (?:me )?code|template).*?(t-?test|anova|regression|correlation)",
+            r"(?:code|template|example).*?(?:for |to )?(?:run|perform|do).*?(t-?test|anova|regression|correlation)",
+        ]
+
+        for pattern in template_patterns:
+            match = re.search(pattern, question_lower)
+            if match:
+                method = match.group(1).replace('-', '').lower()
+                # Map to template names
+                template_mapping = {
+                    'ttest': 'ttest_independent_r',
+                    'anova': 'anova_oneway_r',
+                    'regression': 'regression_simple_r',
+                    'correlation': 'correlation_r',
+                }
+
+                template_name = template_mapping.get(method)
+                if template_name:
+                    try:
+                        result = self.get_code_template(
+                            template_name,
+                            data='my_data',
+                            variable='my_var',
+                            dependent='outcome',
+                            independent='predictor',
+                            predictors='x1 + x2',
+                            group_var='group',
+                            group1='control',
+                            group2='treatment',
+                            var1='var1',
+                            var2='var2'
+                        )
+                        tools_used.append("code_templates")
+
+                        if 'error' not in result:
+                            response_parts = [f"Here's the code for {method.upper()}:\n"]
+                            response_parts.append("```r")
+                            response_parts.append(result['code'])
+                            response_parts.append("```\n")
+
+                            if 'citations' in result:
+                                response_parts.append("📚 Citations:")
+                                for citation in result['citations']:
+                                    response_parts.append(f"• {citation}")
+
+                            if 'notes' in result and result['notes']:
+                                response_parts.append("\n📝 Notes:")
+                                for note in result['notes']:
+                                    response_parts.append(f"• {note}")
+
+                            response_parts.append("\nReplace the placeholder values (my_data, my_var, etc.) with your actual variable names.")
+
+                            return self._quick_reply(
+                                request,
+                                "\n".join(response_parts),
+                                tools_used=tools_used,
+                                confidence=0.9
+                            )
+                    except Exception as e:
+                        logger.error(f"Error getting code template: {e}")
+
+        # Pattern 4: Method detection from code
+        # "what methods did I use", "what should I cite for this code", "citations for my analysis"
+        if any(phrase in question_lower for phrase in [
+            "what methods", "what should i cite", "citations for",
+            "what statistical", "detect methods"
+        ]):
+            # Look for code in the conversation history or context
+            # For now, inform user how to use this feature
+            return self._quick_reply(
+                request,
+                "To detect methods from your code, share the R or Python code with me and I'll identify which statistical methods you're using and provide the appropriate citations.",
+                tools_used=["method_detector_info"],
+                confidence=0.7
+            )
+
+        # No data analysis query detected
+        return None
+
     async def _handle_workflow_commands(self, request: ChatRequest) -> Optional[ChatResponse]:
         """Handle natural language workflow commands directly"""
         question_lower = request.question.lower()
@@ -4325,7 +4601,12 @@ class EnhancedNocturnalAgent:
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
-            
+
+            # Check data analysis queries (automatic tool usage)
+            data_analysis_response = await self._handle_data_analysis_query(request)
+            if data_analysis_response:
+                return data_analysis_response
+
             # Detect and store language preference from user input
             self._detect_language_preference(request.question)
             
