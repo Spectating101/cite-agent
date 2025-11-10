@@ -34,13 +34,20 @@
 - Usage statistics
 - Citation quality metrics
 
-### 🔄 **Workflow Integration** (NEW!)
+### 🔄 **Workflow Integration**
 - Local paper library management
 - BibTeX export for citation managers
 - Clipboard integration for instant citations
 - Markdown export for Obsidian/Notion
 - Session history and query replay
 - **Zero context switching** - stay in your flow
+
+### 🕸️ **Research Discovery** (NEW!)
+- **Citation Network Mapping** - Visualize research lineages and find foundational papers
+- **Smart Paper Comparison** - Compare methodologies, results, and findings side-by-side
+- **Trend Analysis** - Track topic evolution and detect emerging research areas
+- **Similar Paper/Researcher Finder** - Discover related work and potential collaborators
+- **Enhanced Export Formats** - RIS, EndNote XML, Zotero JSON, Obsidian markdown
 
 ## 🚀 Quick Start
 

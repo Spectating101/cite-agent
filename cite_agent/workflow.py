@@ -128,8 +128,176 @@ class Paper:
             md += f"**Tags:** {', '.join(self.tags)}\n\n"
         
         md += f"*Added: {self.added_date}*\n"
-        
+
         return md
+
+    def to_ris(self) -> str:
+        """Convert paper to RIS format (EndNote, RefWorks, Zotero)"""
+        ris = "TY  - JOUR\n"  # Journal article
+
+        ris += f"TI  - {self.title}\n"
+
+        for author in self.authors:
+            ris += f"AU  - {author}\n"
+
+        ris += f"PY  - {self.year}\n"
+
+        if self.venue:
+            ris += f"JO  - {self.venue}\n"
+
+        if self.doi:
+            ris += f"DO  - {self.doi}\n"
+
+        if self.url:
+            ris += f"UR  - {self.url}\n"
+
+        if self.abstract:
+            # RIS format: AB for abstract
+            clean_abstract = self.abstract.replace("\n", " ")
+            ris += f"AB  - {clean_abstract}\n"
+
+        ris += "ER  - \n\n"
+        return ris
+
+    def to_endnote_xml(self) -> str:
+        """Convert paper to EndNote XML format"""
+        xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        xml += '<xml>\n<records>\n<record>\n'
+
+        xml += f'  <ref-type name="Journal Article">17</ref-type>\n'
+        xml += f'  <titles>\n'
+        xml += f'    <title>{self._escape_xml(self.title)}</title>\n'
+        xml += f'  </titles>\n'
+
+        if self.authors:
+            xml += f'  <contributors>\n'
+            xml += f'    <authors>\n'
+            for author in self.authors:
+                xml += f'      <author>{self._escape_xml(author)}</author>\n'
+            xml += f'    </authors>\n'
+            xml += f'  </contributors>\n'
+
+        xml += f'  <dates>\n'
+        xml += f'    <year>{self.year}</year>\n'
+        xml += f'  </dates>\n'
+
+        if self.venue:
+            xml += f'  <periodical>\n'
+            xml += f'    <full-title>{self._escape_xml(self.venue)}</full-title>\n'
+            xml += f'  </periodical>\n'
+
+        if self.doi:
+            xml += f'  <electronic-resource-num>{self.doi}</electronic-resource-num>\n'
+
+        if self.url:
+            xml += f'  <urls>\n'
+            xml += f'    <related-urls>\n'
+            xml += f'      <url>{self._escape_xml(self.url)}</url>\n'
+            xml += f'    </related-urls>\n'
+            xml += f'  </urls>\n'
+
+        if self.abstract:
+            xml += f'  <abstract>{self._escape_xml(self.abstract)}</abstract>\n'
+
+        xml += '</record>\n</records>\n</xml>\n'
+        return xml
+
+    def to_zotero_json(self) -> Dict[str, Any]:
+        """Convert paper to Zotero JSON format"""
+        item = {
+            "itemType": "journalArticle",
+            "title": self.title,
+            "creators": [
+                {"creatorType": "author", "name": author}
+                for author in self.authors
+            ],
+            "date": str(self.year),
+            "abstractNote": self.abstract or "",
+            "publicationTitle": self.venue or "",
+            "DOI": self.doi or "",
+            "url": self.url or "",
+            "accessDate": self.added_date or datetime.now().isoformat(),
+            "tags": [{"tag": tag} for tag in (self.tags or [])],
+            "notes": [{"note": self.notes}] if self.notes else [],
+            "citationCount": self.citation_count
+        }
+
+        return item
+
+    def to_obsidian_md(self) -> str:
+        """Convert paper to Obsidian-formatted markdown with backlinks"""
+        md = f"---\n"
+        md += f"title: {self.title}\n"
+        md += f"authors: {', '.join(self.authors)}\n"
+        md += f"year: {self.year}\n"
+
+        if self.venue:
+            md += f"venue: {self.venue}\n"
+
+        if self.doi:
+            md += f"doi: {self.doi}\n"
+
+        if self.tags:
+            md += f"tags: {', '.join(self.tags)}\n"
+
+        md += f"citation_count: {self.citation_count}\n"
+        md += f"added: {self.added_date}\n"
+        md += f"---\n\n"
+
+        # Title with potential backlinks
+        md += f"# {self.title}\n\n"
+
+        # Authors as potential backlinks
+        md += f"**Authors:** "
+        md += " · ".join([f"[[{author}]]" for author in self.authors])
+        md += "\n\n"
+
+        # Metadata
+        md += f"**Year:** {self.year} · **Citations:** {self.citation_count}\n\n"
+
+        if self.venue:
+            md += f"**Published in:** [[{self.venue}]]\n\n"
+
+        if self.doi:
+            md += f"**DOI:** [{self.doi}](https://doi.org/{self.doi})\n\n"
+
+        # Tags
+        if self.tags:
+            md += "**Tags:** "
+            md += " ".join([f"#{tag.replace(' ', '-')}" for tag in self.tags])
+            md += "\n\n"
+
+        # Abstract
+        if self.abstract:
+            md += f"## Abstract\n\n{self.abstract}\n\n"
+
+        # Notes section
+        md += f"## Notes\n\n"
+        if self.notes:
+            md += f"{self.notes}\n\n"
+        else:
+            md += "*Add your notes here*\n\n"
+
+        # Related papers section
+        md += f"## Related Papers\n\n"
+        md += f"- \n\n"
+
+        # Questions/Discussion
+        md += f"## Questions & Discussion\n\n"
+        md += f"- \n\n"
+
+        return md
+
+    def _escape_xml(self, text: str) -> str:
+        """Escape special XML characters"""
+        if not text:
+            return ""
+        return (text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&apos;"))
 
 
 class WorkflowManager:
