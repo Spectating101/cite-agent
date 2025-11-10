@@ -4,8 +4,10 @@ Comprehensive test suite for all new data analysis features.
 Tests: statistical summaries, method detection, academic formatting, smart search, code templates.
 """
 
-from cite_agent import EnhancedNocturnalAgent
 import sys
+sys.path.insert(0, '/home/user/cite-agent')
+
+from cite_agent import EnhancedNocturnalAgent
 
 def test_statistical_summary():
     """Test statistical summary and data quality checks."""

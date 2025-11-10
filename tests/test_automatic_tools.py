@@ -3,6 +3,9 @@
 Test automatic tool usage - verify the agent detects queries and calls tools automatically
 """
 
+import sys
+sys.path.insert(0, '/home/user/cite-agent')
+
 import asyncio
 from cite_agent import EnhancedNocturnalAgent, ChatRequest
 

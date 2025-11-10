@@ -3444,10 +3444,10 @@ class EnhancedNocturnalAgent:
                 return {"error": data_result['error']}
 
             # Convert to format DataAnalyzer can handle
-            if data_result.get('type') == 'dataframe':
+            if data_result.get('type') in ['dataframe', 'list']:
                 data = data_result.get('data', [])
             else:
-                return {"error": "Object must be a dataframe for statistical summary"}
+                return {"error": f"Object must be a dataframe or list of dicts for statistical summary (got type: {data_result.get('type')})"}
 
             # Analyze
             summary = self.data_analyzer.analyze_dataframe(data, name=object_name)
