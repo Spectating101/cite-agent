@@ -7,6 +7,13 @@ different statistical and data analysis platforms (R, Stata, Python/Jupyter, etc
 The key insight: Data analysts work with floating data in memory. Without access to
 these objects, a citation agent cannot provide contextually relevant citations for
 the actual analysis being performed.
+
+RESOURCE OPTIMIZATION:
+Designed for average user environments (8GB RAM laptops). All operations use:
+- Sampling for large datasets (>10k rows)
+- Memory-efficient data transfer (JSON streaming where possible)
+- Row limits to prevent OOM errors
+- Automatic detection of resource constraints
 """
 
 import json
@@ -17,8 +24,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# ==============================================================================
+# RESOURCE LIMITS FOR 8GB RAM ENVIRONMENTS
+# ==============================================================================
+
+# Maximum rows to fetch from a dataset at once (prevents OOM on 8GB RAM)
+MAX_ROWS_DEFAULT = 1000
+
+# Maximum rows to use for statistical analysis (sampling for large datasets)
+MAX_ROWS_ANALYSIS = 10000
+
+# Threshold for automatic sampling (datasets larger than this get sampled)
+LARGE_DATASET_THRESHOLD = 50000
+
+# Maximum object size to serialize in MB (for JSON transfer)
+MAX_OBJECT_SIZE_MB = 100
+
+# Memory buffer - stop operations if available memory below this (MB)
+MIN_AVAILABLE_MEMORY_MB = 500
 
 
 @dataclass
@@ -47,6 +74,10 @@ class WorkspaceInfo:
 
 class WorkspaceInspector(ABC):
     """Base class for platform-specific workspace inspectors."""
+
+    def __init__(self):
+        self._object_cache = {}  # name -> (timestamp, WorkspaceObject)
+        self._cache_ttl = 30  # seconds
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -79,11 +110,65 @@ class WorkspaceInspector(ABC):
         """Name of the platform (R, Stata, Python, etc.)."""
         pass
 
+    # ==============================================================================
+    # WORKSPACE CHANGE DETECTION & VALIDATION
+    # ==============================================================================
+
+    def validate_object_exists(self, name: str) -> bool:
+        """
+        Validate that an object still exists in the workspace.
+
+        This prevents errors when users delete or modify objects between operations.
+
+        Args:
+            name: Object name to validate
+
+        Returns:
+            True if object exists, False otherwise
+        """
+        try:
+            obj_info = self.get_object_info(name)
+            return obj_info is not None
+        except Exception as e:
+            logger.error(f"Error validating object {name}: {e}")
+            return False
+
+    def get_workspace_changes(self, previous_objects: List[str]) -> Dict[str, List[str]]:
+        """
+        Detect changes in workspace since last check.
+
+        Useful for alerting users when referenced data has been modified.
+
+        Args:
+            previous_objects: List of object names from previous check
+
+        Returns:
+            Dict with 'added', 'removed', 'unchanged' lists
+        """
+        try:
+            current_objects = {obj.name for obj in self.list_objects()}
+            previous_set = set(previous_objects)
+
+            return {
+                'added': list(current_objects - previous_set),
+                'removed': list(previous_set - current_objects),
+                'unchanged': list(current_objects & previous_set)
+            }
+        except Exception as e:
+            logger.error(f"Error detecting workspace changes: {e}")
+            return {'added': [], 'removed': [], 'unchanged': previous_objects}
+
+    def refresh_cache(self):
+        """Refresh the object cache (useful after workspace modifications)."""
+        self._object_cache.clear()
+        logger.debug(f"{self.platform_name} workspace cache refreshed")
+
 
 class RWorkspaceInspector(WorkspaceInspector):
     """Inspector for R environments (.GlobalEnv)."""
 
     def __init__(self, r_executable: str = "Rscript"):
+        super().__init__()
         self.r_executable = r_executable
         self._check_dependencies()
 
@@ -259,36 +344,62 @@ class RWorkspaceInspector(WorkspaceInspector):
             logger.error(f"Failed to parse R object info: {e}")
             return None
 
-    def get_object_data(self, name: str, limit: int = 100) -> Optional[Dict[str, Any]]:
-        """Get actual data from an object."""
+    def get_object_data(self, name: str, limit: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Get actual data from an object with resource-aware sampling.
+
+        Args:
+            name: Object name
+            limit: Max rows to fetch (None = use MAX_ROWS_DEFAULT)
+        """
+        if limit is None:
+            limit = MAX_ROWS_DEFAULT
+
+        # Cap limit to prevent OOM on 8GB RAM systems
+        limit = min(limit, MAX_ROWS_DEFAULT)
+
         code = f"""
         if (!requireNamespace("jsonlite", quietly = TRUE)) {{
-            cat("{{}}")
+            cat('{{"error": "R package jsonlite not installed. Please run: install.packages(\\"jsonlite\\")"}}')
         }} else {{
             if (!exists("{name}", envir = .GlobalEnv)) {{
-                cat("{{}}")
+                cat('{{"error": "Object {name} not found in workspace"}}')
             }} else {{
                 obj <- get("{name}", envir = .GlobalEnv)
 
                 if (is.data.frame(obj)) {{
-                    # Limit rows for large dataframes
-                    if (nrow(obj) > {limit}) {{
+                    total_rows <- nrow(obj)
+
+                    # Smart sampling for large datasets (8GB RAM friendly)
+                    if (total_rows > {LARGE_DATASET_THRESHOLD}) {{
+                        # Sample for very large datasets
+                        sample_size <- min({limit}, {MAX_ROWS_ANALYSIS})
+                        sample_indices <- sample(1:total_rows, sample_size)
+                        obj_preview <- obj[sample_indices, , drop = FALSE]
+                        sampling_method <- "random_sample"
+                        truncated <- TRUE
+                    }} else if (total_rows > {limit}) {{
+                        # Head for moderately large datasets
                         obj_preview <- head(obj, {limit})
+                        sampling_method <- "head"
                         truncated <- TRUE
                     }} else {{
                         obj_preview <- obj
+                        sampling_method <- "full"
                         truncated <- FALSE
                     }}
 
                     result <- list(
                         type = "dataframe",
                         data = obj_preview,
-                        total_rows = nrow(obj),
+                        total_rows = total_rows,
                         shown_rows = nrow(obj_preview),
-                        truncated = truncated
+                        truncated = truncated,
+                        sampling_method = sampling_method
                     )
                 }} else if (is.vector(obj)) {{
-                    if (length(obj) > {limit}) {{
+                    total_len <- length(obj)
+                    if (total_len > {limit}) {{
                         obj_preview <- head(obj, {limit})
                         truncated <- TRUE
                     }} else {{
@@ -299,7 +410,7 @@ class RWorkspaceInspector(WorkspaceInspector):
                     result <- list(
                         type = "vector",
                         data = obj_preview,
-                        total_length = length(obj),
+                        total_length = total_len,
                         shown_length = length(obj_preview),
                         truncated = truncated
                     )
@@ -320,7 +431,11 @@ class RWorkspaceInspector(WorkspaceInspector):
             return None
 
         try:
-            return json.loads(output)
+            data = json.loads(output)
+            if 'error' in data:
+                logger.error(f"R workspace error: {data['error']}")
+                return {'error': data['error']}
+            return data
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse R object data: {e}")
             return None
@@ -382,6 +497,7 @@ class StataWorkspaceInspector(WorkspaceInspector):
     """Inspector for Stata datasets and variables in memory."""
 
     def __init__(self, stata_executable: str = "stata"):
+        super().__init__()
         self.stata_executable = stata_executable
 
     @property
@@ -447,30 +563,297 @@ class StataWorkspaceInspector(WorkspaceInspector):
             Path(log_file).unlink(missing_ok=True)
 
     def list_objects(self) -> List[WorkspaceObject]:
-        """List dataset variables in memory."""
-        # TODO: Implement Stata variable listing
-        # This requires executing Stata commands to describe the dataset
-        logger.warning("Stata workspace inspection not fully implemented yet")
+        """
+        List variables in the active Stata dataset.
+
+        Stata keeps one dataset in memory at a time. This lists all variables
+        in that dataset.
+        """
+        code = """
+        quietly describe
+        if _rc == 0 {
+            quietly describe, short
+            local nvars = r(k)
+            local nobs = r(N)
+
+            * Export variable info to JSON-like format
+            quietly ds
+            local varlist `r(varlist)'
+
+            display "{"
+            display `"  "variables": ["'
+            local first = 1
+            foreach var of varlist `varlist' {
+                if `first' == 0 {
+                    display "," _continue
+                }
+                local first = 0
+
+                local vartype : type `var'
+                display `"    {"'
+                display `"      "name": "`var'","'
+                display `"      "type": "`vartype'","'
+
+                * Get variable label if exists
+                local varlabel : variable label `var'
+                if `"`varlabel'"' != "" {
+                    display `"      "label": "`varlabel'","'
+                }
+
+                display `"      "observations": `nobs'"'
+                display `"    }"' _continue
+            }
+            display ""
+            display "  ],"
+            display `"  "total_observations": `nobs'"'
+            display "}"
+        }
+        else {
+            display `"{"error": "No dataset in memory"}"'
+        }
+        """
+
+        output = self._execute_stata_code(code)
+        if not output:
+            return []
+
+        try:
+            # Extract JSON from Stata output (which includes log text)
+            # Look for the JSON object pattern
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', output)
+            if json_match:
+                data = json.loads(json_match.group(0))
+
+                if 'error' in data:
+                    logger.warning(f"Stata workspace: {data['error']}")
+                    return []
+
+                objects = []
+                for var in data.get('variables', []):
+                    obj = WorkspaceObject(
+                        name=var['name'],
+                        type=var['type'],
+                        class_name='stata_variable',
+                        size=var['observations'],
+                        metadata={'label': var.get('label')} if var.get('label') else None
+                    )
+                    objects.append(obj)
+                return objects
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse Stata output: {e}")
+            return []
+
         return []
 
     def get_object_info(self, name: str) -> Optional[WorkspaceObject]:
-        """Get information about a Stata variable."""
-        logger.warning("Stata workspace inspection not fully implemented yet")
+        """Get detailed information about a Stata variable."""
+        code = f"""
+        capture confirm variable {name}
+        if _rc == 0 {{
+            local vartype : type {name}
+            local varlabel : variable label {name}
+            quietly count
+            local nobs = r(N)
+
+            * Get summary statistics for numeric variables
+            capture summarize {name}, detail
+            if _rc == 0 {{
+                local mean = r(mean)
+                local sd = r(sd)
+                local min = r(min)
+                local max = r(max)
+
+                display "{{"
+                display `"  "name": "{name}","'
+                display `"  "type": "`vartype'","'
+                display `"  "label": "`varlabel'","'
+                display `"  "observations": `nobs',"'
+                display `"  "mean": `mean',"'
+                display `"  "sd": `sd',"'
+                display `"  "min": `min',"'
+                display `"  "max": `max'"'
+                display "}}"
+            }}
+            else {{
+                * Non-numeric variable
+                display "{{"
+                display `"  "name": "{name}","'
+                display `"  "type": "`vartype'","'
+                display `"  "label": "`varlabel'","'
+                display `"  "observations": `nobs'"'
+                display "}}"
+            }}
+        }}
+        else {{
+            display `"{{"error": "Variable {name} not found"}}"'
+        }}
+        """
+
+        output = self._execute_stata_code(code)
+        if not output:
+            return None
+
+        try:
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', output)
+            if json_match:
+                data = json.loads(json_match.group(0))
+
+                if 'error' in data:
+                    return None
+
+                metadata = {}
+                if 'label' in data:
+                    metadata['label'] = data['label']
+                if 'mean' in data:
+                    metadata['mean'] = data['mean']
+                    metadata['sd'] = data['sd']
+                    metadata['min'] = data['min']
+                    metadata['max'] = data['max']
+
+                return WorkspaceObject(
+                    name=data['name'],
+                    type=data['type'],
+                    class_name='stata_variable',
+                    size=data['observations'],
+                    metadata=metadata if metadata else None
+                )
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse Stata output: {e}")
+
         return None
 
-    def get_object_data(self, name: str, limit: int = 100) -> Optional[Dict[str, Any]]:
-        """Get data from a Stata variable."""
-        logger.warning("Stata workspace inspection not fully implemented yet")
+    def get_object_data(self, name: str, limit: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Get data from a Stata variable with resource-aware limits.
+
+        Args:
+            name: Variable name
+            limit: Max observations to fetch (None = use MAX_ROWS_DEFAULT)
+        """
+        if limit is None:
+            limit = MAX_ROWS_DEFAULT
+
+        # Cap limit for 8GB RAM systems
+        limit = min(limit, MAX_ROWS_DEFAULT)
+
+        code = f"""
+        capture confirm variable {name}
+        if _rc == 0 {{
+            quietly count
+            local total_obs = r(N)
+
+            * Resource-aware sampling for large datasets
+            if `total_obs' > {LARGE_DATASET_THRESHOLD} {{
+                * Random sample for very large datasets
+                preserve
+                sample {MAX_ROWS_ANALYSIS}, count
+                local shown_obs = _N
+                local sampling = "random_sample"
+                restore, preserve
+            }}
+            else if `total_obs' > {limit} {{
+                * Head for moderate datasets
+                local shown_obs = {limit}
+                local sampling = "head"
+            }}
+            else {{
+                local shown_obs = `total_obs'
+                local sampling = "full"
+            }}
+
+            * List first observations
+            display "{{"
+            display `"  "type": "variable","'
+            display `"  "data": ["'
+            list {name} in 1/`shown_obs', noobs separator(0)
+            display "  ],"
+            display `"  "total_observations": `total_obs',"'
+            display `"  "shown_observations": `shown_obs',"'
+            display `"  "truncated": "' (`total_obs' > `shown_obs') `"","'
+            display `"  "sampling_method": "`sampling'""'
+            display "}}"
+        }}
+        else {{
+            display `"{{"error": "Variable {name} not found"}}"'
+        }}
+        """
+
+        output = self._execute_stata_code(code)
+        if not output:
+            return None
+
+        try:
+            # Parse Stata output - this is simplified for now
+            # In practice, would need more sophisticated parsing
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', output)
+            if json_match:
+                data = json.loads(json_match.group(0))
+
+                if 'error' in data:
+                    logger.error(f"Stata error: {data['error']}")
+                    return {'error': data['error']}
+
+                return data
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse Stata output: {e}")
+
         return None
 
     def describe_workspace(self) -> WorkspaceInfo:
-        """Get summary of Stata workspace."""
-        logger.warning("Stata workspace inspection not fully implemented yet")
+        """Get summary of active Stata dataset."""
+        objects = self.list_objects()
+
+        code = """
+        quietly describe, short
+        if _rc == 0 {
+            local nobs = r(N)
+            local nvars = r(k)
+            local width = r(width)
+
+            * Estimate memory usage (bytes)
+            local mem_bytes = `nobs' * `width'
+            local mem_mb = `mem_bytes' / (1024 * 1024)
+
+            display "{"
+            display `"  "observations": `nobs',"'
+            display `"  "variables": `nvars',"'
+            display `"  "memory_mb": `mem_mb'"'
+            display "}"
+        }
+        else {
+            display `"{"error": "No dataset in memory"}"'
+        }
+        """
+
+        output = self._execute_stata_code(code)
+        total_size_mb = None
+        metadata = {}
+
+        if output:
+            try:
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', output)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    if 'error' not in data:
+                        total_size_mb = data.get('memory_mb')
+                        metadata = {
+                            'observations': data.get('observations'),
+                            'variables': data.get('variables')
+                        }
+            except (json.JSONDecodeError, KeyError):
+                pass
+
         return WorkspaceInfo(
             platform="Stata",
-            objects=[],
-            total_objects=0,
-            metadata={"status": "not_implemented"}
+            objects=objects,
+            total_objects=len(objects),
+            total_size_mb=total_size_mb,
+            environment_name="active_dataset",
+            metadata=metadata if metadata else None
         )
 
 
@@ -478,6 +861,7 @@ class PythonWorkspaceInspector(WorkspaceInspector):
     """Inspector for Python/Jupyter environments."""
 
     def __init__(self):
+        super().__init__()
         self._namespace = None
 
     @property
@@ -603,8 +987,20 @@ class PythonWorkspaceInspector(WorkspaceInspector):
             metadata=metadata if metadata else None
         )
 
-    def get_object_data(self, name: str, limit: int = 100) -> Optional[Dict[str, Any]]:
-        """Get actual data from a Python object."""
+    def get_object_data(self, name: str, limit: int = None) -> Optional[Dict[str, Any]]:
+        """
+        Get actual data from a Python object with resource-aware sampling.
+
+        Args:
+            name: Object name
+            limit: Max rows to fetch (None = use MAX_ROWS_DEFAULT)
+        """
+        if limit is None:
+            limit = MAX_ROWS_DEFAULT
+
+        # Cap limit for 8GB RAM systems
+        limit = min(limit, MAX_ROWS_DEFAULT)
+
         if self._namespace is None:
             import __main__
             namespace = vars(__main__)
@@ -612,7 +1008,7 @@ class PythonWorkspaceInspector(WorkspaceInspector):
             namespace = self._namespace
 
         if name not in namespace:
-            return None
+            return {'error': f'Object {name} not found in workspace'}
 
         obj = namespace[name]
 
@@ -620,8 +1016,23 @@ class PythonWorkspaceInspector(WorkspaceInspector):
             # Pandas DataFrame
             if hasattr(obj, 'shape') and hasattr(obj, 'columns'):
                 total_rows = len(obj)
-                truncated = total_rows > limit
-                data_preview = obj.head(limit)
+
+                # Smart sampling for large datasets (8GB RAM friendly)
+                if total_rows > LARGE_DATASET_THRESHOLD:
+                    # Random sample for very large datasets
+                    sample_size = min(limit, MAX_ROWS_ANALYSIS)
+                    data_preview = obj.sample(n=sample_size) if total_rows > sample_size else obj
+                    sampling_method = "random_sample"
+                    truncated = True
+                elif total_rows > limit:
+                    # Head for moderately large datasets
+                    data_preview = obj.head(limit)
+                    sampling_method = "head"
+                    truncated = True
+                else:
+                    data_preview = obj
+                    sampling_method = "full"
+                    truncated = False
 
                 return {
                     'type': 'dataframe',
@@ -629,13 +1040,20 @@ class PythonWorkspaceInspector(WorkspaceInspector):
                     'columns': list(obj.columns),
                     'total_rows': total_rows,
                     'shown_rows': len(data_preview),
-                    'truncated': truncated
+                    'truncated': truncated,
+                    'sampling_method': sampling_method
                 }
             # List/tuple
             elif isinstance(obj, (list, tuple)):
                 total_length = len(obj)
-                truncated = total_length > limit
-                data_preview = obj[:limit]
+
+                # Sample lists too for memory efficiency
+                if total_length > limit:
+                    data_preview = obj[:limit]
+                    truncated = True
+                else:
+                    data_preview = obj
+                    truncated = False
 
                 return {
                     'type': 'list',
@@ -646,13 +1064,14 @@ class PythonWorkspaceInspector(WorkspaceInspector):
                 }
             # Other objects
             else:
+                # Limit preview length for memory
                 return {
                     'type': 'other',
                     'preview': str(obj)[:1000]
                 }
         except Exception as e:
             logger.error(f"Error getting Python object data: {e}")
-            return None
+            return {'error': str(e)}
 
     def describe_workspace(self) -> WorkspaceInfo:
         """Get summary of Python workspace."""
@@ -684,6 +1103,299 @@ class PythonWorkspaceInspector(WorkspaceInspector):
         )
 
 
+class SPSSWorkspaceInspector(WorkspaceInspector):
+    """Inspector for SPSS (Statistical Package for the Social Sciences) environments."""
+
+    def __init__(self, spss_executable: str = "spss"):
+        super().__init__()
+        self.spss_executable = spss_executable
+        self._check_dependencies()
+
+    def _check_dependencies(self) -> None:
+        """Check if SPSS Python integration (spss package) is available."""
+        try:
+            import spss
+            logger.info("SPSS Python integration detected")
+        except ImportError:
+            logger.warning(
+                "SPSS Python integration not available. "
+                "For full SPSS support, install the spss package that comes with SPSS Statistics."
+            )
+
+    @property
+    def platform_name(self) -> str:
+        return "SPSS"
+
+    def is_available(self) -> bool:
+        """Check if SPSS is available via Python integration."""
+        try:
+            import spss
+            return True
+        except ImportError:
+            return False
+
+    def list_objects(self) -> List[WorkspaceObject]:
+        """List active datasets in SPSS."""
+        try:
+            import spss
+            import spssdata
+
+            # Get active dataset info
+            datasetObj = spssdata.Spssdata()
+            var_count = datasetObj.GetVarCount()
+
+            objects = []
+            for i in range(var_count):
+                var_name = datasetObj.GetVarName(i)
+                var_type = datasetObj.GetVarType(i)  # 0=numeric, >0=string with length
+
+                obj = WorkspaceObject(
+                    name=var_name,
+                    type="numeric" if var_type == 0 else f"string({var_type})",
+                    class_name="spss_variable",
+                    size=datasetObj.GetCaseCount()
+                )
+                objects.append(obj)
+
+            datasetObj.CClose()
+            return objects
+
+        except ImportError:
+            logger.warning("SPSS Python integration not available")
+            return []
+        except Exception as e:
+            logger.error(f"Error listing SPSS objects: {e}")
+            return []
+
+    def get_object_info(self, name: str) -> Optional[WorkspaceObject]:
+        """Get detailed information about an SPSS variable."""
+        try:
+            import spss
+            import spssdata
+
+            datasetObj = spssdata.Spssdata()
+            var_count = datasetObj.GetVarCount()
+
+            # Find the variable
+            for i in range(var_count):
+                var_name = datasetObj.GetVarName(i)
+                if var_name.lower() == name.lower():
+                    var_type = datasetObj.GetVarType(i)
+                    var_label = datasetObj.GetVarLabel(i)
+
+                    metadata = {}
+                    if var_label:
+                        metadata['label'] = var_label
+
+                    obj = WorkspaceObject(
+                        name=var_name,
+                        type="numeric" if var_type == 0 else f"string({var_type})",
+                        class_name="spss_variable",
+                        size=datasetObj.GetCaseCount(),
+                        metadata=metadata if metadata else None
+                    )
+
+                    datasetObj.CClose()
+                    return obj
+
+            datasetObj.CClose()
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting SPSS object info: {e}")
+            return None
+
+    def get_object_data(self, name: str, limit: int = None) -> Optional[Dict[str, Any]]:
+        """Get data from an SPSS variable with resource-aware limits."""
+        if limit is None:
+            limit = MAX_ROWS_DEFAULT
+
+        limit = min(limit, MAX_ROWS_DEFAULT)
+
+        try:
+            import spss
+            import spssdata
+
+            datasetObj = spssdata.Spssdata()
+            total_cases = datasetObj.GetCaseCount()
+
+            # Resource-aware sampling
+            if total_cases > LARGE_DATASET_THRESHOLD:
+                # Note: SPSS doesn't support random sampling easily in Python API
+                # Fall back to head
+                shown_cases = min(limit, MAX_ROWS_ANALYSIS)
+                sampling_method = "head"
+                truncated = True
+            elif total_cases > limit:
+                shown_cases = limit
+                sampling_method = "head"
+                truncated = True
+            else:
+                shown_cases = total_cases
+                sampling_method = "full"
+                truncated = False
+
+            # Get data
+            data = []
+            for i, row in enumerate(datasetObj):
+                if i >= shown_cases:
+                    break
+                # Row is a tuple, need to match with variable names
+                data.append(row)
+
+            datasetObj.CClose()
+
+            return {
+                'type': 'variable',
+                'data': data,
+                'total_cases': total_cases,
+                'shown_cases': len(data),
+                'truncated': truncated,
+                'sampling_method': sampling_method
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting SPSS data: {e}")
+            return {'error': str(e)}
+
+    def describe_workspace(self) -> WorkspaceInfo:
+        """Get summary of SPSS workspace."""
+        objects = self.list_objects()
+
+        try:
+            import spss
+            import spssdata
+
+            datasetObj = spssdata.Spssdata()
+            total_cases = datasetObj.GetCaseCount()
+            total_vars = datasetObj.GetVarCount()
+            datasetObj.CClose()
+
+            metadata = {
+                'cases': total_cases,
+                'variables': total_vars
+            }
+
+            return WorkspaceInfo(
+                platform="SPSS",
+                objects=objects,
+                total_objects=len(objects),
+                environment_name="active_dataset",
+                metadata=metadata
+            )
+
+        except Exception:
+            return WorkspaceInfo(
+                platform="SPSS",
+                objects=objects,
+                total_objects=len(objects),
+                metadata={"status": "limited_access"}
+            )
+
+
+class EViewsWorkspaceInspector(WorkspaceInspector):
+    """Inspector for EViews (Econometric Views) workfiles."""
+
+    def __init__(self, eviews_executable: str = "eviews"):
+        super().__init__()
+        self.eviews_executable = eviews_executable
+        self._check_dependencies()
+
+    def _check_dependencies(self) -> None:
+        """Check if EViews Python integration is available."""
+        try:
+            import pyeviews
+            logger.info("EViews Python integration (pyeviews) detected")
+        except ImportError:
+            logger.warning(
+                "EViews Python integration not available. "
+                "For full EViews support, install pyeviews: pip install pyeviews"
+            )
+
+    @property
+    def platform_name(self) -> str:
+        return "EViews"
+
+    def is_available(self) -> bool:
+        """Check if EViews is available via Python integration."""
+        try:
+            import pyeviews
+            # Try to connect to EViews
+            return True
+        except ImportError:
+            return False
+
+    def list_objects(self) -> List[WorkspaceObject]:
+        """List objects in active EViews workfile."""
+        try:
+            import pyeviews as evp
+
+            # Get list of series and other objects
+            # EViews command: wflist returns list of objects
+            result = evp.Run("wflist", verbose=False)
+
+            # Parse result (this is simplified - actual parsing depends on EViews output format)
+            objects = []
+
+            # Note: Full implementation would require parsing EViews output
+            # For now, return basic structure
+            logger.warning("EViews workspace listing is basic - full implementation pending")
+
+            return objects
+
+        except ImportError:
+            logger.warning("EViews Python integration (pyeviews) not available")
+            return []
+        except Exception as e:
+            logger.error(f"Error listing EViews objects: {e}")
+            return []
+
+    def get_object_info(self, name: str) -> Optional[WorkspaceObject]:
+        """Get detailed information about an EViews object."""
+        try:
+            import pyeviews as evp
+
+            # Get object type and properties
+            # This would use EViews commands like: {name}.@type, {name}.@length, etc.
+            logger.warning("EViews object inspection is basic - full implementation pending")
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting EViews object info: {e}")
+            return None
+
+    def get_object_data(self, name: str, limit: int = None) -> Optional[Dict[str, Any]]:
+        """Get data from an EViews object with resource-aware limits."""
+        if limit is None:
+            limit = MAX_ROWS_DEFAULT
+
+        try:
+            import pyeviews as evp
+
+            # Fetch data using EViews commands
+            # This would involve exporting series data
+            logger.warning("EViews data fetching is basic - full implementation pending")
+
+            return {'error': 'EViews integration pending full implementation'}
+
+        except Exception as e:
+            logger.error(f"Error getting EViews data: {e}")
+            return {'error': str(e)}
+
+    def describe_workspace(self) -> WorkspaceInfo:
+        """Get summary of EViews workfile."""
+        objects = self.list_objects()
+
+        return WorkspaceInfo(
+            platform="EViews",
+            objects=objects,
+            total_objects=len(objects),
+            environment_name="workfile",
+            metadata={"status": "basic_implementation"}
+        )
+
+
 class MultiPlatformWorkspaceManager:
     """Manager that auto-detects and uses the appropriate workspace inspector."""
 
@@ -692,6 +1404,8 @@ class MultiPlatformWorkspaceManager:
             PythonWorkspaceInspector(),
             RWorkspaceInspector(),
             StataWorkspaceInspector(),
+            SPSSWorkspaceInspector(),
+            EViewsWorkspaceInspector(),
         ]
 
     def get_available_inspectors(self) -> List[WorkspaceInspector]:

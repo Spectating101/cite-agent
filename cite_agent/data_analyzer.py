@@ -3,6 +3,10 @@ Data Analyzer - Statistical summaries and auto-description for datasets.
 
 Provides comprehensive statistical analysis, descriptive statistics, and
 auto-generates text for methods sections.
+
+RESOURCE OPTIMIZATION:
+All operations respect memory limits defined in workspace_inspector for 8GB RAM environments.
+Large datasets are automatically sampled before analysis.
 """
 
 import logging
@@ -10,6 +14,21 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 import statistics
+
+# Import resource limits from workspace_inspector
+try:
+    from .workspace_inspector import (
+        MAX_ROWS_DEFAULT,
+        MAX_ROWS_ANALYSIS,
+        LARGE_DATASET_THRESHOLD,
+        MAX_OBJECT_SIZE_MB
+    )
+except ImportError:
+    # Fallback if workspace_inspector not available
+    MAX_ROWS_DEFAULT = 1000
+    MAX_ROWS_ANALYSIS = 10000
+    LARGE_DATASET_THRESHOLD = 50000
+    MAX_OBJECT_SIZE_MB = 100
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +101,7 @@ class DataAnalyzer:
     def __init__(self):
         self.outlier_threshold_sd = 3.0  # Standard deviations for outlier detection
 
-    def analyze_dataframe(self, data: Any, name: str = "dataset") -> DataSummary:
+    def analyze_dataframe(self, data: Any, name: str = "dataset", sample_if_large: bool = True) -> DataSummary:
         """
         Analyze a dataframe-like object and return comprehensive summary.
 
@@ -90,6 +109,14 @@ class DataAnalyzer:
         - pandas DataFrames
         - List of dicts (from workspace inspector)
         - R data.frames (via workspace inspector)
+
+        Args:
+            data: Data to analyze
+            name: Name of dataset
+            sample_if_large: If True, automatically sample large datasets for 8GB RAM efficiency
+
+        Returns:
+            DataSummary with statistics and quality checks
         """
         try:
             # Detect data type and convert to standard format
@@ -97,6 +124,17 @@ class DataAnalyzer:
 
             if data_dict is None:
                 raise ValueError(f"Could not analyze data type: {type(data)}")
+
+            # RESOURCE OPTIMIZATION: Sample large datasets for 8GB RAM
+            was_sampled = False
+            original_shape = shape
+            if sample_if_large and shape[0] > LARGE_DATASET_THRESHOLD:
+                logger.info(
+                    f"Dataset has {shape[0]:,} rows. Sampling {MAX_ROWS_ANALYSIS:,} rows "
+                    f"for analysis (8GB RAM optimization)"
+                )
+                data_dict, shape = self._sample_data(data_dict, MAX_ROWS_ANALYSIS)
+                was_sampled = True
 
             # Analyze each column
             column_stats = []
@@ -172,6 +210,44 @@ class DataAnalyzer:
         except Exception as e:
             logger.error(f"Error normalizing data: {e}")
             return None, (0, 0)
+
+    def _sample_data(self, data_dict: Dict[str, List[Any]], sample_size: int) -> tuple:
+        """
+        Sample data for memory efficiency on 8GB RAM systems.
+
+        Args:
+            data_dict: Dict of column_name -> list of values
+            sample_size: Number of rows to sample
+
+        Returns:
+            (sampled_data_dict, new_shape)
+        """
+        try:
+            import random
+
+            # Get original row count
+            row_count = len(next(iter(data_dict.values())))
+
+            if row_count <= sample_size:
+                return data_dict, (row_count, len(data_dict))
+
+            # Generate random indices
+            indices = sorted(random.sample(range(row_count), sample_size))
+
+            # Sample each column
+            sampled_dict = {}
+            for col_name, col_data in data_dict.items():
+                sampled_dict[col_name] = [col_data[i] for i in indices]
+
+            new_shape = (sample_size, len(data_dict))
+            logger.info(f"Sampled {sample_size:,} rows from {row_count:,} (memory optimization)")
+
+            return sampled_dict, new_shape
+
+        except Exception as e:
+            logger.error(f"Error sampling data: {e}")
+            # Fall back to original data
+            return data_dict, (len(next(iter(data_dict.values()))), len(data_dict))
 
     def _analyze_column(self, col_name: str, col_data: List[Any]) -> ColumnStatistics:
         """Analyze a single column and return statistics."""
