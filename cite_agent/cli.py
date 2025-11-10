@@ -77,6 +77,10 @@ class NocturnalCLI:
             "Type [bold]workspace[/] to see all data objects in your R, Python, or Stata environment.",
             "Use [bold]inspect <object_name>[/] to see details about a dataframe or variable in memory.",
             "Type [bold]view <object_name>[/] to preview the actual data from your workspace objects.",
+            "Type [bold]summarize <object>[/] to get statistical summary with auto-generated methods section.",
+            "Use [bold]find columns <pattern>[/] to search for columns across all dataframes.",
+            "Type [bold]templates[/] to see available code templates for R and Python analyses.",
+            "Use [bold]template <name>[/] to get ready-to-use code for t-tests, ANOVA, regression, etc.",
         ]
         self._default_artifacts = Path("artifacts_autonomy.json")
 
@@ -437,6 +441,23 @@ class NocturnalCLI:
                     if user_input.lower().startswith('view '):
                         obj_name = user_input[5:].strip()
                         self.view_object_data(obj_name)
+                        continue
+
+                    # Handle data analysis commands
+                    if user_input.lower().startswith('summarize '):
+                        obj_name = user_input[10:].strip()
+                        self.summarize_data(obj_name)
+                        continue
+                    if user_input.lower().startswith('find columns '):
+                        pattern = user_input[13:].strip()
+                        self.search_columns(pattern)
+                        continue
+                    if user_input.lower() == 'templates':
+                        self.list_templates()
+                        continue
+                    if user_input.lower().startswith('template '):
+                        template_name = user_input[9:].strip()
+                        self.get_template(template_name)
                         continue
 
                     if not user_input:
@@ -874,6 +895,175 @@ class NocturnalCLI:
             preview += ", ..."
 
         self.console.print(f"[dim]{preview}[/dim]")
+
+    def summarize_data(self, object_name: str):
+        """Generate statistical summary of a dataset."""
+        try:
+            result = self.agent.summarize_data(object_name)
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            from rich.panel import Panel
+
+            # Display summary info
+            self.console.print(f"\n[bold cyan]📊 Statistical Summary: {result['name']}[/bold cyan]")
+            self.console.print(f"Shape: {result['shape'][0]} rows × {result['shape'][1]} columns")
+            self.console.print(f"Size: {result['total_size_mb']:.4f} MB\n")
+
+            # Display stats table
+            self.console.print(result['stats_table'])
+
+            # Display quality issues
+            if result['quality_issues']:
+                self.console.print(f"\n[bold yellow]⚠️  Data Quality Issues ({len(result['quality_issues'])})[/bold yellow]")
+                for issue in result['quality_issues'][:5]:  # Show first 5
+                    severity_color = "red" if issue['severity'] == "critical" else "yellow"
+                    self.console.print(f"[{severity_color}]• [{issue['severity'].upper()}][/{severity_color}] {issue['description']}")
+                    if issue['suggestion']:
+                        self.console.print(f"  [dim]→ {issue['suggestion']}[/dim]")
+
+            # Display auto-generated methods text
+            self.console.print(f"\n[bold green]📝 Auto-Generated Methods Section:[/bold green]")
+            panel = Panel(result['methods_text'], border_style="green")
+            self.console.print(panel)
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def search_columns(self, pattern: str):
+        """Search for columns across dataframes."""
+        try:
+            result = self.agent.search_columns(pattern)
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            from rich.table import Table
+            from rich import box
+
+            if result['total_matches'] == 0:
+                self.console.print(f"[warning]No columns found matching '{pattern}'[/warning]")
+                return
+
+            self.console.print(f"\n[bold]🔍 Found {result['total_matches']} columns matching '{pattern}':[/bold]\n")
+
+            table = Table(box=box.ROUNDED)
+            table.add_column("Object", style="cyan")
+            table.add_column("Column", style="yellow")
+            table.add_column("Type", style="green")
+            table.add_column("Dimensions", style="magenta")
+
+            for match in result['results']:
+                dims_str = f"{match['dimensions'][0]}×{match['dimensions'][1]}" if match['dimensions'] else "-"
+                table.add_row(
+                    match['object'],
+                    match['column'] or "-",
+                    match['type'],
+                    dims_str
+                )
+
+            self.console.print(table)
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def list_templates(self):
+        """List available code templates."""
+        try:
+            result = self.agent.list_code_templates()
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            from rich.table import Table
+            from rich import box
+
+            self.console.print(f"\n[bold]📋 Available Code Templates ({result['total']})[/bold]\n")
+
+            # Group by language
+            r_templates = [t for t in result['templates'] if t['language'] == 'R']
+            python_templates = [t for t in result['templates'] if t['language'] == 'Python']
+
+            if r_templates:
+                self.console.print("[bold cyan]R Templates:[/bold cyan]")
+                table = Table(box=box.SIMPLE)
+                table.add_column("Name", style="yellow")
+                table.add_column("Description", style="dim")
+
+                for t in r_templates:
+                    table.add_row(t['name'], t['description'][:60] + "..." if len(t['description']) > 60 else t['description'])
+
+                self.console.print(table)
+
+            if python_templates:
+                self.console.print("\n[bold green]Python Templates:[/bold green]")
+                table2 = Table(box=box.SIMPLE)
+                table2.add_column("Name", style="yellow")
+                table2.add_column("Description", style="dim")
+
+                for t in python_templates:
+                    table2.add_row(t['name'], t['description'][:60] + "..." if len(t['description']) > 60 else t['description'])
+
+                self.console.print(table2)
+
+            self.console.print("\n[dim]Use 'template <name>' to view a specific template[/dim]")
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
+
+    def get_template(self, template_name: str):
+        """Get and display a code template."""
+        try:
+            # For demo, use placeholder params
+            result = self.agent.get_code_template(
+                template_name,
+                data='my_data',
+                variable='my_var',
+                dependent='outcome',
+                independent='predictor',
+                predictors='x1 + x2',
+                group_var='group',
+                group1='control',
+                group2='treatment',
+                var1='var1',
+                var2='var2'
+            )
+
+            if 'error' in result:
+                self.console.print(f"[error]❌ {result['error']}[/error]")
+                return
+
+            from rich.syntax import Syntax
+            from rich.panel import Panel
+
+            # Detect language for syntax highlighting
+            lang = "r" if "_r" in template_name else "python"
+
+            # Display code with syntax highlighting
+            syntax = Syntax(result['code'], lang, theme="monokai", line_numbers=True)
+            panel = Panel(syntax, title=f"📝 {template_name}", border_style="cyan")
+            self.console.print(panel)
+
+            # Display citations
+            if 'citations' in result:
+                self.console.print("\n[bold]📚 Citations:[/bold]")
+                for citation in result['citations']:
+                    self.console.print(f"  • {citation}")
+
+            # Display notes
+            if 'notes' in result and result['notes']:
+                self.console.print("\n[bold yellow]📝 Notes:[/bold yellow]")
+                for note in result['notes']:
+                    self.console.print(f"  • {note}")
+
+            self.console.print("\n[dim]Note: Fill in placeholder values (my_data, my_var, etc.) with your actual variable names[/dim]")
+
+        except Exception as e:
+            self.console.print(f"[error]❌ Error: {e}[/error]")
 
     def search_library_interactive(self, query: str):
         """Search papers in library"""

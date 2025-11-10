@@ -35,6 +35,11 @@ from .adaptive_providers import AdaptiveProviderSelector
 from .execution_safety import CommandExecutionValidator
 from .self_healing import SelfHealingAgent
 from .workspace_inspector import MultiPlatformWorkspaceManager
+from .data_analyzer import DataAnalyzer
+from .method_detector import MethodDetector
+from .academic_formatter import AcademicFormatter
+from .smart_search import SmartSearch
+from .code_templates import CodeTemplateGenerator
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -191,6 +196,13 @@ class EnhancedNocturnalAgent:
 
         # Workspace Inspector - Multi-platform in-memory data access
         self.workspace_manager = MultiPlatformWorkspaceManager()
+
+        # Data Analysis Tools
+        self.data_analyzer = DataAnalyzer()
+        self.method_detector = MethodDetector()
+        self.academic_formatter = AcademicFormatter(style="apa")
+        self.smart_search = SmartSearch(self.workspace_manager)
+        self.code_templates = CodeTemplateGenerator()
 
     def _classify_query_type(self, query: str) -> str:
         """
@@ -3302,6 +3314,251 @@ class EnhancedNocturnalAgent:
 
         except Exception as e:
             logger.error(f"Error describing workspace: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    # ========================================================================
+    # DATA ANALYSIS & STATISTICAL SUMMARIES
+    # ========================================================================
+
+    def summarize_data(self, object_name: str, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Generate comprehensive statistical summary of a dataset.
+
+        Args:
+            object_name: Name of dataframe/dataset to summarize
+            platform: Optional platform name
+
+        Returns:
+            {
+                "summary": DataSummary object (as dict),
+                "stats_table": formatted statistics table,
+                "methods_text": auto-generated methods section,
+                "quality_issues": list of data quality issues
+            }
+        """
+        try:
+            # Get data from workspace
+            data_result = self.get_workspace_data(object_name, limit=10000, platform=platform)
+
+            if 'error' in data_result:
+                return {"error": data_result['error']}
+
+            # Convert to format DataAnalyzer can handle
+            if data_result.get('type') == 'dataframe':
+                data = data_result.get('data', [])
+            else:
+                return {"error": "Object must be a dataframe for statistical summary"}
+
+            # Analyze
+            summary = self.data_analyzer.analyze_dataframe(data, name=object_name)
+
+            return {
+                "name": summary.name,
+                "shape": summary.shape,
+                "total_size_mb": summary.total_size_mb,
+                "numeric_columns": summary.numeric_columns,
+                "categorical_columns": summary.categorical_columns,
+                "temporal_columns": summary.temporal_columns,
+                "stats_table": summary.descriptive_stats_table,
+                "methods_text": summary.methods_section_text,
+                "quality_issues": [
+                    {
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "column": issue.column,
+                        "description": issue.description,
+                        "suggestion": issue.suggestion,
+                        "citation": issue.citation
+                    }
+                    for issue in summary.quality_issues
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Error summarizing data: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def search_columns(self, pattern: str, platform: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Search for columns matching a pattern across all dataframes.
+
+        Args:
+            pattern: Column name pattern to search for
+            platform: Optional platform name
+
+        Returns:
+            {"results": [{"object": str, "column": str, "dimensions": tuple}, ...]}
+        """
+        try:
+            results = self.smart_search.find_columns(pattern, platform=platform)
+
+            return {
+                "pattern": pattern,
+                "total_matches": len(results),
+                "results": [
+                    {
+                        "object": r.object_name,
+                        "column": r.column_name,
+                        "type": r.object_type,
+                        "dimensions": r.dimensions,
+                        "context": r.context
+                    }
+                    for r in results
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Error searching columns: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def find_numeric_columns(self, platform: Optional[str] = None) -> Dict[str, Any]:
+        """Find all numeric columns across workspace."""
+        try:
+            results = self.smart_search.find_numeric_columns(platform=platform)
+
+            return {
+                "total_objects": len(results),
+                "results": [
+                    {
+                        "object": r.object_name,
+                        "numeric_columns": r.column_name,
+                        "dimensions": r.dimensions
+                    }
+                    for r in results
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Error finding numeric columns: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def get_code_template(self, template_name: str, **params) -> Dict[str, Any]:
+        """
+        Get a code template filled with parameters.
+
+        Args:
+            template_name: Name of template (e.g., "ttest_independent_r")
+            **params: Parameters to fill in
+
+        Returns:
+            {"code": str, "citations": [str], "notes": [str]}
+        """
+        try:
+            code = self.code_templates.get_template(template_name, **params)
+
+            template_obj = self.code_templates.templates.get(template_name)
+            if template_obj:
+                return {
+                    "code": code,
+                    "citations": template_obj.citations,
+                    "notes": template_obj.notes or [],
+                    "description": template_obj.description
+                }
+            else:
+                return {"code": code}
+
+        except Exception as e:
+            logger.error(f"Error getting code template: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def list_code_templates(self, language: Optional[str] = None) -> Dict[str, Any]:
+        """
+        List all available code templates.
+
+        Args:
+            language: Optional language filter ("R" or "Python")
+
+        Returns:
+            {"templates": [{"name": str, "description": str, ...}, ...]}
+        """
+        try:
+            templates = self.code_templates.list_templates(language=language)
+
+            return {"templates": templates, "total": len(templates)}
+
+        except Exception as e:
+            logger.error(f"Error listing templates: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def detect_methods_from_code(self, code: str) -> Dict[str, Any]:
+        """
+        Detect statistical methods from code and suggest citations.
+
+        Args:
+            code: R or Python code string
+
+        Returns:
+            {"methods": [{"name": str, "citation": str, ...}, ...]}
+        """
+        try:
+            detected_methods = self.method_detector.analyze_code(code)
+
+            return {
+                "total_methods": len(detected_methods),
+                "methods": [
+                    {
+                        "name": method.method_name,
+                        "category": method.category,
+                        "description": method.description,
+                        "primary_citation": method.primary_citation,
+                        "additional_citations": method.additional_citations,
+                        "sample_size_note": method.sample_size_note
+                    }
+                    for method in detected_methods
+                ]
+            }
+
+        except Exception as e:
+            logger.error(f"Error detecting methods: {e}")
+            return {"error": f"{type(e).__name__}: {e}"}
+
+    def format_statistical_result(self, result: Dict[str, Any],
+                                  test_type: str = "auto") -> Dict[str, Any]:
+        """
+        Format statistical result in APA style.
+
+        Args:
+            result: Dict with statistical results
+            test_type: Type of test ("ttest", "anova", "regression", "correlation", "auto")
+
+        Returns:
+            {"formatted_text": str, "style": str}
+        """
+        try:
+            if test_type == "auto":
+                # Auto-detect
+                if 't' in result:
+                    formatted = self.academic_formatter.format_ttest_result(result)
+                elif 'F' in result and 'R2' not in result:
+                    formatted = self.academic_formatter.format_anova_result(result)
+                elif 'R2' in result:
+                    formatted = self.academic_formatter.format_regression_result(result)
+                elif 'r' in result:
+                    formatted = self.academic_formatter.format_correlation_result(result)
+                elif 'chi2' in result:
+                    formatted = self.academic_formatter.format_chi_square_result(result)
+                else:
+                    formatted = str(result)
+            elif test_type == "ttest":
+                formatted = self.academic_formatter.format_ttest_result(result)
+            elif test_type == "anova":
+                formatted = self.academic_formatter.format_anova_result(result)
+            elif test_type == "regression":
+                formatted = self.academic_formatter.format_regression_result(result)
+            elif test_type == "correlation":
+                formatted = self.academic_formatter.format_correlation_result(result)
+            elif test_type == "chi_square":
+                formatted = self.academic_formatter.format_chi_square_result(result)
+            else:
+                formatted = str(result)
+
+            return {
+                "formatted_text": formatted,
+                "style": "APA 7th edition"
+            }
+
+        except Exception as e:
+            logger.error(f"Error formatting result: {e}")
             return {"error": f"{type(e).__name__}: {e}"}
 
     async def batch_edit_files(self, edits: List[Dict[str, str]]) -> Dict[str, Any]:
