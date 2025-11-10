@@ -404,6 +404,15 @@ export NOCTURNAL_DEBUG=1
 cite-agent "your query"
 ```
 
+### Documentation
+
+For developers and contributors:
+- **[SYSTEM_STATUS.md](SYSTEM_STATUS.md)** - Current system status, test results, how to run
+- **[ARCHITECTURE_EXPLAINED.md](ARCHITECTURE_EXPLAINED.md)** - Why the codebase is complex
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and changes
+- **[INSTALL.md](INSTALL.md)** - Detailed installation instructions
+- **[TESTING.md](TESTING.md)** - How to run tests
+
 ### Support
 
 - **Documentation**: [Full docs](https://docs.cite-agent.com)

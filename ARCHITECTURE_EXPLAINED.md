@@ -2,6 +2,8 @@
 
 **Purpose:** This document explains why the codebase looks "distorted" and complex, documenting the current state for future developers.
 
+**For current system status and test results, see:** [SYSTEM_STATUS.md](SYSTEM_STATUS.md)
+
 ---
 
 ## TL;DR - Why Is The Code Complex?
@@ -9,7 +11,7 @@
 **Short Answer:** The repo has features split across branches, two different query architectures, and infrastructure that's loaded but not fully wired. It works, but it's messy.
 
 **What You'll Find:**
-- ✅ Core agent **works perfectly** (100% test pass in previous sessions)
+- ✅ Core agent **works perfectly** (100% test pass - see SYSTEM_STATUS.md)
 - ✅ Workspace features **exist and work** (10/10 stress tests pass)
 - ❌ BUT they're in **different branches** (not merged yet)
 - ⚠️ Two query modes exist (backend mode + direct mode)

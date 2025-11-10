@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(git rm:*)",
+      "Bash(git merge:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(awk:*)",
+      "Bash(test:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

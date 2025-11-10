@@ -56,16 +56,20 @@ User's priority:
 
 ## What Was Documented Instead
 
-Created: **ARCHITECTURE_EXPLAINED.md** (comprehensive)
+Created comprehensive documentation:
 
-**Contents:**
+**ARCHITECTURE_EXPLAINED.md:**
 1. Why the code looks "distorted"
 2. Dual query architecture explanation
 3. Infrastructure that's loaded but bypassed
 4. Workspace features status (in other branch)
-5. Testing status (both branches 100% pass)
-6. Safe cleanup recommendations for future
-7. How to explain the complexity to others
+5. Safe cleanup recommendations for future
+
+**SYSTEM_STATUS.md:**
+1. Current test results (100% pass)
+2. How to run tests and backend
+3. Known issues and fixes
+4. Branch overview
 
 **Purpose:**
 - Save time re-explaining architecture
