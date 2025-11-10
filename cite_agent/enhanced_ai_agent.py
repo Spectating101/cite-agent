@@ -5518,7 +5518,6 @@ JSON:"""
 
                     # Try to extract object/dataset names mentioned in the question
                     # Look for words that might be variable names (alphanumeric + underscore)
-                    import re
                     potential_names = re.findall(r'\b[a-z_][a-z0-9_]{2,}\b', question_lower)
 
                     # Detect what workspace action is needed
@@ -5966,7 +5965,6 @@ JSON:"""
                 question_lower = request.question.lower()
 
                 # Try to extract object/dataset names mentioned in the question
-                import re
                 potential_names = re.findall(r'\b[a-z_][a-z0-9_]{2,}\b', question_lower)
 
                 # Detect what workspace action is needed
