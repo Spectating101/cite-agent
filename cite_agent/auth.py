@@ -38,10 +38,10 @@ class AuthManager:
         try:
             # Call auth API
             response = requests.post(
-                f"{self.api_base}/auth/login",
+                f"{self.api_base}/api/auth/login",
                 json={
                     "email": email,
-                    "password_hash": password_hash
+                    "password": password
                 },
                 timeout=10
             )

@@ -601,6 +601,139 @@ class EnhancedNocturnalAgent:
             "note": "Agent can discover these dynamically - no need to hardcode in prompts"
         }
 
+    def get_tools_for_function_calling(self) -> List[Dict[str, Any]]:
+        """
+        Convert available tools to OpenAI function calling format.
+        This allows LLM to decide which tools to use without hardcoded keywords.
+        Works in ANY language since LLM understands intent, not just English keywords.
+
+        Returns:
+            List of tool definitions in OpenAI format
+        """
+        function_tools = []
+
+        # Workspace tools
+        function_tools.append({
+            "type": "function",
+            "function": {
+                "name": "describe_workspace",
+                "description": "List all dataframes, datasets, and variables currently loaded in R, Python, or Stata workspace. Use this when user asks about their data, what data they have, or wants to see available datasets.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "platform": {
+                            "type": "string",
+                            "enum": ["Python", "R", "Stata"],
+                            "description": "Optional: Specific platform to inspect. If not provided, checks all platforms."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        })
+
+        function_tools.append({
+            "type": "function",
+            "function": {
+                "name": "inspect_workspace_object",
+                "description": "Get detailed information about a specific dataframe or variable: dimensions, columns, data types. Use when user asks about a specific dataset's structure or columns.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the dataframe/variable to inspect"
+                        },
+                        "platform": {
+                            "type": "string",
+                            "enum": ["Python", "R", "Stata"],
+                            "description": "Optional: Platform where the object exists"
+                        }
+                    },
+                    "required": ["name"]
+                }
+            }
+        })
+
+        function_tools.append({
+            "type": "function",
+            "function": {
+                "name": "summarize_data",
+                "description": "Generate comprehensive statistical summary with descriptive statistics (mean, median, SD, range) and auto-generated methods section for publication. Use when user asks for statistics, descriptive stats, or data summary.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "object_name": {
+                            "type": "string",
+                            "description": "Name of the dataframe to summarize"
+                        },
+                        "platform": {
+                            "type": "string",
+                            "enum": ["Python", "R", "Stata"],
+                            "description": "Optional: Platform where the object exists"
+                        }
+                    },
+                    "required": ["object_name"]
+                }
+            }
+        })
+
+        function_tools.append({
+            "type": "function",
+            "function": {
+                "name": "search_columns",
+                "description": "Search for columns/variables by name pattern across all dataframes. Use when user asks which dataframe has a specific column, or wants to find columns containing certain text.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "Search pattern (supports partial matching)"
+                        },
+                        "platform": {
+                            "type": "string",
+                            "enum": ["Python", "R", "Stata"],
+                            "description": "Optional: Limit search to specific platform"
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            }
+        })
+
+        function_tools.append({
+            "type": "function",
+            "function": {
+                "name": "get_code_template",
+                "description": "Generate ready-to-use R or Python code for statistical analysis (t-test, ANOVA, regression, correlation) with proper citations. Use when user asks how to run a statistical test or needs analysis code.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "template_name": {
+                            "type": "string",
+                            "enum": ["ttest_independent_r", "ttest_independent_python", "anova_oneway_r", "regression_simple_r", "regression_multiple_r", "correlation_r"],
+                            "description": "Type of statistical test template"
+                        },
+                        "data": {
+                            "type": "string",
+                            "description": "Name of the dataframe"
+                        },
+                        "variable": {
+                            "type": "string",
+                            "description": "Dependent/outcome variable name"
+                        },
+                        "group_var": {
+                            "type": "string",
+                            "description": "Grouping variable (for t-test, ANOVA)"
+                        }
+                    },
+                    "required": ["template_name"]
+                }
+            }
+        })
+
+        return function_tools
+
     async def close(self):
         """Cleanly close resources (HTTP session and shell)."""
         lock = self._get_init_lock()
@@ -1415,14 +1548,28 @@ class EnhancedNocturnalAgent:
         analysis_mode = request_analysis.get("analysis_mode", "quantitative")
         dev_mode = self.client is not None
 
-        # Identity and capabilities
+        # Identity and capabilities - dynamically discover available tools
+        available_tools_data = self.get_available_tools()
+        available_tools = available_tools_data.get("tools", {})
+
+        tools_desc = []
+        for tool_name, tool_info in available_tools.items():
+            desc = tool_info.get('description', '')
+            use_when = tool_info.get('use_when', '')
+            methods = tool_info.get('methods', [])
+
+            if desc and methods:
+                tools_desc.append(f"• {desc}")
+                if use_when:
+                    tools_desc.append(f"  Use when: {use_when}")
+                # Show first 2-3 key methods
+                method_list = ', '.join(m.split(' - ')[0] for m in methods[:2])
+                tools_desc.append(f"  Key methods: {method_list}")
+
         intro = (
-            "You are Cite Agent, a research and analysis assistant with access to:\n"
-            "• Persistent shell (Python, R, SQL, Bash)\n"
-            "• File operations (read, write, edit, search)\n"
-            "• Academic papers (Archive API - 200M+ papers)\n"
-            "• Financial data (FinSight API - SEC filings)\n"
-            "• Web search\n\n"
+            "You are Cite Agent, a research and analysis assistant.\n\n"
+            "Your available capabilities:\n" +
+            "\n".join(tools_desc) + "\n\n"
             "Communication style: Be natural, direct, and helpful. "
             "Think like a capable research partner, not a rigid assistant."
         )
@@ -2101,12 +2248,15 @@ class EnhancedNocturnalAgent:
             # Infrastructure present and working, but interfaces need alignment
             # Using default provider for now until interfaces are properly connected
             selected_provider = "cerebras"
-            selected_model = "llama-3.3-70b"
+            selected_model = "openai/gpt-oss-120b"  # Using GPT-OSS-120B via Cerebras
 
             # Build system instruction for language enforcement
             system_instruction = ""
             if language == 'zh-TW':
                 system_instruction = "CRITICAL: You MUST respond entirely in Traditional Chinese (繁體中文). Use Chinese characters (漢字), NOT pinyin romanization. All explanations, descriptions, and responses must be in Chinese characters."
+
+            # Get function calling tools (no hardcoded keywords!)
+            tools = self.get_tools_for_function_calling()
 
             # Build request with API context as separate field
             payload = {
@@ -2118,7 +2268,9 @@ class EnhancedNocturnalAgent:
                 "temperature": 0.2,  # Low temp for accuracy
                 "max_tokens": 4000,
                 "language": language,  # Pass language preference
-                "system_instruction": system_instruction if system_instruction else None  # Only include if set
+                "system_instruction": system_instruction if system_instruction else None,  # Only include if set
+                "tools": tools,  # Function calling tools - LLM decides what to use
+                "tool_choice": "auto"  # Let LLM decide when to use tools
             }
             
             # Call backend
@@ -2207,6 +2359,64 @@ class EnhancedNocturnalAgent:
                     actual_model = data.get('model', selected_model)
 
                     # ========================================================================
+                    # FUNCTION CALLING: Execute tools if LLM requested them
+                    # ========================================================================
+                    tool_calls = data.get('tool_calls', [])
+                    tool_results = {}
+
+                    if tool_calls:
+                        if debug_mode:
+                            print(f"🔧 LLM requested {len(tool_calls)} tool calls")
+
+                        for tool_call in tool_calls:
+                            function_name = tool_call.get('function', {}).get('name')
+                            arguments = tool_call.get('function', {}).get('arguments', {})
+
+                            if debug_mode:
+                                print(f"🔧 Executing: {function_name}({arguments})")
+
+                            # Execute the tool
+                            if function_name == 'describe_workspace':
+                                result = self.describe_workspace(platform=arguments.get('platform'))
+                                tool_results['workspace_summary'] = result
+
+                            elif function_name == 'inspect_workspace_object':
+                                result = self.inspect_workspace_object(
+                                    name=arguments.get('name'),
+                                    platform=arguments.get('platform')
+                                )
+                                tool_results['object_inspection'] = result
+
+                            elif function_name == 'summarize_data':
+                                result = self.summarize_data(
+                                    object_name=arguments.get('object_name'),
+                                    platform=arguments.get('platform')
+                                )
+                                tool_results['statistical_summary'] = result
+
+                            elif function_name == 'search_columns':
+                                result = self.search_columns(
+                                    pattern=arguments.get('pattern'),
+                                    platform=arguments.get('platform')
+                                )
+                                tool_results['column_search'] = result
+
+                            elif function_name == 'get_code_template':
+                                result = self.get_code_template(
+                                    template_name=arguments.get('template_name'),
+                                    **{k: v for k, v in arguments.items() if k != 'template_name'}
+                                )
+                                tool_results['code_template'] = result
+
+                        # If we have tool results, append them to the response
+                        if tool_results and response_text:
+                            # Tool results will be visible to the LLM in the conversation
+                            # Backend should handle this, but we can include in api_results
+                            if api_results is None:
+                                api_results = {}
+                            api_results['tool_results'] = tool_results
+
+                    # ========================================================================
                     # ADAPTIVE PROVIDER: Track provider performance (BYPASSED)
                     # ========================================================================
                     # Infrastructure loaded but bypassed - interfaces need alignment
@@ -2216,6 +2426,12 @@ class EnhancedNocturnalAgent:
                     # Combine tools used
                     all_tools = tools_used or []
                     all_tools.append("backend_llm")
+
+                    # Add executed tool names
+                    for tool_call in tool_calls:
+                        func_name = tool_call.get('function', {}).get('name')
+                        if func_name:
+                            all_tools.append(func_name)
                     
                     # Save to workflow history
                     self.workflow.save_query_result(
@@ -4396,9 +4612,11 @@ class EnhancedNocturnalAgent:
         
         # Research indicators (quantitative)
         research_keywords = [
-            'research', 'paper', 'study', 'academic', 'literature', 'journal',
+            'find papers', 'search papers', 'paper', 'papers', 'study', 'studies',
+            'academic', 'literature', 'journal',
             'synthesis', 'findings', 'methodology', 'abstract', 'citation',
-            'author', 'publication', 'peer review', 'scientific'
+            'author', 'publication', 'peer review', 'scientific', 'published',
+            'arxiv', 'doi', 'research on', 'research about', 'papers on', 'papers about'
         ]
         
         # Qualitative indicators (NEW)
@@ -4421,6 +4639,20 @@ class EnhancedNocturnalAgent:
             'rate of', 'ratio', 'growth rate', 'change in', 'compared to'
         ]
         
+        # Workspace/data indicators - NEW
+        workspace_keywords = [
+            'workspace', 'data', 'dataframe', 'dataframes', 'dataset', 'datasets',
+            'variables', 'variable', 'in memory', 'loaded data', 'my data',
+            'what data', 'which data', 'show data', 'list data',
+            'columns', 'column', 'rows', 'observations',
+            'statistics', 'descriptive', 'summary', 'summarize', 'describe',
+            'mean', 'median', 'std', 'variance', 'distribution',
+            't-test', 't test', 'ttest', 'anova', 'regression', 'correlation',
+            'analysis code', 'statistical test', 'how to analyze',
+            'r code', 'python code', 'analysis in r', 'analysis in python',
+            'which dataframe', 'find column', 'search column', 'contains column'
+        ]
+
         # System/technical indicators
         system_keywords = [
             'file', 'files', 'directory', 'directories', 'folder', 'folders',
@@ -4497,6 +4729,10 @@ class EnhancedNocturnalAgent:
             # Some of both - default to mixed
             analysis_mode = "mixed"
 
+        if any(keyword in question_lower for keyword in workspace_keywords):
+            matched_types.append("workspace")
+            apis_to_use.append("workspace")
+
         if any(keyword in question_lower for keyword in financial_keywords):
             matched_types.append("financial")
             apis_to_use.append("finsight")
@@ -4504,7 +4740,7 @@ class EnhancedNocturnalAgent:
         if any(keyword in question_lower for keyword in research_keywords):
             matched_types.append("research")
             apis_to_use.append("archive")
-        
+
         # Qualitative queries often involve research
         if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types:
             matched_types.append("research")
@@ -5267,7 +5503,64 @@ JSON:"""
                                 # Keep only: title, authors, year, doi, url
                         api_results["research"] = result
                         tools_used.append("archive_api")
-                
+
+                # NEW: Workspace data inspection
+                if "workspace" in request_analysis.get("apis", []):
+                    workspace_data = {}
+                    question_lower = request.question.lower()
+
+                    # Try to extract object/dataset names mentioned in the question
+                    # Look for words that might be variable names (alphanumeric + underscore)
+                    import re
+                    potential_names = re.findall(r'\b[a-z_][a-z0-9_]{2,}\b', question_lower)
+
+                    # Detect what workspace action is needed
+                    if any(kw in question_lower for kw in ['what data', 'show data', 'list data', 'workspace', 'dataframes', 'datasets']):
+                        # List all workspace objects
+                        workspace_data['workspace_summary'] = self.describe_workspace()
+                        tools_used.append("workspace_inspection")
+
+                    # Object inspection: "tell me about X", "what columns does X have", "describe X"
+                    if any(kw in question_lower for kw in ['columns does', 'about', 'tell me', 'describe', 'inspect', 'show me']):
+                        for name in potential_names:
+                            if name not in ['the', 'a', 'an', 'my', 'data', 'dataset', 'dataframe']:
+                                result = self.inspect_workspace_object(name)
+                                if 'error' not in result:
+                                    workspace_data['object_inspection'] = result
+                                    tools_used.append("workspace_inspection")
+                                    break
+
+                    # Statistical summary: "statistics for X", "descriptive stats", "summarize X"
+                    if any(kw in question_lower for kw in ['statistics', 'descriptive', 'summary', 'summarize', 'mean', 'median', 'std']):
+                        exclude_words = ['the', 'a', 'an', 'my', 'data', 'dataset', 'dataframe', 'give', 'for', 'statistics', 'descriptive']
+                        for name in potential_names:
+                            if name not in exclude_words:
+                                result = self.summarize_data(name)
+                                if 'error' not in result:
+                                    workspace_data['statistical_summary'] = result
+                                    tools_used.append("statistical_analysis")
+                                    break
+
+                    # Column search: "which columns contain X", "find column X"
+                    if any(kw in question_lower for kw in ['column', 'columns', 'find column', 'search column', 'contain', 'contains']):
+                        # Extract search pattern - look for quoted terms or words after 'contain'
+                        pattern = None
+                        if 'contain' in question_lower:
+                            parts = question_lower.split('contain')
+                            if len(parts) > 1:
+                                after_contain = parts[-1].strip()
+                                # Remove common words
+                                words = [w.strip('\'".,!?') for w in after_contain.split() if w not in ['the', 'a', 'an']]
+                                if words:
+                                    pattern = words[0]
+
+                        if pattern and len(pattern) > 2:
+                            workspace_data['column_search'] = self.search_columns(pattern)
+                            tools_used.append("smart_search")
+
+                    if workspace_data:
+                        api_results["workspace_data"] = workspace_data
+
                 # FinSight API for financial data - Use LLM for ticker/metric extraction
                 if "finsight" in request_analysis.get("apis", []):
                     session_key = f"{request.user_id}:{request.conversation_id}"
@@ -5659,7 +5952,63 @@ JSON:"""
 
             if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
                 return self._respond_with_workspace_listing(request, workspace_listing)
-            
+
+            # NEW: Workspace data inspection
+            if "workspace" in request_analysis["apis"]:
+                workspace_data = {}
+                question_lower = request.question.lower()
+
+                # Try to extract object/dataset names mentioned in the question
+                import re
+                potential_names = re.findall(r'\b[a-z_][a-z0-9_]{2,}\b', question_lower)
+
+                # Detect what workspace action is needed
+                if any(kw in question_lower for kw in ['what data', 'show data', 'list data', 'workspace', 'dataframes', 'datasets']):
+                    # List all workspace objects
+                    workspace_data['workspace_summary'] = self.describe_workspace()
+                    tools_used.append("workspace_inspection")
+
+                # Object inspection: "tell me about X", "what columns does X have", "describe X"
+                if any(kw in question_lower for kw in ['columns does', 'about', 'tell me', 'describe', 'inspect', 'show me']):
+                    for name in potential_names:
+                        if name not in ['the', 'a', 'an', 'my', 'data', 'dataset', 'dataframe']:
+                            result = self.inspect_workspace_object(name)
+                            if 'error' not in result:
+                                workspace_data['object_inspection'] = result
+                                tools_used.append("workspace_inspection")
+                                break
+
+                # Statistical summary: "statistics for X", "descriptive stats", "summarize X"
+                if any(kw in question_lower for kw in ['statistics', 'descriptive', 'summary', 'summarize', 'mean', 'median', 'std']):
+                    exclude_words = ['the', 'a', 'an', 'my', 'data', 'dataset', 'dataframe', 'give', 'for', 'statistics', 'descriptive']
+                    for name in potential_names:
+                        if name not in exclude_words:
+                            result = self.summarize_data(name)
+                            if 'error' not in result:
+                                workspace_data['statistical_summary'] = result
+                                tools_used.append("statistical_analysis")
+                                break
+
+                # Column search: "which columns contain X", "find column X"
+                if any(kw in question_lower for kw in ['column', 'columns', 'find column', 'search column', 'contain', 'contains']):
+                    # Extract search pattern - look for quoted terms or words after 'contain'
+                    pattern = None
+                    if 'contain' in question_lower:
+                        parts = question_lower.split('contain')
+                        if len(parts) > 1:
+                            after_contain = parts[-1].strip()
+                            # Remove common words
+                            words = [w.strip('\'".,!?') for w in after_contain.split() if w not in ['the', 'a', 'an']]
+                            if words:
+                                pattern = words[0]
+
+                    if pattern and len(pattern) > 2:
+                        workspace_data['column_search'] = self.search_columns(pattern)
+                        tools_used.append("smart_search")
+
+                if workspace_data:
+                    api_results["workspace_data"] = workspace_data
+
             if "finsight" in request_analysis["apis"]:
                 session_key = f"{request.user_id}:{request.conversation_id}"
                 tickers, metrics_to_fetch = self._plan_financial_request(request.question, session_key)
