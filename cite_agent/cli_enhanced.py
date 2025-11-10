@@ -6,7 +6,9 @@ Like Cursor/Claude - no clutter
 
 import argparse
 import asyncio
+import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 from .enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest
@@ -20,7 +22,9 @@ class NocturnalCLI:
     
     def __init__(self):
         self.agent: Optional[EnhancedNocturnalAgent] = None
-        self.auth = AuthManager()
+        config_dir_str = os.environ.get("CLAUDE_CLI_CONFIG_DIR")
+        config_dir = Path(config_dir_str) if config_dir_str else None
+        self.auth = AuthManager(config_dir=config_dir)
         self.session = None
         self.telemetry = None
         self.queries_today = 0
@@ -191,7 +195,9 @@ def main():
     args = parser.parse_args()
     
     if args.logout:
-        AuthManager().logout()
+        config_dir_str = os.environ.get("CLAUDE_CLI_CONFIG_DIR")
+        config_dir = Path(config_dir_str) if config_dir_str else None
+        AuthManager(config_dir=config_dir).logout()
         print("Logged out")
         return
     

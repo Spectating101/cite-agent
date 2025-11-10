@@ -2255,9 +2255,6 @@ class EnhancedNocturnalAgent:
             if language == 'zh-TW':
                 system_instruction = "CRITICAL: You MUST respond entirely in Traditional Chinese (繁體中文). Use Chinese characters (漢字), NOT pinyin romanization. All explanations, descriptions, and responses must be in Chinese characters."
 
-            # Get function calling tools (no hardcoded keywords!)
-            tools = self.get_tools_for_function_calling()
-
             # Build request with API context as separate field
             payload = {
                 "query": query,  # Keep query clean
@@ -2268,10 +2265,20 @@ class EnhancedNocturnalAgent:
                 "temperature": 0.2,  # Low temp for accuracy
                 "max_tokens": 4000,
                 "language": language,  # Pass language preference
-                "system_instruction": system_instruction if system_instruction else None,  # Only include if set
-                "tools": tools,  # Function calling tools - LLM decides what to use
-                "tool_choice": "auto"  # Let LLM decide when to use tools
+                "system_instruction": system_instruction if system_instruction else None  # Only include if set
             }
+
+            # OPTIONAL: Function calling (requires backend support)
+            # Enable with: ENABLE_FUNCTION_CALLING=true
+            enable_function_calling = os.getenv("ENABLE_FUNCTION_CALLING", "false").lower() == "true"
+
+            if enable_function_calling:
+                tools = self.get_tools_for_function_calling()
+                payload["tools"] = tools  # Function calling tools - LLM decides what to use
+                payload["tool_choice"] = "auto"  # Let LLM decide when to use tools
+
+                if debug_mode:
+                    print(f"🔧 Function calling ENABLED - sending {len(tools)} tools to backend")
             
             # Call backend
             headers = {
