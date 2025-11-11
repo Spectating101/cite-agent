@@ -4668,7 +4668,14 @@ JSON:"""
                 for i, paper in enumerate(research_data["results"][:5], 1):
                     papers_text += f"\n═══ PAPER {i} ═══\n"
                     papers_text += f"Title: {paper.get('title', 'No title')}\n"
-                    papers_text += f"Authors: {', '.join(paper.get('authors', [])[:3])}\n"
+                    # Handle authors as either list of dicts or list of strings
+                    authors = paper.get('authors', [])
+                    if authors:
+                        if isinstance(authors[0], dict):
+                            author_names = [a.get('name', 'Unknown') for a in authors[:3]]
+                        else:
+                            author_names = authors[:3]
+                        papers_text += f"Authors: {', '.join(author_names)}\n"
                     papers_text += f"Year: {paper.get('year', 'N/A')}\n"
                     if paper.get('abstract'):
                         papers_text += f"\nAbstract:\n{paper['abstract']}\n"
@@ -5266,7 +5273,14 @@ JSON:"""
                 for i, paper in enumerate(research_data["results"][:5], 1):
                     papers_text += f"\n═══ PAPER {i} ═══\n"
                     papers_text += f"Title: {paper.get('title', 'No title')}\n"
-                    papers_text += f"Authors: {', '.join(paper.get('authors', [])[:3])}\n"
+                    # Handle authors as either list of dicts or list of strings
+                    authors = paper.get('authors', [])
+                    if authors:
+                        if isinstance(authors[0], dict):
+                            author_names = [a.get('name', 'Unknown') for a in authors[:3]]
+                        else:
+                            author_names = authors[:3]
+                        papers_text += f"Authors: {', '.join(author_names)}\n"
                     papers_text += f"Year: {paper.get('year', 'N/A')}\n"
                     if paper.get('abstract'):
                         papers_text += f"\nAbstract:\n{paper['abstract']}\n"
