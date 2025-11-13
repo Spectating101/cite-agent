@@ -94,12 +94,13 @@ class EnhancedNocturnalAgent:
         self.archive = ConversationArchive()
 
         # Integration handler for Zotero, Mendeley, Notion
-        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler, FinancialHandler
+        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler, FinancialHandler, AgentUtilities
         self.integration_handler = IntegrationHandler()
         self.query_analyzer = QueryAnalyzer()
         self.file_ops = FileOperations()
         self.shell_handler = ShellHandler()
         self.financial_handler = FinancialHandler()
+        self.utilities = AgentUtilities()
 
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
@@ -2322,14 +2323,14 @@ class EnhancedNocturnalAgent:
         return self.shell_handler.is_safe_shell_command(cmd)
     
     def _check_token_budget(self, estimated_tokens: int) -> bool:
-        """Check if we have enough token budget"""
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        return (self.daily_token_usage + estimated_tokens) < self.daily_limit
+        return self.utilities.check_token_budget(self.daily_token_usage, self.daily_limit, estimated_tokens)
 
     def _check_user_token_budget(self, user_id: str, estimated_tokens: int) -> bool:
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        current = self.user_token_usage.get(user_id, 0)
-        return (current + estimated_tokens) < self.per_user_token_limit
+        return self.utilities.check_user_token_budget(self.user_token_usage, self.per_user_token_limit, user_id, estimated_tokens)
 
     def _resolve_daily_query_limit(self) -> int:
         limit_env = os.getenv("NOCTURNAL_QUERY_LIMIT")
@@ -2340,15 +2341,12 @@ class EnhancedNocturnalAgent:
         return DEFAULT_QUERY_LIMIT
 
     def _check_query_budget(self, user_id: Optional[str]) -> bool:
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        if self.daily_query_limit > 0 and self.daily_query_count >= self.daily_query_limit:
-            return False
-
-        effective_limit = self.per_user_query_limit if self.per_user_query_limit > 0 else self.daily_query_limit
-        if user_id and effective_limit > 0 and self.user_query_counts.get(user_id, 0) >= effective_limit:
-            return False
-
-        return True
+        return self.utilities.check_query_budget(
+            self.daily_query_count, self.daily_query_limit,
+            self.user_query_counts, self.per_user_query_limit, user_id
+        )
 
     def _record_query_usage(self, user_id: Optional[str]):
         self._ensure_usage_day()
@@ -2438,43 +2436,17 @@ class EnhancedNocturnalAgent:
         return response
     
     def _get_memory_context(self, user_id: str, conversation_id: str) -> str:
-        """Get relevant memory context for the conversation"""
-        if user_id not in self.memory:
-            self.memory[user_id] = {}
-        
-        if conversation_id not in self.memory[user_id]:
-            self.memory[user_id][conversation_id] = []
-        
-        # Get last 3 interactions for context
-        recent_memory = self.memory[user_id][conversation_id][-3:]
-        if not recent_memory:
-            return ""
-        
-        context = "Recent conversation context:\n"
-        for mem in recent_memory:
-            context += f"- {mem}\n"
-        return context
-    
+        """Delegate to AgentUtilities"""
+        return self.utilities.get_memory_context(self.memory, user_id, conversation_id)
+
     def _update_memory(self, user_id: str, conversation_id: str, interaction: str):
-        """Update memory with new interaction"""
-        if user_id not in self.memory:
-            self.memory[user_id] = {}
-        
-        if conversation_id not in self.memory[user_id]:
-            self.memory[user_id][conversation_id] = []
-        
-        self.memory[user_id][conversation_id].append(interaction)
-        
-        # Keep only last 10 interactions
-        if len(self.memory[user_id][conversation_id]) > 10:
-            self.memory[user_id][conversation_id] = self.memory[user_id][conversation_id][-10:]
+        """Delegate to AgentUtilities"""
+        self.utilities.update_memory(self.memory, user_id, conversation_id, interaction)
 
     @staticmethod
     def _hash_identifier(value: Optional[str]) -> Optional[str]:
-        if not value:
-            return None
-        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-        return digest[:16]
+        """Delegate to AgentUtilities"""
+        return AgentUtilities.hash_identifier(value)
 
     def _emit_telemetry(
         self,
@@ -2504,11 +2476,8 @@ class EnhancedNocturnalAgent:
 
     @staticmethod
     def _format_model_error(details: str) -> str:
-        headline = "⚠️ I couldn't finish the reasoning step because the language model call failed."
-        advice = "Please retry shortly or verify your Groq API keys and network connectivity."
-        if details:
-            return f"{headline}\n\nDetails: {details}\n\n{advice}"
-        return f"{headline}\n\n{advice}"
+        """Delegate to AgentUtilities"""
+        return AgentUtilities.format_model_error(details)
 
     def _summarize_command_output(
         self,
