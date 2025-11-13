@@ -35,6 +35,10 @@ setup(
         "rich>=13.7.0",
         "keyring>=24.3.0",
         "ddgs>=1.0.0",  # For web search fallback (DuckDuckGo)
+        # PDF Processing (for full paper reading)
+        "pypdf2>=3.0.0",
+        "pdfplumber>=0.10.0",
+        "pymupdf>=1.23.0",
     ],
     entry_points={
         "console_scripts": [

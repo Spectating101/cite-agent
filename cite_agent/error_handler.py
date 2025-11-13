@@ -1,228 +1,382 @@
+#!/usr/bin/env python3
 """
-Graceful Error Handling - Never Expose Technical Details to Users
-Converts technical errors to friendly, actionable messages
+Enhanced Error Handler - User-Friendly Error Messages
+
+Provides helpful error messages and recovery suggestions
 """
 
-import logging
-from typing import Optional, Dict, Any
+import sys
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+from typing import Optional
 
-logger = logging.getLogger(__name__)
+
+class ErrorHandler:
+    """Handles errors with user-friendly messages and recovery suggestions"""
+
+    def __init__(self):
+        self.console = Console()
+
+    def handle_authentication_error(self, error_message: str = None):
+        """Handle authentication errors with helpful suggestions"""
+        error_text = """
+# ❌ Authentication Error
+
+**Problem**: You're not authenticated with Cite-Agent.
+
+## 🔧 How to Fix:
+
+### Step 1: Run Setup
+```bash
+cite-agent --setup
+```
+
+This will prompt you for:
+- Email address (must be academic: .edu, .ac.uk, etc.)
+- Password
+
+### Step 2: Verify Credentials
+Make sure your email is from an academic institution:
+- ✅ Valid: user@university.edu, student@ac.uk
+- ❌ Invalid: user@gmail.com, user@company.com
+
+### Step 3: Check Network
+Make sure you have internet connection:
+```bash
+ping google.com
+```
+
+## 💡 Alternative: Use Environment Variables
+
+Set credentials in your environment:
+```bash
+export NOCTURNAL_ACCOUNT_EMAIL="your@email.edu"
+export NOCTURNAL_ACCOUNT_PASSWORD="your_password"
+```
+
+Then restart cite-agent.
+
+---
+
+**Still having issues?** Check the troubleshooting guide:
+https://github.com/Spectating101/cite-agent#troubleshooting
+"""
+        self.console.print(Panel(
+            Markdown(error_text),
+            title="[bold red]Authentication Required[/]",
+            border_style="red"
+        ))
+
+    def handle_backend_unreachable(self, backend_url: str = None):
+        """Handle backend connection errors"""
+        error_text = f"""
+# ❌ Backend Unreachable
+
+**Problem**: Cannot connect to Cite-Agent backend.
+
+{'**Backend URL**: ' + backend_url if backend_url else ''}
+
+## 🔧 Troubleshooting Steps:
+
+### 1. Check Internet Connection
+```bash
+# Test basic connectivity
+ping 8.8.8.8
+
+# Test DNS resolution
+ping google.com
+```
+
+### 2. Check Backend Status
+The backend might be temporarily down for maintenance.
+
+### 3. Verify Backend URL
+Current backend: {backend_url or 'https://cite-agent-api-720dfadd602c.herokuapp.com'}
+
+Check if URL is correct in your configuration.
+
+### 4. Check Firewall/Proxy
+If you're behind a corporate firewall:
+- Check if HTTPS connections are allowed
+- Configure proxy if needed
+
+### 5. Try Offline Mode (if available)
+Some features work without backend:
+```bash
+cite-agent --library        # View saved papers offline
+cite-agent --history        # View query history
+```
+
+## ⏰ If Backend is Down
+
+The Cite-Agent team is automatically notified. Service typically:
+- Returns within 15 minutes for routine issues
+- Updates posted at: https://status.cite-agent.com (if exists)
+
+## 💡 Workaround
+
+While waiting, you can:
+1. Work with previously saved papers in your library
+2. Export existing citations to BibTeX
+3. Review your search history
+
+---
+
+**Still stuck?** Report the issue:
+https://github.com/Spectating101/cite-agent/issues
+"""
+        self.console.print(Panel(
+            Markdown(error_text),
+            title="[bold red]Connection Failed[/]",
+            border_style="red"
+        ))
+
+    def handle_rate_limit_error(self, limit: int = None, reset_time: str = None):
+        """Handle rate limiting errors"""
+        error_text = f"""
+# ⚠️ Rate Limit Exceeded
+
+**Problem**: You've hit your query limit.
+
+{f'**Current Limit**: {limit} queries/hour' if limit else ''}
+{f'**Resets At**: {reset_time}' if reset_time else ''}
+
+## 🔧 Solutions:
+
+### Option 1: Wait
+Your quota will reset automatically.
+
+### Option 2: Upgrade Your Plan
+```bash
+cite-agent --upgrade
+```
+
+**Pricing Tiers:**
+- Free: 100 queries/month (100/hour)
+- Pro: 1,000 queries/month (1,000/hour) - $9/month
+- Academic: 500 queries/month (500/hour) - $5/month
+- Enterprise: Unlimited - $99/month
+
+### Option 3: Work Offline
+Use saved papers and citations:
+```bash
+cite-agent --library          # Browse saved papers
+cite-agent --export-bibtex    # Export citations
+cite-agent --history          # View past queries
+```
+
+## 💡 Tips to Avoid Rate Limits
+
+1. **Batch Your Queries**: Use batch processing for multiple searches
+2. **Save Results**: Use `--save` to avoid re-searching
+3. **Export Regularly**: Keep local copies of important papers
+4. **Use Library**: Search your library before querying APIs
+
+---
+
+**Check your usage**: `cite-agent --status`
+"""
+        self.console.print(Panel(
+            Markdown(error_text),
+            title="[bold yellow]Rate Limit Reached[/]",
+            border_style="yellow"
+        ))
+
+    def handle_pdf_library_error(self):
+        """Handle missing PDF processing library errors"""
+        error_text = """
+# ❌ PDF Processing Libraries Missing
+
+**Problem**: Required PDF processing libraries are not installed.
+
+## 🔧 How to Fix:
+
+### Quick Fix: Reinstall cite-agent
+```bash
+pip install --upgrade --force-reinstall cite-agent
+```
+
+This will install all required dependencies including:
+- pypdf2 (PDF text extraction)
+- pdfplumber (Advanced PDF parsing)
+- pymupdf (Fast PDF processing)
+
+### Manual Installation (if needed)
+```bash
+pip install pypdf2>=3.0.0 pdfplumber>=0.10.0 pymupdf>=1.23.0
+```
+
+### Verify Installation
+```bash
+python -c "import pypdf2, pdfplumber, fitz; print('✅ PDF libraries installed')"
+```
+
+## 💡 What This Enables
+
+With PDF libraries installed, you can:
+- 📄 Read full academic papers automatically
+- 🤖 Get AI-powered summaries of papers
+- 📊 Extract tables and figures from PDFs
+- 🔍 Search within PDF content
+- 💾 Build a searchable paper library
+
+## Example Usage
+
+Once fixed, try:
+```bash
+cite-agent "Read and summarize the BERT paper"
+```
+
+---
+
+**Still having issues?** Check Python version (requires 3.9+):
+```bash
+python --version
+```
+"""
+        self.console.print(Panel(
+            Markdown(error_text),
+            title="[bold red]Missing Dependencies[/]",
+            border_style="red"
+        ))
+
+    def handle_generic_error(self, error: Exception, context: str = None):
+        """Handle generic errors with helpful context"""
+        error_text = f"""
+# ❌ Error Occurred
+
+**Error Type**: {type(error).__name__}
+**Error Message**: {str(error)}
+
+{f'**Context**: {context}' if context else ''}
+
+## 🔧 General Troubleshooting:
+
+### 1. Check Logs
+Enable debug mode to see detailed logs:
+```bash
+export NOCTURNAL_DEBUG=1
+cite-agent "your query"
+```
+
+### 2. Update to Latest Version
+```bash
+cite-agent --update
+```
+
+### 3. Clear Cache
+Sometimes cached data can cause issues:
+```bash
+rm -rf ~/.nocturnal_archive
+cite-agent --setup
+```
+
+### 4. Check System Requirements
+- Python 3.9 or higher
+- Active internet connection
+- At least 100MB free disk space
+
+### 5. Report the Bug
+If this persists, please report it:
+```bash
+cite-agent --feedback
+```
+
+Or open an issue at:
+https://github.com/Spectating101/cite-agent/issues
+
+---
+
+**Include in your bug report:**
+- Error message above
+- Python version: `python --version`
+- Cite-agent version: `cite-agent --version`
+- Operating system
+"""
+        self.console.print(Panel(
+            Markdown(error_text),
+            title="[bold red]Unexpected Error[/]",
+            border_style="red"
+        ))
+
+    def show_help_message(self):
+        """Show general help message"""
+        help_text = """
+# 🆘 Getting Help
+
+## Quick Commands
+
+```bash
+cite-agent --help         # Show all available commands
+cite-agent --tips         # Show usage tips
+cite-agent --setup        # Reconfigure authentication
+cite-agent --version      # Show version info
+cite-agent --update       # Update to latest version
+```
+
+## Common Issues & Solutions
+
+### "Not authenticated"
+→ Run `cite-agent --setup`
+
+### "Backend unreachable"
+→ Check internet connection
+→ Try again in a few minutes
+
+### "Rate limit exceeded"
+→ Wait for quota reset
+→ Upgrade plan: `cite-agent --upgrade`
+
+### "Command not found"
+→ Add to PATH: `export PATH="$HOME/.local/bin:$PATH"`
+→ Or use: `python -m cite_agent.cli`
+
+## Resources
+
+- **Documentation**: https://github.com/Spectating101/cite-agent
+- **Examples**: Check `examples/` directory
+- **Issues**: https://github.com/Spectating101/cite-agent/issues
+- **Email**: support@cite-agent.com (if configured)
+
+## Debug Mode
+
+For detailed error information:
+```bash
+export NOCTURNAL_DEBUG=1
+cite-agent "your query"
+```
+"""
+        self.console.print(Panel(
+            Markdown(help_text),
+            title="[bold cyan]Cite-Agent Help[/]",
+            border_style="cyan"
+        ))
 
 
-class GracefulErrorHandler:
+# Global error handler instance
+_error_handler = ErrorHandler()
+
+
+def handle_error(error: Exception, error_type: str = "generic", **kwargs):
     """
-    Converts all technical errors to user-friendly messages
+    Global error handling function
 
-    PRINCIPLE: Users should never see:
-    - Stack traces
-    - API error codes
-    - Certificate errors
-    - Connection details
-    - Internal variable names
-    - Technical jargon
-
-    PRINCIPLE: Users should always see:
-    - What went wrong in simple terms
-    - What they can do about it
-    - Alternative options if available
+    Args:
+        error: The exception that occurred
+        error_type: Type of error (authentication, backend, rate_limit, pdf, generic)
+        **kwargs: Additional context (backend_url, limit, reset_time, etc.)
     """
-
-    # User-friendly error messages mapped from technical errors
-    ERROR_MESSAGES = {
-        # Network / Connection
-        'ConnectionError': "I'm having trouble connecting right now. Please try again in a moment.",
-        'Timeout': "That's taking longer than expected. Let me try a simpler approach.",
-        'TimeoutError': "That's taking longer than expected. Let me try a simpler approach.",
-        'ConnectTimeout': "I couldn't connect. Please check your network and try again.",
-
-        # API Errors
-        'HTTPError': "I encountered an issue accessing that service. Let me try again.",
-        'APIError': "Something went wrong on my end. Let me try another way.",
-        'RateLimitError': "I've hit my usage limit. Please try again in a few minutes.",
-        'QuotaExceeded': "I've reached my daily limit. Please try again tomorrow.",
-
-        # Authentication / Authorization
-        'AuthenticationError': "I'm having trouble with authentication. Please check your setup.",
-        'PermissionError': "I don't have permission to access that. Please check the permissions.",
-        'UnauthorizedError': "I need authorization to access that resource.",
-
-        # Data / Parsing
-        'JSONDecodeError': "I received data in an unexpected format. Let me try again.",
-        'ParseError': "I couldn't understand the response. Let me try another approach.",
-        'ValueError': "I received unexpected data. Let me try again.",
-        'KeyError': "I couldn't find the expected information. Let me try differently.",
-
-        # TLS / SSL / Certificate
-        'SSLError': "I'm having trouble with the secure connection. Please try again.",
-        'CertificateError': "I'm having trouble with the secure connection. Please try again.",
-        'TLS_error': "I'm having trouble with the secure connection. Please try again.",
-
-        # File System
-        'FileNotFoundError': "I couldn't find that file. Please check the path.",
-        'IsADirectoryError': "That's a directory, not a file. Please specify a file path.",
-        'NotADirectoryError': "That's a file, not a directory. Please specify a directory path.",
-        'PermissionError_file': "I don't have permission to access that file.",
-
-        # General
-        'Exception': "Something unexpected happened. Let me try again.",
-        'RuntimeError': "I encountered an unexpected issue. Let me try another approach.",
-    }
-
-    @classmethod
-    def handle_error(
-        cls,
-        error: Exception,
-        context: str = "",
-        fallback_action: Optional[str] = None
-    ) -> str:
-        """
-        Convert any error to a user-friendly message
-
-        Args:
-            error: The exception that occurred
-            context: What the agent was trying to do (e.g., "search papers", "read file")
-            fallback_action: What the user can do instead (e.g., "try a different search")
-
-        Returns:
-            User-friendly error message (never technical details)
-        """
-        # Log technical details for debugging (but don't show to user!)
-        logger.error(f"Error in {context}: {type(error).__name__}: {str(error)}", exc_info=True)
-
-        # Get error type name
-        error_type = type(error).__name__
-
-        # Look up user-friendly message
-        user_message = cls.ERROR_MESSAGES.get(error_type)
-
-        # Check for specific error patterns in the message
-        error_str = str(error).lower()
-
-        if not user_message:
-            # Pattern matching for specific errors
-            if 'certificate' in error_str or 'tls' in error_str or 'ssl' in error_str:
-                user_message = cls.ERROR_MESSAGES['CertificateError']
-            elif 'timeout' in error_str:
-                user_message = cls.ERROR_MESSAGES['Timeout']
-            elif 'connection' in error_str or 'connect' in error_str:
-                user_message = cls.ERROR_MESSAGES['ConnectionError']
-            elif 'rate limit' in error_str or 'quota' in error_str:
-                user_message = cls.ERROR_MESSAGES['RateLimitError']
-            elif 'auth' in error_str or 'unauthorized' in error_str:
-                user_message = cls.ERROR_MESSAGES['AuthenticationError']
-            elif 'not found' in error_str:
-                user_message = cls.ERROR_MESSAGES['FileNotFoundError']
-            else:
-                # Generic fallback
-                user_message = cls.ERROR_MESSAGES['Exception']
-
-        # Add context if provided
-        if context:
-            full_message = f"While trying to {context}, {user_message.lower()}"
-        else:
-            full_message = user_message
-
-        # Add fallback action if provided
-        if fallback_action:
-            full_message += f" {fallback_action}"
-
-        return full_message
-
-    @classmethod
-    def wrap_response_with_error_handling(cls, response: str) -> str:
-        """
-        Scan response for any leaked technical errors and clean them
-
-        This is a safety net in case errors slip through
-        """
-        # Technical terms that should NEVER appear in user responses
-        forbidden_patterns = [
-            ('TLS_error', 'secure connection issue'),
-            ('CERTIFICATE_VERIFY_FAILED', 'secure connection issue'),
-            ('upstream connect error', 'connection issue'),
-            ('stack trace', ''),
-            ('Traceback (most recent call last)', ''),
-            ('Exception:', ''),
-            ('ERROR:', ''),
-            ('⚠️ I couldn\'t finish the reasoning step', 'I encountered an issue'),
-            ('language model call failed', 'I had trouble processing that'),
-            ('API call failed', 'I had trouble accessing that service'),
-        ]
-
-        cleaned_response = response
-        had_technical_errors = False
-
-        for technical_term, friendly_replacement in forbidden_patterns:
-            if technical_term.lower() in cleaned_response.lower():
-                # If we find technical errors, replace with friendly version
-                logger.warning(f"Found leaked technical error in response: {technical_term}")
-                had_technical_errors = True
-
-                if friendly_replacement:
-                    # Replace with friendly term
-                    import re
-                    cleaned_response = re.sub(
-                        re.escape(technical_term),
-                        friendly_replacement,
-                        cleaned_response,
-                        flags=re.IGNORECASE
-                    )
-                else:
-                    # Remove the line entirely
-                    lines = cleaned_response.split('\n')
-                    cleaned_response = '\n'.join([
-                        line for line in lines
-                        if technical_term.lower() not in line.lower()
-                    ])
-
-        # If the response became empty or too short AFTER cleaning errors, provide generic friendly message
-        # Don't flag legitimately short responses (greetings, acknowledgments, etc.)
-        if had_technical_errors and len(cleaned_response.strip()) < 20:
-            cleaned_response = "I encountered an issue while processing that. Could you try rephrasing your question?"
-
-        return cleaned_response
-
-    @classmethod
-    def create_fallback_response(cls, original_query: str, error: Exception) -> str:
-        """
-        Create a complete fallback response when main processing fails
-
-        Returns a helpful response instead of exposing the error
-        """
-        # Get friendly error message
-        error_msg = cls.handle_error(error, "process your request")
-
-        # Try to be helpful based on query type
-        query_lower = original_query.lower()
-
-        suggestions = []
-
-        if any(word in query_lower for word in ['search', 'find', 'papers', 'research']):
-            suggestions.append("• Try a more specific search term")
-            suggestions.append("• Check if the topic exists in our database")
-
-        if any(word in query_lower for word in ['revenue', 'stock', 'financial', 'company']):
-            suggestions.append("• Try searching for a specific company by name")
-            suggestions.append("• Check if the company is publicly traded")
-
-        if any(word in query_lower for word in ['file', 'directory', 'folder', 'read']):
-            suggestions.append("• Check if the file path is correct")
-            suggestions.append("• Try using an absolute path")
-
-        response_parts = [error_msg]
-
-        if suggestions:
-            response_parts.append("\nYou could try:")
-            response_parts.extend(suggestions)
-
-        return '\n'.join(response_parts)
-
-
-# Convenient function for quick error handling
-def handle_error_gracefully(
-    error: Exception,
-    context: str = "",
-    fallback_action: Optional[str] = None
-) -> str:
-    """Shortcut function for graceful error handling"""
-    return GracefulErrorHandler.handle_error(error, context, fallback_action)
+    if error_type == "authentication":
+        _error_handler.handle_authentication_error(kwargs.get("message"))
+    elif error_type == "backend":
+        _error_handler.handle_backend_unreachable(kwargs.get("backend_url"))
+    elif error_type == "rate_limit":
+        _error_handler.handle_rate_limit_error(
+            kwargs.get("limit"),
+            kwargs.get("reset_time")
+        )
+    elif error_type == "pdf":
+        _error_handler.handle_pdf_library_error()
+    else:
+        _error_handler.handle_generic_error(error, kwargs.get("context"))

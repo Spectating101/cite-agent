@@ -27,17 +27,6 @@ from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 
-# Quality improvements - Phase 1
-from .error_handler import GracefulErrorHandler, handle_error_gracefully
-from .response_formatter import ResponseFormatter
-from .quality_gate import ResponseQualityGate, assess_response_quality
-from .response_pipeline import ResponsePipeline
-
-# Intelligence improvements - Phase 2
-from .thinking_blocks import ThinkingBlockGenerator, generate_and_format_thinking
-from .tool_orchestrator import ToolOrchestrator
-from .confidence_calibration import ConfidenceCalibrator, assess_and_apply_caveat
-
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -103,7 +92,17 @@ class EnhancedNocturnalAgent:
         self.workflow = WorkflowManager()
         self.last_paper_result = None  # Track last paper mentioned for "save that"
         self.archive = ConversationArchive()
-        
+
+        # Integration handler for Zotero, Mendeley, Notion
+        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler, FinancialHandler, AgentUtilities, APIHandler
+        self.integration_handler = IntegrationHandler()
+        self.query_analyzer = QueryAnalyzer()
+        self.file_ops = FileOperations()
+        self.shell_handler = ShellHandler()
+        self.financial_handler = FinancialHandler()
+        self.utilities = AgentUtilities()
+        self.api_handler = APIHandler()
+
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
             'last_file': None,           # Last file mentioned/read
@@ -785,17 +784,8 @@ class EnhancedNocturnalAgent:
             execution_results=execution_results
         )
     def _format_currency_value(self, value: float) -> str:
-        try:
-            abs_val = abs(value)
-            if abs_val >= 1e12:
-                return f"${value / 1e12:.2f} trillion"
-            if abs_val >= 1e9:
-                return f"${value / 1e9:.2f} billion"
-            if abs_val >= 1e6:
-                return f"${value / 1e6:.2f} million"
-            return f"${value:,.2f}"
-        except Exception:
-            return str(value)
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.format_currency_value(value)
 
     def _respond_with_financial_metrics(self, request: ChatRequest, payload: Dict[str, Any]) -> ChatResponse:
         ticker, metrics = next(iter(payload.items()))
@@ -898,11 +888,9 @@ class EnhancedNocturnalAgent:
                 }
 
             content = p.read_text(errors="ignore")
-            # Increase preview size for better code analysis
-            # Show first 300 lines OR 100KB (whichever is smaller)
-            truncated = len(content) > 102400  # 100KB
-            snippet = content[:102400]
-            preview = "\n".join(snippet.splitlines()[:300])  # Increased from 60 to 300 lines
+            truncated = len(content) > 65536
+            snippet = content[:65536]
+            preview = "\n".join(snippet.splitlines()[:60])
             return {
                 "path": str(p),
                 "type": "text",
@@ -962,24 +950,12 @@ class EnhancedNocturnalAgent:
         return False
 
     def _is_simple_greeting(self, text: str) -> bool:
-        greetings = {"hi", "hello", "hey", "hola", "howdy", "greetings"}
-        normalized = text.lower().strip()
-        return any(normalized.startswith(greet) for greet in greetings)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_simple_greeting(text)
 
     def _is_casual_acknowledgment(self, text: str) -> bool:
-        acknowledgments = {
-            "thanks",
-            "thank you",
-            "thx",
-            "ty",
-            "appreciate it",
-            "got it",
-            "cool",
-            "great",
-            "awesome"
-        }
-        normalized = text.lower().strip()
-        return any(normalized.startswith(ack) for ack in acknowledgments)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_casual_acknowledgment(text)
 
     def _detect_language_preference(self, text: str) -> None:
         """
@@ -1005,32 +981,12 @@ class EnhancedNocturnalAgent:
                 self.language_preference = 'en'
 
     def _is_generic_test_prompt(self, text: str) -> bool:
-        """Detect simple 'test' style probes that don't need full analysis."""
-        normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-        words = [w for w in normalized.split() if w]
-        if not words or "test" not in words:
-            return False
-        if len(words) > 4:
-            return False
-        allowed = {"test", "testing", "just", "this", "is", "a", "only"}
-        return all(w in allowed for w in words)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_generic_test_prompt(text)
 
     def _is_location_query(self, text: str) -> bool:
-        """Detect requests asking for the current working directory."""
-        normalized = re.sub(r"[^a-z0-9/._\s-]", " ", text.lower())
-        normalized = " ".join(normalized.split())
-        location_phrases = [
-            "where are we",
-            "where am i",
-            "where are we right now",
-            "what directory",
-            "current directory",
-            "current folder",
-            "current path",
-        ]
-        if any(phrase in normalized for phrase in location_phrases):
-            return True
-        return normalized in {"pwd", "pwd?"}
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_location_query(text)
 
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
@@ -1135,8 +1091,7 @@ class EnhancedNocturnalAgent:
             "Cite sources: papers (title+authors), files (path:line), API data.",
             "shell_info shows already-executed commands. Present RESULTS concisely - no commands shown.",
             "For follow-up questions with pronouns ('it', 'that'), infer from conversation context.",
-            "Ambiguous query? Ask clarification naturally - use phrases like 'What kind of X?', 'Which X?', 'Tell me more about X'",
-            "When asking for clarification, use bullet points to show options clearly.",
+            "Ambiguous query? Ask clarification OR infer from context if reasonable.",
             "Be honest about uncertainty.",
             "",
             "CRITICAL - ANSWER WHAT WAS ASKED:",
@@ -1166,23 +1121,9 @@ class EnhancedNocturnalAgent:
 
         guidelines.extend([
             "",
-            "- COMMUNICATION RULES - ACTION-FIRST MODE:",
+            "- COMMUNICATION RULES:",
             "- You MUST NOT return an empty response. EVER.",
-            "- SHOW results proactively, don't just describe them. DO the obvious next step automatically.",
-            "- If listing files → SHOW preview of the main file (don't ask permission)",
-            "- If finding papers → SHOW abstracts/summaries (don't ask permission)",
-            "- If explaining code → SHOW key functions with examples (don't ask permission)",
-            "- If querying data → SHOW the data with context (don't ask permission)",
-            "- LESS TALK, MORE ACTION - responses should be 70% data/results, 30% explanation",
-            "- NEVER ask 'Want me to...?' or 'Should I...?' - just DO the helpful next step",
-            "",
-            "🚨 CRITICAL: RESEARCH PAPERS - If you see 'Research API snapshot' below:",
-            "- The papers have ALREADY been found - DO NOT say 'we will search' or 'attempting search'",
-            "- The abstracts are PROVIDED - READ THEM and SUMMARIZE THE KEY FINDINGS",
-            "- You MUST write at least 500 words synthesizing the papers",
-            "- Include: paper titles, key methods, findings, and contributions from the abstracts",
-            "- Compare and contrast the approaches across papers",
-            "- DO NOT just list titles - EXPLAIN what each paper discovered",
+            "- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., \"Okay, I'll check the contents of that directory,\" or \"I will search for that file.\")",
         ])
 
         guidelines.extend([
@@ -1405,15 +1346,12 @@ class EnhancedNocturnalAgent:
         if "fallback" not in tools:
             tools.append("fallback")
 
-        # ========================================
-        # PHASE 1 GRACEFUL FALLBACK
-        # User-friendly messaging instead of technical errors
-        # ========================================
+        header = "⚠️ Temporary LLM downtime\n\n"
 
         if self._is_simple_greeting(request.question):
             body = (
-                "Hi there! I'm running into some temporary limits right now. "
-                "Feel free to try again in a moment, or I can still help with specific data queries."
+                "Hi there! I'm currently at my Groq capacity, so I can't craft a full narrative response just yet. "
+                "You're welcome to try again in a little while, or I can still fetch finance and research data for you."
             )
         else:
             details: List[str] = []
@@ -1428,21 +1366,39 @@ class EnhancedNocturnalAgent:
 
             research = api_results.get("research")
             if research:
-                payload_full = json.dumps(research, indent=2)
-                # Increase limit for literature review - need full abstracts (10000 chars for 5 papers)
-                payload = payload_full[:10000]
-                if len(payload_full) > 10000:
-                    payload += "\n…"
+                # Format research results conversationally (no JSON dump)
+                results = research.get("results", [])
 
-                # Check if results are empty and add explicit warning
-                if research.get("results") == [] or not research.get("results"):
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
-                    details.append("🚨 **CRITICAL: API RETURNED EMPTY RESULTS - DO NOT GENERATE ANY PAPER DETAILS**")
-                    details.append("🚨 **DO NOT PROVIDE AUTHORS, TITLES, DOIs, OR ANY PAPER INFORMATION**")
-                    details.append("🚨 **SAY 'NO PAPERS FOUND' AND STOP - DO NOT HALLUCINATE**")
+                if not results:
+                    details.append("📚 No papers found for your query. Try different search terms or broader keywords.")
                 else:
-                    details.append(f"**Research API snapshot**\n```json\n{payload}\n```")
-                    details.append("✅ **IMPORTANT: SUMMARIZE THESE PAPERS IN DETAIL - Include key findings, methods, and contributions from abstracts**")
+                    # Create conversational paper list
+                    paper_list = []
+                    for i, paper in enumerate(results[:10], 1):
+                        title = paper.get("title", "Untitled")
+                        authors = paper.get("authors", [])
+                        author_str = ", ".join([a.get("name", "") for a in authors[:2]])
+                        if len(authors) > 2:
+                            author_str += f" et al."
+                        year = paper.get("year", "n.d.")
+                        citations = paper.get("citationCount", 0)
+
+                        paper_entry = f"{i}. **{title}**"
+                        if author_str:
+                            paper_entry += f"\n   Authors: {author_str}"
+                        paper_entry += f"\n   Year: {year} | Citations: {citations:,}"
+
+                        # Add abstract preview if available
+                        abstract = paper.get("abstract", "")
+                        if abstract:
+                            preview = abstract[:150].strip()
+                            if len(abstract) > 150:
+                                preview += "..."
+                            paper_entry += f"\n   {preview}"
+
+                        paper_list.append(paper_entry)
+
+                    details.append(f"📚 **Found {len(results)} papers:**\n\n" + "\n\n".join(paper_list))
 
             files_context = api_results.get("files_context")
             if files_context:
@@ -1453,17 +1409,23 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I gathered the data you asked for, but I'm having trouble processing it fully right now. "
-                    "Here's what I found:"
+                    "I've gathered the information you requested. While I'm temporarily at Groq capacity for detailed analysis, "
+                    "here's what I found:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
-                    "I'm running into some temporary limits. "
-                    "Please try again in a moment, and I should be able to help."
+                    "I'm temporarily out of Groq quota, so I can't compose a full answer. "
+                    "Please try again in a bit, or ask me to queue this work for later."
                 )
 
-        # Friendly closing without technical details
-        message = body
+        footer = (
+            "\n\nNext steps:\n"
+            "• Wait for the Groq daily quota to reset (usually within 24 hours).\n"
+            "• Add another API key in your environment for automatic rotation.\n"
+            "• Keep the conversation open—I’ll resume normal replies once capacity returns."
+        )
+
+        message = header + body + footer
 
         self.conversation_history.append({"role": "user", "content": request.question})
         self.conversation_history.append({"role": "assistant", "content": message})
@@ -1497,67 +1459,14 @@ class EnhancedNocturnalAgent:
         )
 
     def _extract_tickers_from_text(self, text: str) -> List[str]:
-        """Find tickers either as explicit symbols or from known company names."""
-        text_lower = text.lower()
-        # Explicit ticker-like symbols
-        ticker_candidates: List[str] = []
-        for token in re.findall(r"\b[A-Z]{1,5}(?:\d{0,2})\b", text):
-            ticker_candidates.append(token)
-        # Company name matches
-        for name, sym in self.company_name_to_ticker.items():
-            if name and name in text_lower:
-                ticker_candidates.append(sym)
-        # Deduplicate preserve order
-        seen = set()
-        ordered: List[str] = []
-        for t in ticker_candidates:
-            if t not in seen:
-                seen.add(t)
-                ordered.append(t)
-        return ordered[:4]
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.extract_tickers_from_text(text, self.company_name_to_ticker)
 
     def _plan_financial_request(self, question: str, session_key: Optional[str] = None) -> Tuple[List[str], List[str]]:
-        """Derive ticker and metric targets for a financial query."""
-        tickers = list(self._extract_tickers_from_text(question))
-        question_lower = question.lower()
-
-        if not tickers:
-            if "apple" in question_lower:
-                tickers.append("AAPL")
-            if "microsoft" in question_lower:
-                tickers.append("MSFT" if "AAPL" not in tickers else "MSFT")
-
-        metrics_to_fetch: List[str] = []
-        keyword_map = [
-            ("revenue", ["revenue", "sales", "top line"]),
-            ("grossProfit", ["gross profit", "gross margin", "margin"]),
-            ("operatingIncome", ["operating income", "operating profit", "ebit"]),
-            ("netIncome", ["net income", "profit", "earnings", "bottom line"]),
-        ]
-
-        for metric, keywords in keyword_map:
-            if any(kw in question_lower for kw in keywords):
-                metrics_to_fetch.append(metric)
-
-        if session_key:
-            last_topic = self._session_topics.get(session_key)
-        else:
-            last_topic = None
-
-        if not metrics_to_fetch and last_topic and last_topic.get("metrics"):
-            metrics_to_fetch = list(last_topic["metrics"])
-
-        if not metrics_to_fetch:
-            metrics_to_fetch = ["revenue", "grossProfit"]
-
-        deduped: List[str] = []
-        seen: Set[str] = set()
-        for symbol in tickers:
-            if symbol and symbol not in seen:
-                seen.add(symbol)
-                deduped.append(symbol)
-
-        return deduped[:2], metrics_to_fetch
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.plan_financial_request(
+            question, self.company_name_to_ticker, self._session_topics, session_key
+        )
     
     async def initialize(self, force_reload: bool = False):
         """Initialize the agent with API keys and shell session."""
@@ -1940,703 +1849,133 @@ class EnhancedNocturnalAgent:
         json_body: Optional[Dict[str, Any]] = None,
         data: Any = None,
     ) -> Dict[str, Any]:
-        if not self.session:
-            return {"error": "HTTP session not initialized"}
-
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("Files", f"{method.upper()} {endpoint}", False, detail)
-            return {"error": f"Workspace API unavailable: {detail or 'backend offline'}"}
-
-        url = f"{self.files_base_url}{endpoint}"
-        request_method = getattr(self.session, method.lower(), None)
-        if not request_method:
-            return {"error": f"Unsupported HTTP method: {method}"}
-
-        try:
-            async with request_method(url, params=params, json=json_body, data=data, timeout=20) as response:
-                payload: Any
-                if response.content_type and "json" in response.content_type:
-                    payload = await response.json()
-                else:
-                    payload = {"raw": await response.text()}
-
-                success = response.status == 200
-                self._record_data_source(
-                    "Files",
-                    f"{method.upper()} {endpoint}",
-                    success,
-                    "" if success else f"HTTP {response.status}"
-                )
-
-                if success:
-                    return payload if isinstance(payload, dict) else {"data": payload}
-
-                detail_msg = payload.get("detail") if isinstance(payload, dict) else None
-                return {"error": detail_msg or f"Files API error: {response.status}"}
-        except Exception as exc:
-            self._record_data_source("Files", f"{method.upper()} {endpoint}", False, str(exc))
-            return {"error": f"Files API call failed: {exc}"}
+        """Delegate to APIHandler"""
+        return await self.api_handler.call_files_api(
+            method, endpoint,
+            params=params,
+            json_body=json_body,
+            data=data,
+            session=self.session,
+            files_base_url=self.files_base_url,
+            ensure_backend_ready_fn=self._ensure_backend_ready,
+            record_data_source_fn=self._record_data_source
+        )
 
     async def _call_archive_api(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Call Archive API endpoint with retry mechanism"""
-        max_retries = 3
-        retry_delay = 1
-        
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("Archive", f"POST {endpoint}", False, detail)
-            return {"error": f"Archive backend unavailable: {detail or 'backend offline'}"}
-
-        for attempt in range(max_retries):
-            try:
-                if not self.session:
-                    return {"error": "HTTP session not initialized"}
-                
-                url = f"{self.archive_base_url}/{endpoint}"
-                # Start fresh with headers
-                headers = {}
-                
-                # Always use demo key for Archive (public research data)
-                headers["X-API-Key"] = "demo-key-123"
-                headers["Content-Type"] = "application/json"
-                
-                # Also add JWT if we have it
-                if self.auth_token:
-                    headers["Authorization"] = f"Bearer {self.auth_token}"
-                
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-                if debug_mode:
-                    print(f"🔍 Archive headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
-                    print(f"🔍 Archive URL: {url}")
-                    print(f"🔍 Archive data: {data}")
-                
-                async with self.session.post(url, json=data, headers=headers, timeout=30) as response:
-                    if debug_mode:
-                        print(f"🔍 Archive response status: {response.status}")
-                    
-                    if response.status == 200:
-                        payload = await response.json()
-                        self._record_data_source("Archive", f"POST {endpoint}", True)
-                        return payload
-                    elif response.status == 422:  # Validation error
-                        try:
-                            error_detail = await response.json()
-                            logger.error(f"Archive API validation error (HTTP 422): {error_detail}")
-                        except Exception:
-                            error_detail = await response.text()
-                            logger.error(f"Archive API validation error (HTTP 422): {error_detail}")
-
-                        if attempt < max_retries - 1:
-                            # Retry with simplified request
-                            if "sources" in data and len(data["sources"]) > 1:
-                                data["sources"] = [data["sources"][0]]  # Try single source
-                                logger.info(f"Retrying with single source: {data['sources']}")
-                            await asyncio.sleep(retry_delay)
-                            continue
-                        self._record_data_source("Archive", f"POST {endpoint}", False, "422 validation error")
-                        return {"error": f"Archive API validation error: {error_detail}"}
-                    elif response.status == 429:  # Rate limited
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
-                            continue
-                        self._record_data_source("Archive", f"POST {endpoint}", False, "rate limited")
-                        return {"error": "Archive API rate limited. Please try again later."}
-                    elif response.status == 401:
-                        self._record_data_source("Archive", f"POST {endpoint}", False, "401 unauthorized")
-                        return {"error": "Archive API authentication failed. Please check API key."}
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Archive API error (HTTP {response.status}): {error_text}")
-                        self._record_data_source("Archive", f"POST {endpoint}", False, f"HTTP {response.status}")
-                        return {"error": f"Archive API error: {response.status}"}
-                        
-            except asyncio.TimeoutError:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
-                    continue
-                self._record_data_source("Archive", f"POST {endpoint}", False, "timeout")
-                return {"error": "Archive API timeout. Please try again later."}
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
-                    continue
-                self._record_data_source("Archive", f"POST {endpoint}", False, str(e))
-                return {"error": f"Archive API call failed: {e}"}
-        
-        return {"error": "Archive API call failed after all retries"}
+        """Delegate to APIHandler"""
+        return await self.api_handler.call_archive_api(
+            endpoint, data,
+            session=self.session,
+            archive_base_url=self.archive_base_url,
+            auth_token=self.auth_token,
+            ensure_backend_ready_fn=self._ensure_backend_ready,
+            record_data_source_fn=self._record_data_source
+        )
     
     async def _call_finsight_api(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Call FinSight API endpoint with retry mechanism"""
-        max_retries = 3
-        retry_delay = 1
-        
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("FinSight", f"GET {endpoint}", False, detail)
-            return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
-
-        for attempt in range(max_retries):
-            try:
-                if not self.session:
-                    return {"error": "HTTP session not initialized"}
-                
-                url = f"{self.finsight_base_url}/{endpoint}"
-                # Start fresh with headers - don't use _default_headers which might be wrong
-                headers = {}
-
-                # Always use demo key for FinSight (SEC data is public)
-                headers["X-API-Key"] = "demo-key-123"
-
-                # Mark request as agent-mediated for product separation
-                headers["X-Request-Source"] = "agent"
-
-                # Also add JWT if we have it
-                if self.auth_token:
-                    headers["Authorization"] = f"Bearer {self.auth_token}"
-
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-                if debug_mode:
-                    print(f"🔍 FinSight headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
-                    print(f"🔍 FinSight URL: {url}")
-                
-                async with self.session.get(url, params=params, headers=headers, timeout=30) as response:
-                    if response.status == 200:
-                        payload = await response.json()
-                        self._record_data_source("FinSight", f"GET {endpoint}", True)
-                        return payload
-                    elif response.status == 429:  # Rate limited
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
-                            continue
-                        self._record_data_source("FinSight", f"GET {endpoint}", False, "rate limited")
-                        return {"error": "FinSight API rate limited. Please try again later."}
-                    elif response.status == 401:
-                        self._record_data_source("FinSight", f"GET {endpoint}", False, "401 unauthorized")
-                        return {"error": "FinSight API authentication failed. Please check API key."}
-                    else:
-                        self._record_data_source("FinSight", f"GET {endpoint}", False, f"HTTP {response.status}")
-                        return {"error": f"FinSight API error: {response.status}"}
-                        
-            except asyncio.TimeoutError:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
-                    continue
-                self._record_data_source("FinSight", f"GET {endpoint}", False, "timeout")
-                return {"error": "FinSight API timeout. Please try again later."}
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
-                    continue
-                self._record_data_source("FinSight", f"GET {endpoint}", False, str(e))
-                return {"error": f"FinSight API call failed: {e}"}
-        
-        return {"error": "FinSight API call failed after all retries"}
+        """Delegate to APIHandler"""
+        return await self.api_handler.call_finsight_api(
+            endpoint, params,
+            session=self.session,
+            finsight_base_url=self.finsight_base_url,
+            auth_token=self.auth_token,
+            ensure_backend_ready_fn=self._ensure_backend_ready,
+            record_data_source_fn=self._record_data_source
+        )
     
     async def _call_finsight_api_post(self, endpoint: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Call FinSight API endpoint with POST request"""
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("FinSight", f"POST {endpoint}", False, detail)
-            return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
-
-        try:
-            if not self.session:
-                return {"error": "HTTP session not initialized"}
-            
-            url = f"{self.finsight_base_url}/{endpoint}"
-            headers = getattr(self, "_default_headers", None)
-            if headers:
-                headers = dict(headers)
-            async with self.session.post(url, json=data, headers=headers) as response:
-                if response.status == 200:
-                    payload = await response.json()
-                    self._record_data_source("FinSight", f"POST {endpoint}", True)
-                    return payload
-                self._record_data_source("FinSight", f"POST {endpoint}", False, f"HTTP {response.status}")
-                return {"error": f"FinSight API error: {response.status}"}
-                    
-        except Exception as e:
-            self._record_data_source("FinSight", f"POST {endpoint}", False, str(e))
-            return {"error": f"FinSight API call failed: {e}"}
+        """Delegate to APIHandler"""
+        default_headers = getattr(self, "_default_headers", None)
+        return await self.api_handler.call_finsight_api_post(
+            endpoint, data,
+            session=self.session,
+            finsight_base_url=self.finsight_base_url,
+            default_headers=default_headers,
+            ensure_backend_ready_fn=self._ensure_backend_ready,
+            record_data_source_fn=self._record_data_source
+        )
     
     async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
-        """Search academic papers using Archive API with resilient fallbacks."""
-        source_sets: List[List[str]] = [
-            ["semantic_scholar", "openalex"],
-            ["semantic_scholar"],
-            ["openalex"],
-            ["pubmed"],
-            ["offline"],
-        ]
+        """Delegate to APIHandler"""
+        return await self.api_handler.search_academic_papers(
+            query, limit,
+            call_archive_api_fn=self._call_archive_api
+        )
 
-        tried: List[List[str]] = []
-        provider_errors: List[Dict[str, Any]] = []
-        aggregated_payload: Dict[str, Any] = {"results": []}
-
-        for sources in source_sets:
-            data = {"query": query, "limit": limit, "sources": sources}
-            tried.append(list(sources))
-            result = await self._call_archive_api("search", data)
-
-            if "error" in result:
-                provider_errors.append({"sources": sources, "error": result["error"]})
-                continue
-
-            results = result.get("results") or result.get("papers") or []
-            # Validate papers have minimal required fields
-            validated_results = []
-            for paper in results:
-                if isinstance(paper, dict) and paper.get("title") and paper.get("year"):
-                    validated_results.append(paper)
-                else:
-                    logger.warning(f"Skipping invalid paper: {paper}")
-
-            if validated_results:
-                aggregated_payload = dict(result)
-                aggregated_payload["results"] = validated_results
-                aggregated_payload["validation_note"] = f"Validated {len(validated_results)} out of {len(results)} papers"
-                break
-
-        aggregated_payload.setdefault("results", [])
-        aggregated_payload["sources_tried"] = [",".join(s) for s in tried]
-
-        if provider_errors:
-            aggregated_payload["provider_errors"] = provider_errors
-
-        # CRITICAL: Add explicit marker for empty results to prevent hallucination
-        if not aggregated_payload["results"]:
-            aggregated_payload["notes"] = (
-                "No papers were returned by the research providers. This often occurs during "
-                "temporary rate limits; please retry in a minute or adjust the query scope."
-            )
-            aggregated_payload["EMPTY_RESULTS"] = True
-            aggregated_payload["warning"] = "DO NOT GENERATE FAKE PAPERS - API returned zero results"
-
-        return aggregated_payload
-    
     async def synthesize_research(self, paper_ids: List[str], max_words: int = 500) -> Dict[str, Any]:
-        """Synthesize research papers using Archive API"""
-        data = {
-            "paper_ids": paper_ids,
-            "max_words": max_words,
-            "focus": "key_findings",
-            "style": "academic"
-        }
-        return await self._call_archive_api("synthesize", data)
-    
+        """Delegate to APIHandler"""
+        return await self.api_handler.synthesize_research(
+            paper_ids, max_words,
+            call_archive_api_fn=self._call_archive_api
+        )
+
     async def get_financial_data(self, ticker: str, metric: str, limit: int = 12) -> Dict[str, Any]:
-        """Get financial data using FinSight API"""
-        params = {
-            "freq": "Q",
-            "limit": limit
-        }
-        return await self._call_finsight_api(f"kpis/{ticker}/{metric}", params)
-    
+        """Delegate to APIHandler"""
+        return await self.api_handler.get_financial_data(
+            ticker, metric, limit,
+            call_finsight_api_fn=self._call_finsight_api
+        )
+
     async def get_financial_metrics(self, ticker: str, metrics: List[str] = None) -> Dict[str, Any]:
-        """Get financial metrics using FinSight KPI endpoints (with schema drift fixes)"""
-        if metrics is None:
-            metrics = ["revenue", "grossProfit", "operatingIncome", "netIncome"]
+        """Delegate to APIHandler"""
+        return await self.api_handler.get_financial_metrics(
+            ticker, metrics,
+            call_finsight_api_fn=self._call_finsight_api
+        )
 
-        if not metrics:
-            return {}
+    def _detect_integration_request(self, question: str) -> Optional[Dict[str, Any]]:
+        """Delegate to IntegrationHandler"""
+        return self.integration_handler.detect_integration_request(question)
 
-        async def _fetch_metric(metric_name: str) -> Dict[str, Any]:
-            params = {"period": "latest", "freq": "Q"}
-            try:
-                result = await self._call_finsight_api(f"calc/{ticker}/{metric_name}", params)
-            except Exception as exc:
-                return {metric_name: {"error": str(exc)}}
+    def _extract_papers_from_context(self, api_results: Dict[str, Any], question: str) -> List[Dict[str, Any]]:
+        """Delegate to IntegrationHandler"""
+        return self.integration_handler.extract_papers_from_context(api_results, question)
 
-            if "error" in result:
-                return {metric_name: {"error": result["error"]}}
-            return {metric_name: result}
-
-        tasks = [asyncio.create_task(_fetch_metric(metric)) for metric in metrics]
-        results: Dict[str, Any] = {}
-
-        for payload in await asyncio.gather(*tasks):
-            results.update(payload)
-
-        return results
+    async def _push_to_integration_conversational(
+        self,
+        target: str,
+        papers: List[Dict[str, Any]],
+        collection: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Delegate to IntegrationHandler"""
+        return await self.integration_handler.push_to_integration(target, papers, collection)
 
     def _looks_like_user_prompt(self, command: str) -> bool:
-        command_lower = command.strip().lower()
-        if not command_lower:
-            return True
-        phrases = [
-            "ask the user",
-            "can you run",
-            "please run",
-            "tell the user",
-            "ask them",
-        ]
-        return any(phrase in command_lower for phrase in phrases)
+        """Delegate to ShellHandler"""
+        return self.shell_handler.looks_like_user_prompt(command)
 
     def _infer_shell_command(self, question: str) -> str:
-        question_lower = question.lower()
-        if any(word in question_lower for word in ["list", "show", "files", "directory", "folder", "ls"]):
-            return "ls -lah"
-        if any(word in question_lower for word in ["where", "pwd", "current directory", "location"]):
-            return "pwd"
-        if "read" in question_lower and any(ext in question_lower for ext in [".py", ".txt", ".csv", "file"]):
-            return "ls -lah"
-        return "pwd"
+        """Delegate to ShellHandler"""
+        return self.shell_handler.infer_shell_command(question)
 
     def execute_command(self, command: str) -> str:
-        """Execute command and return output - improved with echo markers"""
-        try:
-            if self.shell_session is None:
-                return "ERROR: Shell session not initialized"
-            
-            # Clean command - remove natural language prefixes
-            command = command.strip()
-            prefixes_to_remove = [
-                'run this bash:', 'execute this:', 'run command:', 'execute:', 
-                'run this:', 'run:', 'bash:', 'command:', 'this bash:', 'this:',
-                'r code to', 'R code to', 'python code to', 'in r:', 'in R:',
-                'in python:', 'in bash:', 'with r:', 'with bash:'
-            ]
-            for prefix in prefixes_to_remove:
-                if command.lower().startswith(prefix.lower()):
-                    command = command[len(prefix):].strip()
-                    # Try again in case of nested prefixes
-                    for prefix2 in prefixes_to_remove:
-                        if command.lower().startswith(prefix2.lower()):
-                            command = command[len(prefix2):].strip()
-                            break
-                    break
-            
-            # Use echo markers to detect when command is done
-            import uuid
-            marker = f"CMD_DONE_{uuid.uuid4().hex[:8]}"
-            
-            # Send command with marker
-            terminator = "\r\n" if self._is_windows else "\n"
-            if self._is_windows:
-                full_command = f"{command}; echo '{marker}'{terminator}"
-            else:
-                full_command = f"{command}; echo '{marker}'{terminator}"
-            self.shell_session.stdin.write(full_command)
-            self.shell_session.stdin.flush()
-
-            # Read until we see the marker
-            output_lines = []
-            start_time = time.time()
-            timeout = 30  # Increased for R scripts
-            
-            while time.time() - start_time < timeout:
-                try:
-                    line = self.shell_session.stdout.readline()
-                    if not line:
-                        break
-                    
-                    line = line.rstrip()
-                    
-                    # Check if we hit the marker
-                    if marker in line:
-                        break
-                    
-                    output_lines.append(line)
-                except Exception:
-                    break
-            
-            output = '\n'.join(output_lines).strip()
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            
-            # Log execution details in debug mode
-            if debug_mode:
-                output_preview = output[:200] if output else "(no output)"
-                print(f"✅ Command executed: {command}")
-                print(f"📤 Output ({len(output)} chars): {output_preview}...")
-            
-            return output if output else "Command executed (no output)"
-
-        except Exception as e:
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            if debug_mode:
-                print(f"❌ Command failed: {command}")
-                print(f"❌ Error: {e}")
-            return f"ERROR: {e}"
+        """Delegate to ShellHandler"""
+        return self.shell_handler.execute_command(command, self.shell_session, self._is_windows)
 
     def _format_shell_output(self, output: str, command: str) -> Dict[str, Any]:
-        """
-        Format shell command output for display.
-        Returns dictionary with formatted preview and full output.
-        """
-        lines = output.split('\n') if output else []
-        
-        # Detect output type based on command
-        command_lower = command.lower()
-        
-        formatted = {
-            "type": "shell_output",
-            "command": command,
-            "line_count": len(lines),
-            "byte_count": len(output),
-            "preview": '\n'.join(lines[:10]) if lines else "(no output)",
-            "full_output": output
-        }
-        
-        # Enhanced formatting based on command type
-        if any(cmd in command_lower for cmd in ['ls', 'dir']):
-            formatted["type"] = "directory_listing"
-            formatted["preview"] = f"📁 Found {len([l for l in lines if l.strip()])} items"
-        elif any(cmd in command_lower for cmd in ['find', 'locate', 'search']):
-            formatted["type"] = "search_results"
-            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matches"
-        elif any(cmd in command_lower for cmd in ['grep', 'match']):
-            formatted["type"] = "search_results"
-            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matching lines"
-        elif any(cmd in command_lower for cmd in ['cat', 'head', 'tail']):
-            formatted["type"] = "file_content"
-            formatted["preview"] = f"📄 {len(lines)} lines of content"
-        elif any(cmd in command_lower for cmd in ['pwd', 'cd']):
-            formatted["type"] = "directory_change"
-            formatted["preview"] = f"📍 {output.strip()}"
-        elif any(cmd in command_lower for cmd in ['mkdir', 'touch', 'create']):
-            formatted["type"] = "file_creation"
-            formatted["preview"] = f"✨ Created: {output.strip()}"
-        
-        return formatted
+        """Delegate to ShellHandler"""
+        return self.shell_handler.format_shell_output(output, command)
 
     # ========================================================================
     # DIRECT FILE OPERATIONS (Claude Code / Cursor Parity)
     # ========================================================================
 
     def read_file(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
-        """
-        Read file with line numbers (like Claude Code's Read tool)
-
-        Args:
-            file_path: Path to file
-            offset: Starting line number (0-indexed)
-            limit: Maximum number of lines to read
-
-        Returns:
-            File contents with line numbers in format: "  123→content"
-        """
-        try:
-            # Expand ~ to home directory
-            file_path = os.path.expanduser(file_path)
-
-            # Make absolute if relative
-            if not os.path.isabs(file_path):
-                file_path = os.path.abspath(file_path)
-
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                lines = f.readlines()
-
-            # Apply offset and limit
-            if offset or limit:
-                lines = lines[offset:offset+limit if limit else None]
-
-            # Format with line numbers (1-indexed, like vim/editors)
-            numbered_lines = [
-                f"{offset+i+1:6d}→{line.rstrip()}\n"
-                for i, line in enumerate(lines)
-            ]
-
-            result = ''.join(numbered_lines)
-
-            # Update file context
-            self.file_context['last_file'] = file_path
-            if file_path not in self.file_context['recent_files']:
-                self.file_context['recent_files'].append(file_path)
-                self.file_context['recent_files'] = self.file_context['recent_files'][-5:]
-
-            return result if result else "(empty file)"
-
-        except FileNotFoundError:
-            return f"ERROR: File not found: {file_path}"
-        except PermissionError:
-            return f"ERROR: Permission denied: {file_path}"
-        except IsADirectoryError:
-            return f"ERROR: {file_path} is a directory, not a file"
-        except Exception as e:
-            return f"ERROR: {type(e).__name__}: {e}"
+        """Delegate to FileOperations"""
+        return self.file_ops.read_file(file_path, offset, limit, self.file_context)
 
     def write_file(self, file_path: str, content: str) -> Dict[str, Any]:
-        """
-        Write file directly (like Claude Code's Write tool)
-        Creates new file or overwrites existing one.
-
-        Args:
-            file_path: Path to file
-            content: Full file content
-
-        Returns:
-            {"success": bool, "message": str, "bytes_written": int}
-        """
-        try:
-            # Expand ~ to home directory
-            file_path = os.path.expanduser(file_path)
-
-            # Make absolute if relative
-            if not os.path.isabs(file_path):
-                file_path = os.path.abspath(file_path)
-
-            # Create parent directories if needed
-            parent_dir = os.path.dirname(file_path)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-
-            # Write file
-            with open(file_path, 'w', encoding='utf-8') as f:
-                bytes_written = f.write(content)
-
-            # Update file context
-            self.file_context['last_file'] = file_path
-            if file_path not in self.file_context['recent_files']:
-                self.file_context['recent_files'].append(file_path)
-                self.file_context['recent_files'] = self.file_context['recent_files'][-5:]
-
-            return {
-                "success": True,
-                "message": f"Wrote {bytes_written} bytes to {file_path}",
-                "bytes_written": bytes_written
-            }
-
-        except PermissionError:
-            return {
-                "success": False,
-                "message": f"ERROR: Permission denied: {file_path}",
-                "bytes_written": 0
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"ERROR: {type(e).__name__}: {e}",
-                "bytes_written": 0
-            }
+        """Delegate to FileOperations"""
+        return self.file_ops.write_file(file_path, content, self.file_context)
 
     def edit_file(self, file_path: str, old_string: str, new_string: str,
                   replace_all: bool = False) -> Dict[str, Any]:
-        """
-        Surgical file edit (like Claude Code's Edit tool)
-
-        Args:
-            file_path: Path to file
-            old_string: Exact string to replace (must be unique unless replace_all=True)
-            new_string: Replacement string
-            replace_all: If True, replace all occurrences. If False, old_string must be unique.
-
-        Returns:
-            {"success": bool, "message": str, "replacements": int}
-        """
-        try:
-            # Expand ~ to home directory
-            file_path = os.path.expanduser(file_path)
-
-            # Make absolute if relative
-            if not os.path.isabs(file_path):
-                file_path = os.path.abspath(file_path)
-
-            # Read file
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-
-            # Check if old_string exists
-            if old_string not in content:
-                return {
-                    "success": False,
-                    "message": f"ERROR: old_string not found in {file_path}",
-                    "replacements": 0
-                }
-
-            # Check uniqueness if not replace_all
-            occurrences = content.count(old_string)
-            if not replace_all and occurrences > 1:
-                return {
-                    "success": False,
-                    "message": f"ERROR: old_string appears {occurrences} times in {file_path}. Use replace_all=True or provide more context to make it unique.",
-                    "replacements": 0
-                }
-
-            # Perform replacement
-            if replace_all:
-                new_content = content.replace(old_string, new_string)
-            else:
-                new_content = content.replace(old_string, new_string, 1)
-
-            # Write back
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-
-            # Update file context
-            self.file_context['last_file'] = file_path
-
-            return {
-                "success": True,
-                "message": f"Replaced {occurrences if replace_all else 1} occurrence(s) in {file_path}",
-                "replacements": occurrences if replace_all else 1
-            }
-
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "message": f"ERROR: File not found: {file_path}",
-                "replacements": 0
-            }
-        except PermissionError:
-            return {
-                "success": False,
-                "message": f"ERROR: Permission denied: {file_path}",
-                "replacements": 0
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"ERROR: {type(e).__name__}: {e}",
-                "replacements": 0
-            }
+        """Delegate to FileOperations"""
+        return self.file_ops.edit_file(file_path, old_string, new_string, replace_all, self.file_context)
 
     def glob_search(self, pattern: str, path: str = ".") -> Dict[str, Any]:
-        """
-        Fast file pattern matching (like Claude Code's Glob tool)
-
-        Args:
-            pattern: Glob pattern (e.g., "*.py", "**/*.md", "src/**/*.ts")
-            path: Starting directory (default: current directory)
-
-        Returns:
-            {"files": List[str], "count": int, "pattern": str}
-        """
-        try:
-            import glob as glob_module
-
-            # Expand ~ to home directory
-            path = os.path.expanduser(path)
-
-            # Make absolute if relative
-            if not os.path.isabs(path):
-                path = os.path.abspath(path)
-
-            # Combine path and pattern
-            full_pattern = os.path.join(path, pattern)
-
-            # Find matches (recursive if ** in pattern)
-            matches = glob_module.glob(full_pattern, recursive=True)
-
-            # Filter to files only (not directories)
-            files = [f for f in matches if os.path.isfile(f)]
-
-            # Sort by modification time (newest first)
-            files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
-
-            return {
-                "files": files,
-                "count": len(files),
-                "pattern": full_pattern
-            }
-
-        except Exception as e:
-            return {
-                "files": [],
-                "count": 0,
-                "pattern": pattern,
-                "error": f"{type(e).__name__}: {e}"
-            }
+        """Delegate to FileOperations"""
+        return self.file_ops.glob_search(pattern, path)
 
     def grep_search(self, pattern: str, path: str = ".",
                     file_pattern: str = "*",
@@ -2644,296 +1983,21 @@ class EnhancedNocturnalAgent:
                     context_lines: int = 0,
                     ignore_case: bool = False,
                     max_results: int = 100) -> Dict[str, Any]:
-        """
-        Fast content search (like Claude Code's Grep tool / ripgrep)
-
-        Args:
-            pattern: Regex pattern to search for
-            path: Directory to search in
-            file_pattern: Glob pattern for files to search (e.g., "*.py")
-            output_mode: "files_with_matches", "content", or "count"
-            context_lines: Lines of context around matches
-            ignore_case: Case-insensitive search
-            max_results: Maximum number of results to return
-
-        Returns:
-            Depends on output_mode:
-            - files_with_matches: {"files": List[str], "count": int}
-            - content: {"matches": {file: [(line_num, line_content), ...]}}
-            - count: {"counts": {file: match_count}}
-        """
-        try:
-            # import re removed - using module-level import
-
-            # Expand ~ to home directory
-            path = os.path.expanduser(path)
-
-            # Make absolute if relative
-            if not os.path.isabs(path):
-                path = os.path.abspath(path)
-
-            # Compile regex
-            flags = re.IGNORECASE if ignore_case else 0
-            regex = re.compile(pattern, flags)
-
-            # Find files to search
-            glob_result = self.glob_search(file_pattern, path)
-            files_to_search = glob_result["files"]
-
-            # Search each file
-            if output_mode == "files_with_matches":
-                matching_files = []
-                for file_path in files_to_search[:max_results]:
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                            content = f.read()
-                        if regex.search(content):
-                            matching_files.append(file_path)
-                    except:
-                        continue
-
-                return {
-                    "files": matching_files,
-                    "count": len(matching_files),
-                    "pattern": pattern
-                }
-
-            elif output_mode == "content":
-                matches = {}
-                for file_path in files_to_search:
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                            lines = f.readlines()
-
-                        file_matches = []
-                        for line_num, line in enumerate(lines, 1):
-                            if regex.search(line):
-                                file_matches.append((line_num, line.rstrip()))
-
-                                if len(file_matches) >= max_results:
-                                    break
-
-                        if file_matches:
-                            matches[file_path] = file_matches
-                    except:
-                        continue
-
-                return {
-                    "matches": matches,
-                    "file_count": len(matches),
-                    "pattern": pattern
-                }
-
-            elif output_mode == "count":
-                counts = {}
-                for file_path in files_to_search:
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                            content = f.read()
-
-                        match_count = len(regex.findall(content))
-                        if match_count > 0:
-                            counts[file_path] = match_count
-                    except:
-                        continue
-
-                return {
-                    "counts": counts,
-                    "total_matches": sum(counts.values()),
-                    "pattern": pattern
-                }
-
-            else:
-                return {
-                    "error": f"Invalid output_mode: {output_mode}. Use 'files_with_matches', 'content', or 'count'."
-                }
-
-        except re.error as e:
-            return {
-                "error": f"Invalid regex pattern: {e}"
-            }
-        except Exception as e:
-            return {
-                "error": f"{type(e).__name__}: {e}"
-            }
+        """Delegate to FileOperations"""
+        return self.file_ops.grep_search(pattern, path, file_pattern, output_mode,
+                                         context_lines, ignore_case, max_results)
 
     async def batch_edit_files(self, edits: List[Dict[str, str]]) -> Dict[str, Any]:
-        """
-        Apply multiple file edits atomically (all-or-nothing)
-
-        Args:
-            edits: List of edit operations:
-                [
-                    {"file": "path.py", "old": "...", "new": "..."},
-                    {"file": "other.py", "old": "...", "new": "...", "replace_all": True},
-                    ...
-                ]
-
-        Returns:
-            {
-                "success": bool,
-                "results": {file: {"success": bool, "message": str, "replacements": int}},
-                "total_edits": int,
-                "failed_edits": int
-            }
-        """
-        try:
-            results = {}
-
-            # Phase 1: Validate all edits
-            for edit in edits:
-                file_path = edit["file"]
-                old_string = edit["old"]
-                replace_all = edit.get("replace_all", False)
-
-                # Expand path
-                file_path = os.path.expanduser(file_path)
-                if not os.path.isabs(file_path):
-                    file_path = os.path.abspath(file_path)
-
-                # Check file exists
-                if not os.path.exists(file_path):
-                    return {
-                        "success": False,
-                        "results": {},
-                        "total_edits": 0,
-                        "failed_edits": len(edits),
-                        "error": f"Validation failed: {file_path} not found. No edits applied."
-                    }
-
-                # Check old_string exists
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                        content = f.read()
-
-                    if old_string not in content:
-                        return {
-                            "success": False,
-                            "results": {},
-                            "total_edits": 0,
-                            "failed_edits": len(edits),
-                            "error": f"Validation failed: Pattern not found in {file_path}. No edits applied."
-                        }
-
-                    # Check uniqueness if not replace_all
-                    if not replace_all and content.count(old_string) > 1:
-                        return {
-                            "success": False,
-                            "results": {},
-                            "total_edits": 0,
-                            "failed_edits": len(edits),
-                            "error": f"Validation failed: Pattern appears {content.count(old_string)} times in {file_path}. Use replace_all or provide more context. No edits applied."
-                        }
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "results": {},
-                        "total_edits": 0,
-                        "failed_edits": len(edits),
-                        "error": f"Validation failed reading {file_path}: {e}. No edits applied."
-                    }
-
-            # Phase 2: Apply all edits (validation passed)
-            for edit in edits:
-                file_path = edit["file"]
-                old_string = edit["old"]
-                new_string = edit["new"]
-                replace_all = edit.get("replace_all", False)
-
-                result = self.edit_file(file_path, old_string, new_string, replace_all)
-                results[file_path] = result
-
-            # Count successes/failures
-            successful_edits = sum(1 for r in results.values() if r["success"])
-            failed_edits = len(edits) - successful_edits
-
-            return {
-                "success": failed_edits == 0,
-                "results": results,
-                "total_edits": len(edits),
-                "successful_edits": successful_edits,
-                "failed_edits": failed_edits
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "results": {},
-                "total_edits": 0,
-                "failed_edits": len(edits),
-                "error": f"Batch edit failed: {type(e).__name__}: {e}"
-            }
+        """Delegate to FileOperations"""
+        return await self.file_ops.batch_edit_files(edits, self.file_context)
 
     # ========================================================================
     # END DIRECT FILE OPERATIONS
     # ========================================================================
 
     def _classify_command_safety(self, cmd: str) -> str:
-        """
-        Classify command by safety level for smart execution.
-        Returns: 'SAFE', 'WRITE', 'DANGEROUS', or 'BLOCKED'
-        """
-        cmd = cmd.strip()
-        if not cmd:
-            return 'BLOCKED'
-        
-        cmd_lower = cmd.lower()
-        cmd_parts = cmd.split()
-        cmd_base = cmd_parts[0] if cmd_parts else ''
-        cmd_with_sub = ' '.join(cmd_parts[:2]) if len(cmd_parts) >= 2 else ''
-        
-        # BLOCKED: Catastrophic commands
-        nuclear_patterns = [
-            'rm -rf /',
-            'rm -rf ~',
-            'rm -rf /*',
-            'dd if=/dev/zero',
-            'mkfs',
-            'fdisk',
-            ':(){ :|:& };:',  # Fork bomb
-            'chmod -r 777 /',
-            '> /dev/sda',
-        ]
-        for pattern in nuclear_patterns:
-            if pattern in cmd_lower:
-                return 'BLOCKED'
-        
-        # SAFE: Read-only commands
-        safe_commands = {
-            'pwd', 'ls', 'cd', 'cat', 'head', 'tail', 'grep', 'find', 'which', 'type',
-            'wc', 'diff', 'echo', 'ps', 'top', 'df', 'du', 'file', 'stat', 'tree',
-            'whoami', 'hostname', 'date', 'cal', 'uptime', 'printenv', 'env',
-        }
-        safe_git = {'git status', 'git log', 'git diff', 'git branch', 'git show', 'git remote'}
-        
-        if cmd_base in safe_commands or cmd_with_sub in safe_git:
-            return 'SAFE'
-        
-        # WRITE: File creation/modification (allowed but tracked)
-        write_commands = {'mkdir', 'touch', 'cp', 'mv', 'tee'}
-        if cmd_base in write_commands:
-            return 'WRITE'
-        
-        # WRITE: Redirection operations (echo > file, cat > file)
-        if '>' in cmd or '>>' in cmd:
-            # Allow redirection to regular files, block to devices
-            if '/dev/' not in cmd_lower:
-                return 'WRITE'
-            else:
-                return 'BLOCKED'
-        
-        # DANGEROUS: Deletion and permission changes
-        dangerous_commands = {'rm', 'rmdir', 'chmod', 'chown', 'chgrp'}
-        if cmd_base in dangerous_commands:
-            return 'DANGEROUS'
-        
-        # WRITE: Git write operations
-        write_git = {'git add', 'git commit', 'git push', 'git pull', 'git checkout', 'git merge'}
-        if cmd_with_sub in write_git:
-            return 'WRITE'
-        
-        # Default: Treat unknown commands as requiring user awareness
-        return 'WRITE'
+        """Delegate to ShellHandler"""
+        return self.shell_handler.classify_command_safety(cmd)
 
     def _format_archive_summary(
         self,
@@ -2968,22 +2032,18 @@ class EnhancedNocturnalAgent:
         }
 
     def _is_safe_shell_command(self, cmd: str) -> bool:
-        """
-        Compatibility wrapper for old safety check.
-        Now uses tiered classification system.
-        """
-        classification = self._classify_command_safety(cmd)
-        return classification in ['SAFE', 'WRITE']  # Allow SAFE and WRITE, block DANGEROUS and BLOCKED
+        """Delegate to ShellHandler"""
+        return self.shell_handler.is_safe_shell_command(cmd)
     
     def _check_token_budget(self, estimated_tokens: int) -> bool:
-        """Check if we have enough token budget"""
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        return (self.daily_token_usage + estimated_tokens) < self.daily_limit
+        return self.utilities.check_token_budget(self.daily_token_usage, self.daily_limit, estimated_tokens)
 
     def _check_user_token_budget(self, user_id: str, estimated_tokens: int) -> bool:
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        current = self.user_token_usage.get(user_id, 0)
-        return (current + estimated_tokens) < self.per_user_token_limit
+        return self.utilities.check_user_token_budget(self.user_token_usage, self.per_user_token_limit, user_id, estimated_tokens)
 
     def _resolve_daily_query_limit(self) -> int:
         limit_env = os.getenv("NOCTURNAL_QUERY_LIMIT")
@@ -2994,15 +2054,12 @@ class EnhancedNocturnalAgent:
         return DEFAULT_QUERY_LIMIT
 
     def _check_query_budget(self, user_id: Optional[str]) -> bool:
+        """Delegate to AgentUtilities"""
         self._ensure_usage_day()
-        if self.daily_query_limit > 0 and self.daily_query_count >= self.daily_query_limit:
-            return False
-
-        effective_limit = self.per_user_query_limit if self.per_user_query_limit > 0 else self.daily_query_limit
-        if user_id and effective_limit > 0 and self.user_query_counts.get(user_id, 0) >= effective_limit:
-            return False
-
-        return True
+        return self.utilities.check_query_budget(
+            self.daily_query_count, self.daily_query_limit,
+            self.user_query_counts, self.per_user_query_limit, user_id
+        )
 
     def _record_query_usage(self, user_id: Optional[str]):
         self._ensure_usage_day()
@@ -3092,43 +2149,17 @@ class EnhancedNocturnalAgent:
         return response
     
     def _get_memory_context(self, user_id: str, conversation_id: str) -> str:
-        """Get relevant memory context for the conversation"""
-        if user_id not in self.memory:
-            self.memory[user_id] = {}
-        
-        if conversation_id not in self.memory[user_id]:
-            self.memory[user_id][conversation_id] = []
-        
-        # Get last 3 interactions for context
-        recent_memory = self.memory[user_id][conversation_id][-3:]
-        if not recent_memory:
-            return ""
-        
-        context = "Recent conversation context:\n"
-        for mem in recent_memory:
-            context += f"- {mem}\n"
-        return context
-    
+        """Delegate to AgentUtilities"""
+        return self.utilities.get_memory_context(self.memory, user_id, conversation_id)
+
     def _update_memory(self, user_id: str, conversation_id: str, interaction: str):
-        """Update memory with new interaction"""
-        if user_id not in self.memory:
-            self.memory[user_id] = {}
-        
-        if conversation_id not in self.memory[user_id]:
-            self.memory[user_id][conversation_id] = []
-        
-        self.memory[user_id][conversation_id].append(interaction)
-        
-        # Keep only last 10 interactions
-        if len(self.memory[user_id][conversation_id]) > 10:
-            self.memory[user_id][conversation_id] = self.memory[user_id][conversation_id][-10:]
+        """Delegate to AgentUtilities"""
+        self.utilities.update_memory(self.memory, user_id, conversation_id, interaction)
 
     @staticmethod
     def _hash_identifier(value: Optional[str]) -> Optional[str]:
-        if not value:
-            return None
-        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-        return digest[:16]
+        """Delegate to AgentUtilities"""
+        return AgentUtilities.hash_identifier(value)
 
     def _emit_telemetry(
         self,
@@ -3158,11 +2189,8 @@ class EnhancedNocturnalAgent:
 
     @staticmethod
     def _format_model_error(details: str) -> str:
-        headline = "⚠️ I couldn't finish the reasoning step because the language model call failed."
-        advice = "Please retry shortly or verify your Groq API keys and network connectivity."
-        if details:
-            return f"{headline}\n\nDetails: {details}\n\n{advice}"
-        return f"{headline}\n\n{advice}"
+        """Delegate to AgentUtilities"""
+        return AgentUtilities.format_model_error(details)
 
     def _summarize_command_output(
         self,
@@ -3274,241 +2302,12 @@ class EnhancedNocturnalAgent:
         return None
 
     async def _analyze_request_type(self, question: str) -> Dict[str, Any]:
-        """Analyze what type of request this is and what APIs to use"""
-        
-        # Financial indicators - COMPREHENSIVE list to ensure FinSight is used
-        financial_keywords = [
-            # Core metrics
-            'financial', 'revenue', 'sales', 'income', 'profit', 'earnings', 'loss',
-            'net income', 'operating income', 'gross profit', 'ebitda', 'ebit',
-            
-            # Margins & Ratios
-            'margin', 'gross margin', 'profit margin', 'operating margin', 'net margin', 'ebitda margin',
-            'ratio', 'current ratio', 'quick ratio', 'debt ratio', 'pe ratio', 'p/e',
-            'roe', 'roa', 'roic', 'roce', 'eps',
-            
-            # Balance Sheet
-            'assets', 'liabilities', 'equity', 'debt', 'cash', 'capital',
-            'balance sheet', 'total assets', 'current assets', 'fixed assets',
-            'shareholders equity', 'stockholders equity', 'retained earnings',
-            
-            # Cash Flow
-            'cash flow', 'fcf', 'free cash flow', 'operating cash flow',
-            'cfo', 'cfi', 'cff', 'capex', 'capital expenditure',
-            
-            # Market Metrics
-            'stock', 'market cap', 'market capitalization', 'enterprise value',
-            'valuation', 'price', 'share price', 'stock price', 'quote',
-            'volume', 'trading volume', 'shares outstanding',
-            
-            # Financial Statements
-            'income statement', '10-k', '10-q', '8-k', 'filing', 'sec filing',
-            'quarterly', 'annual report', 'earnings report', 'financial statement',
-            
-            # Company Info
-            'ticker', 'company', 'corporation', 'ceo', 'earnings call',
-            'dividend', 'dividend yield', 'payout ratio',
-            
-            # Growth & Performance
-            'growth', 'yoy', 'year over year', 'qoq', 'quarter over quarter',
-            'cagr', 'trend', 'performance', 'returns'
-        ]
-        
-        # Research indicators (quantitative)
-        research_keywords = [
-            'research', 'paper', 'study', 'academic', 'literature', 'journal',
-            'synthesis', 'findings', 'methodology', 'abstract', 'citation',
-            'author', 'publication', 'peer review', 'scientific'
-        ]
-        
-        # Qualitative indicators (NEW)
-        qualitative_keywords = [
-            'theme', 'themes', 'thematic', 'code', 'coding', 'qualitative',
-            'interview', 'interviews', 'transcript', 'case study', 'narrative',
-            'discourse', 'content analysis', 'quote', 'quotes', 'excerpt',
-            'participant', 'respondent', 'informant', 'ethnography',
-            'grounded theory', 'phenomenology', 'what do people say',
-            'how do participants', 'sentiment', 'perception', 'experience',
-            'lived experience', 'meaning', 'interpret', 'understand',
-            'focus group', 'observation', 'field notes', 'memoir', 'diary'
-        ]
-        
-        # Quantitative indicators (explicit stats/math)
-        quantitative_keywords = [
-            'calculate', 'average', 'mean', 'median', 'percentage', 'correlation',
-            'regression', 'statistical', 'significance', 'p-value', 'variance',
-            'standard deviation', 'trend', 'forecast', 'model', 'predict',
-            'rate of', 'ratio', 'growth rate', 'change in', 'compared to'
-        ]
-        
-        # System/technical indicators
-        system_keywords = [
-            'file', 'files', 'directory', 'directories', 'folder', 'folders',
-            'command', 'run', 'execute', 'install',
-            'python', 'code', 'script', 'scripts', 'program', 'system', 'terminal',
-            'find', 'search for', 'locate', 'list', 'show me', 'where is',
-            'what files', 'which files', 'how many files',
-            'grep', 'search', 'look for', 'count',
-            '.py', '.txt', '.js', '.java', '.cpp', '.c', '.h',
-            'function', 'method', 'class', 'definition', 'route', 'endpoint',
-            'codebase', 'project structure', 'source code', 'implementation',
-            'compare', 'analyze', 'explain', 'purpose', 'what does', 'how does',
-            'this codebase', 'this repo', 'this repository', 'this project',
-            'our codebase', 'our repo', 'local code', 'local files'
-        ]
-        
-        question_lower = question.lower()
-        
-        matched_types: List[str] = []
-        apis_to_use: List[str] = []
-        analysis_mode = "quantitative"  # default
-        
-        # Context-aware keyword detection
-        # Strong quant contexts that override everything
-        strong_quant_contexts = [
-            'algorithm', 'park', 'system', 'database',
-            'calculate', 'predict', 'forecast', 'ratio', 'percentage'
-        ]
-        
-        # Measurement words (can indicate mixed when combined with qual words)
-        measurement_words = ['score', 'metric', 'rating', 'measure', 'index']
-        
-        has_strong_quant_context = any(ctx in question_lower for ctx in strong_quant_contexts)
-        has_measurement = any(mw in question_lower for mw in measurement_words)
-        
-        # Special cases: Certain qual words + measurement = mixed (subjective + quantified)
-        # BUT: Only if NOT in a strong quant context (algorithm overrides)
-        mixed_indicators = [
-            'experience',  # user experience
-            'sentiment',   # sentiment analysis
-            'perception',  # perception
-        ]
-        
-        is_mixed_method = False
-        if not has_strong_quant_context and has_measurement:
-            if any(indicator in question_lower for indicator in mixed_indicators):
-                is_mixed_method = True
-        
-        # Check for qualitative vs quantitative keywords
-        qual_score = sum(1 for kw in qualitative_keywords if kw in question_lower)
-        quant_score = sum(1 for kw in quantitative_keywords if kw in question_lower)
-        
-        # Financial queries are quantitative by nature (unless explicitly qualitative like "interview")
-        has_financial = any(kw in question_lower for kw in financial_keywords)
-        if has_financial and qual_score == 1:
-            # Single qual keyword + financial = probably mixed
-            # e.g., "Interview CEO about earnings" = interview (qual) + earnings/CEO (financial)
-            quant_score += 1
-        
-        # Adjust for context
-        if has_strong_quant_context:
-            # Reduce qualitative score if in strong quantitative context
-            # e.g., "theme park" or "sentiment analysis algorithm"
-            qual_score = max(0, qual_score - 1)
-        
-        # Improved mixed detection: use ratio instead of simple comparison
-        if is_mixed_method:
-            # Special case: qual word + measurement = always mixed
-            analysis_mode = "mixed"
-        elif qual_score >= 2 and quant_score >= 1:
-            # Clear mixed: multiple qual + some quant
-            analysis_mode = "mixed"
-        elif qual_score > quant_score and qual_score > 0:
-            # Predominantly qualitative
-            analysis_mode = "qualitative"
-        elif qual_score > 0 and quant_score > 0:
-            # Some of both - default to mixed
-            analysis_mode = "mixed"
-
-        if any(keyword in question_lower for keyword in financial_keywords):
-            matched_types.append("financial")
-            apis_to_use.append("finsight")
-
-        # Check for explicit local/codebase indicators FIRST (highest priority)
-        local_indicators = ['this codebase', 'this repo', 'this repository', 'this project',
-                          'our codebase', 'our repo', 'local code', 'local files']
-        is_local_query = any(indicator in question_lower for indicator in local_indicators)
-
-        if any(keyword in question_lower for keyword in research_keywords) and not is_local_query:
-            matched_types.append("research")
-            apis_to_use.append("archive")
-
-        # Qualitative queries often involve research
-        if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types and not is_local_query:
-            matched_types.append("research")
-            if "archive" not in apis_to_use:
-                apis_to_use.append("archive")
-
-        if any(keyword in question_lower for keyword in system_keywords):
-            matched_types.append("system")
-            apis_to_use.append("shell")
-
-        # Deduplicate while preserving order
-        apis_to_use = list(dict.fromkeys(apis_to_use))
-        unique_types = list(dict.fromkeys(matched_types))
-
-        if not unique_types:
-            request_type = "general"
-        elif len(unique_types) == 1:
-            request_type = unique_types[0]
-        elif {"financial", "research"}.issubset(set(unique_types)):
-            request_type = "comprehensive"
-            if "system" in unique_types:
-                request_type += "+system"
-        else:
-            request_type = "+".join(unique_types)
-
-        confidence = 0.8 if apis_to_use else 0.5
-        if len(unique_types) > 1:
-            confidence = 0.85
-
-        return {
-            "type": request_type,
-            "apis": apis_to_use,
-            "confidence": confidence,
-            "analysis_mode": analysis_mode  # NEW: qualitative, quantitative, or mixed
-        }
+        """Delegate to QueryAnalyzer"""
+        return await self.query_analyzer.analyze_request_type(question)
     
     def _is_query_too_vague_for_apis(self, question: str) -> bool:
-        """
-        Detect if query is too vague to warrant API calls
-        Returns True if we should skip APIs and just ask clarifying questions
-        """
-        question_lower = question.lower()
-        
-        # Pattern 1: Multiple years without SPECIFIC topic (e.g., "2008, 2015, 2019")
-        # import re removed - using module-level import
-        years_pattern = r'\b(19\d{2}|20\d{2})\b'
-        years = re.findall(years_pattern, question)
-        if len(years) >= 2:
-            # Multiple years - check if there's a SPECIFIC topic beyond just "papers on"
-            # Generic terms that don't add specificity
-            generic_terms = ['papers', 'about', 'on', 'regarding', 'concerning', 'related to']
-            # Remove generic terms and check what's left
-            words = question_lower.split()
-            content_words = [w for w in words if w not in generic_terms and not re.match(r'\d{4}', w)]
-            # If fewer than 2 meaningful content words, it's too vague
-            if len(content_words) < 2:
-                return True  # Too vague: "papers on 2008, 2015, 2019" needs topic
-        
-        # Pattern 2: Market share without market specified
-        if 'market share' in question_lower:
-            market_indicators = ['analytics', 'software', 'government', 'data', 'cloud', 'sector', 'industry']
-            if not any(indicator in question_lower for indicator in market_indicators):
-                return True  # Too vague: needs market specification
-        
-        # Pattern 3: Comparison without metric (compare X and Y)
-        if any(word in question_lower for word in ['compare', 'versus', 'vs', 'vs.']):
-            metric_indicators = ['revenue', 'market cap', 'sales', 'growth', 'profit', 'valuation']
-            if not any(indicator in question_lower for indicator in metric_indicators):
-                return True  # Too vague: needs metric specification
-        
-        # Pattern 4: Ultra-short queries without specifics (< 4 words)
-        word_count = len(question.split())
-        if word_count <= 3 and '?' in question:
-            return True  # Too short and questioning - likely needs clarification
-        
-        return False  # Query seems specific enough for API calls
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_query_too_vague_for_apis(question)
     
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
@@ -3571,7 +2370,135 @@ class EnhancedNocturnalAgent:
                         tools_used=tools or ["quick_reply"],
                         confidence=0.3,
                     )
-            
+
+            # ========================================================================
+            # INTEGRATION PUSH DETECTION (Zotero, Mendeley, Notion)
+            # ========================================================================
+            # Check if user wants to push papers to an integration
+            integration_request = self._detect_integration_request(request.question)
+            if integration_request:
+                target = integration_request["target"]
+                collection = integration_request.get("collection")
+
+                # Extract papers from api_results or conversation history
+                papers = self._extract_papers_from_context(api_results, request.question)
+
+                # If no papers found in context, check if this is a combined request
+                # e.g., "find papers on transformers and add them to zotero"
+                if not papers:
+                    # Check if query contains both search request AND integration push
+                    question_lower = request.question.lower()
+                    is_combined_request = any(word in question_lower for word in [
+                        "find", "search", "get", "look for", "show me", "papers on", "research on"
+                    ])
+
+                    if is_combined_request:
+                        # Extract the search query part (before "and add/push/save")
+                        # Split on integration patterns
+                        split_patterns = [
+                            r'\s+and\s+(add|push|save|send|put|export|store)',
+                            r'\s+then\s+(add|push|save|send|put|export|store)',
+                            r',\s+(add|push|save|send|put|export|store)'
+                        ]
+
+                        search_query = request.question
+                        for pattern in split_patterns:
+                            match = re.split(pattern, request.question, flags=re.IGNORECASE)
+                            if len(match) > 1:
+                                search_query = match[0].strip()
+                                break
+
+                        # Perform academic search
+                        search_result = await self.search_academic_papers(search_query, limit=10)
+
+                        if "error" not in search_result:
+                            papers = search_result.get("results") or search_result.get("papers") or []
+                            api_results["research"] = search_result
+                            tools_used.append("archive_api")
+
+                # Now push papers if we have them
+                if papers:
+                    integration_result = await self._push_to_integration_conversational(
+                        target=target,
+                        papers=papers,
+                        collection=collection
+                    )
+
+                    # Format response message
+                    if integration_result.get("success"):
+                        paper_count = len(papers)
+                        message = f"✅ {integration_result['message']}\n\n"
+
+                        # Add paper summary
+                        message += f"Papers added ({paper_count}):\n"
+                        for i, paper in enumerate(papers[:5], 1):  # Show first 5
+                            title = paper.get("title", "Untitled")
+                            authors = paper.get("authors", [])
+                            author_str = authors[0] if authors else "Unknown"
+                            if len(authors) > 1:
+                                author_str += " et al."
+                            year = paper.get("year", "N/A")
+                            message += f"{i}. {title} - {author_str} ({year})\n"
+
+                        if paper_count > 5:
+                            message += f"... and {paper_count - 5} more\n"
+
+                        # Add view link if available
+                        if "library_url" in integration_result:
+                            message += f"\n🔗 View in {target.capitalize()}: {integration_result['library_url']}\n"
+                        elif "url" in integration_result:
+                            message += f"\n🔗 View in {target.capitalize()}: {integration_result['url']}\n"
+
+                        # Add integration result to api_results
+                        api_results["integration"] = integration_result
+
+                        return ChatResponse(
+                            response=message,
+                            tools_used=tools_used + [f"{target}_push"],
+                            reasoning_steps=[f"Pushed {paper_count} papers to {target}"],
+                            tokens_used=0,
+                            confidence_score=0.95,
+                            api_results=api_results
+                        )
+                    else:
+                        # Integration push failed
+                        error_message = f"❌ {integration_result['message']}\n\n"
+
+                        # Check for common issues and provide helpful guidance
+                        message_lower = integration_result['message'].lower()
+                        if "credentials" in message_lower or "not found" in message_lower:
+                            error_message += f"💡 **Setup Required**: Run `cite-agent --setup-integrations` to configure {target.capitalize()}.\n"
+                            error_message += f"📖 See AUTHENTICATION.md for step-by-step setup instructions.\n"
+                        elif "authentication" in message_lower or "unauthorized" in message_lower:
+                            error_message += f"💡 **Authentication Issue**: Your {target.capitalize()} credentials may be invalid.\n"
+                            error_message += f"Run `cite-agent --test-integrations` to diagnose the problem.\n"
+
+                        # Add integration result to api_results
+                        api_results["integration"] = integration_result
+
+                        return ChatResponse(
+                            response=error_message,
+                            tools_used=tools_used + [f"{target}_push_failed"],
+                            reasoning_steps=[f"Failed to push to {target}"],
+                            tokens_used=0,
+                            confidence_score=0.6,
+                            api_results=api_results
+                        )
+                else:
+                    # No papers found to push
+                    message = f"❌ No papers found to push to {target.capitalize()}.\n\n"
+                    message += "💡 Try searching for papers first:\n"
+                    message += f'  Example: "find papers on transformers and add them to {target}"\n'
+
+                    return ChatResponse(
+                        response=message,
+                        tools_used=["integration_request_no_papers"],
+                        reasoning_steps=["Integration requested but no papers available"],
+                        tokens_used=0,
+                        confidence_score=0.4,
+                        api_results=api_results
+                    )
+
             # ========================================================================
             # PRIORITY 1: SHELL PLANNING (Reasoning Layer - Runs FIRST for ALL modes)
             # ========================================================================
@@ -3587,9 +2514,7 @@ class EnhancedNocturnalAgent:
                 'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
-                'git', 'grep', 'navigate', 'go to', 'change to',
-                'method', 'function', 'class', 'implementation', 'what does', 'how does', 'explain',
-                'how many', 'count', 'lines', 'wc -l', 'number of'
+                'git', 'grep', 'navigate', 'go to', 'change to'
             ])
             
             if might_need_shell and self.shell_session:
@@ -3634,11 +2559,6 @@ IMPORTANT RULES:
 11. 🚨 MULTI-STEP QUERIES: For queries like "read X and do Y", ONLY generate the FIRST step (reading X). The LLM will handle subsequent steps after seeing the file contents.
 12. 🚨 NEVER use python -m py_compile or other code execution for finding bugs - just read the file with cat/head
 13. 🚨 FOR GREP: When searching in a DIRECTORY (not a specific file), ALWAYS use -r flag for recursive search: grep -rn 'pattern' /path/to/dir 2>/dev/null
-14. 🚨 FOR FINDING FUNCTIONS/METHODS when file path is UNKNOWN: Use find + grep together:
-    - "what does X method do in file.py?" → find . -name 'file.py' -exec grep -A 50 'def X' {{}} \\; 2>/dev/null
-    - "explain process_request in agent.py" → find . -name '*agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null
-    - If you know exact path, use grep directly: grep -A 50 'def X' path/to/file.py 2>/dev/null
-15. 🚨 FOR COMPARING FILES: Read FIRST file only. The LLM will request the second file after analyzing the first.
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -3657,10 +2577,6 @@ Examples:
 "find all bugs in code" → {{"action": "execute", "command": "grep -rn 'BUG:' . 2>/dev/null", "reason": "Search for bug markers in code", "updates_context": false}}
 "read analyze.py and find bugs" → {{"action": "execute", "command": "head -200 analyze.py", "reason": "Read file to analyze bugs", "updates_context": false}}
 "show me calc.py completely" → {{"action": "execute", "command": "cat calc.py", "reason": "Display entire file", "updates_context": false}}
-"what does process_request method do in enhanced_ai_agent.py" → {{"action": "execute", "command": "find . -name '*enhanced_ai_agent.py' -exec grep -A 80 'def process_request' {{}} \\; 2>/dev/null", "reason": "Find file and show method definition with context", "updates_context": false}}
-"explain the initialize method in agent.py" → {{"action": "execute", "command": "find . -name '*agent.py' -exec grep -A 50 'def initialize' {{}} \\; 2>/dev/null", "reason": "Find file and show method", "updates_context": false}}
-"find calculate function in utils.py" → {{"action": "execute", "command": "find . -name 'utils.py' -exec grep -A 30 'def calculate' {{}} \\; 2>/dev/null", "reason": "Find file and show function", "updates_context": false}}
-"compare file1.py and file2.py" → {{"action": "execute", "command": "head -100 file1.py", "reason": "Read first file (will read second in next step)", "updates_context": true}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
 "hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
@@ -3798,8 +2714,7 @@ JSON:"""
                                     pass  # Fall back to shell execution
 
                             # Check for file search commands (find)
-                            # BUT: Don't intercept find -exec commands (those need real shell execution)
-                            if not intercepted and 'find' in command and '-name' in command and '-exec' not in command:
+                            if not intercepted and 'find' in command and '-name' in command:
                                 try:
                                     # import re removed - using module-level import
                                     # Extract pattern: find ... -name '*pattern*'
@@ -4178,14 +3093,16 @@ JSON:"""
             if not is_vague:
                 # Archive API for research
                 if "archive" in request_analysis.get("apis", []):
-                    result = await self.search_academic_papers(request.question, 5)  # Get 5 papers for comprehensive review
+                    result = await self.search_academic_papers(request.question, 3)  # Reduced from 5 to save tokens
                     if "error" not in result:
-                        # KEEP abstracts for literature review - essential for paper understanding
-                        # Only remove full_text to save tokens
+                        # Strip abstracts to save tokens - only keep essential fields
                         if "results" in result:
                             for paper in result["results"]:
-                                paper.pop("full_text", None)  # Remove only full text, keep abstract & tldr
-                                # Keep: title, authors, year, doi, url, abstract, tldr
+                                # Remove heavy fields
+                                paper.pop("abstract", None)
+                                paper.pop("tldr", None)
+                                paper.pop("full_text", None)
+                                # Keep only: title, authors, year, doi, url
                         api_results["research"] = result
                         tools_used.append("archive_api")
                 
@@ -4524,16 +3441,6 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
-
-            # Check if query is asking about specific functions/methods/classes OR file metadata
-            # If so, SKIP auto-preview and let shell planning handle it
-            query_lower = request.question.lower()
-            asking_about_code_element = any(pattern in query_lower for pattern in [
-                'method', 'function', 'class', 'def ', 'what does', 'how does',
-                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
-                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
-            ])
-
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
             def _is_safe_path(path_str: str) -> bool:
@@ -4544,47 +3451,31 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-
-            # Only auto-preview if NOT asking about specific code elements
-            if not asking_about_code_element:
-                for m in mentioned:
-                    if not _is_safe_path(m):
-                        files_forbidden.append(m)
-                        continue
-                    pr = await self._preview_file(m)
-                    # Only add successful previews (not errors)
-                    if pr and pr.get("type") != "error":
-                        file_previews.append(pr)
-            else:
-                # Query is about specific code elements - let shell planning handle with grep
-                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
+            for m in mentioned:
+                if not _is_safe_path(m):
+                    files_forbidden.append(m)
+                    continue
+                pr = await self._preview_file(m)
+                if pr:
+                    file_previews.append(pr)
             if file_previews:
                 api_results["files"] = file_previews
-                tools_used.append("read_file")  # Track that files were read
-                # Build grounded context from ALL text previews (for comparisons)
+                # Build grounded context from first text preview
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    # Detect comparison queries - include MORE context
-                    is_comparison = len(text_previews) > 1 or any(word in request.question.lower() for word in ['compare', 'difference', 'contrast', 'vs', 'versus'])
-                    line_limit = 200 if is_comparison else 100  # More lines for comparisons
-
-                    # Include all files with appropriate context
-                    file_contexts = []
-                    for fp in text_previews:
-                        quoted = "\n".join(fp["preview"].splitlines()[:line_limit])
-                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
-                    files_context = "\n\n---\n\n".join(file_contexts)
+                    fp = text_previews[0]
+                    quoted = "\n".join(fp["preview"].splitlines()[:20])
+                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
                 api_results["files_context"] = files_context
-            elif mentioned and not asking_about_code_element:
-                # Mentioned files but none found (only set if we actually tried to preview them)
+            elif mentioned:
+                # Mentioned files but none found
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
 
             workspace_listing: Optional[Dict[str, Any]] = None
-            # Only show workspace listing if NOT looking for specific missing files
-            if not file_previews and not api_results.get("files_missing"):
+            if not file_previews:
                 file_browse_keywords = (
                     "list files",
                     "show files",
@@ -4604,8 +3495,7 @@ JSON:"""
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            # Don't show workspace listing if there are missing files (prioritize error)
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
                 return self._respond_with_workspace_listing(request, workspace_listing)
             
             if "finsight" in request_analysis["apis"]:
@@ -4656,64 +3546,10 @@ JSON:"""
             messages = [
                 {"role": "system", "content": system_prompt}
             ]
-
-            # CRITICAL: Inject research papers IMMEDIATELY after system prompt (highest priority)
-            research_data = api_results.get("research")
-            if research_data and research_data.get("results"):
-                papers_text = "🚨 PAPERS ALREADY FOUND - SYNTHESIZE THESE NOW:\n\n"
-                papers_text += "DO NOT say 'we will search' - the search is COMPLETE.\n"
-                papers_text += "DO NOT say 'attempting' - papers are ALREADY HERE.\n"
-                papers_text += "YOUR JOB: Synthesize these papers into a comprehensive literature review (500+ words).\n\n"
-
-                for i, paper in enumerate(research_data["results"][:5], 1):
-                    papers_text += f"\n═══ PAPER {i} ═══\n"
-                    papers_text += f"Title: {paper.get('title', 'No title')}\n"
-                    # Handle authors as either list of dicts or list of strings
-                    authors = paper.get('authors', [])
-                    if authors:
-                        if isinstance(authors[0], dict):
-                            author_names = [a.get('name', 'Unknown') for a in authors[:3]]
-                        else:
-                            author_names = authors[:3]
-                        papers_text += f"Authors: {', '.join(author_names)}\n"
-                    papers_text += f"Year: {paper.get('year', 'N/A')}\n"
-                    if paper.get('abstract'):
-                        papers_text += f"\nAbstract:\n{paper['abstract']}\n"
-                    if paper.get('tldr'):
-                        papers_text += f"\nTL;DR: {paper['tldr']}\n"
-                    papers_text += "\n"
-
-                papers_text += "\n🚨 SYNTHESIZE THESE PAPERS NOW - Include:\n"
-                papers_text += "- Overview of the research area\n"
-                papers_text += "- Key findings from each paper's abstract\n"
-                papers_text += "- Methods and approaches used\n"
-                papers_text += "- Comparison and contrast of different approaches\n"
-                papers_text += "- Implications and future directions\n"
-                papers_text += "\nMINIMUM 500 WORDS. Use the abstracts above."
-
-                messages.append({"role": "system", "content": papers_text})
-
             # If we have file context, inject it as an additional grounding message
             fc = api_results.get("files_context")
             if fc:
-                # Count how many files are being compared
-                file_count = len([fp for fp in api_results.get("files", []) if fp.get("type") == "text"])
-
-                if file_count > 1:
-                    # Multi-file comparison - make it VERY explicit
-                    comparison_msg = "🚨 MULTIPLE FILES PROVIDED FOR COMPARISON:\n\n"
-                    comparison_msg += fc
-                    comparison_msg += "\n\n🚨 CRITICAL INSTRUCTIONS FOR COMPARISON:\n"
-                    comparison_msg += "1. Read ALL file contents above carefully\n"
-                    comparison_msg += "2. Extract specific data points, numbers, percentages from EACH file\n"
-                    comparison_msg += "3. Compare and contrast the ACTUAL content (not just filenames)\n"
-                    comparison_msg += "4. If asked about differences, cite EXACT lines or values from BOTH files\n"
-                    comparison_msg += "5. Do NOT make general statements - be specific with examples from the files\n"
-                    comparison_msg += "\nAnswer based STRICTLY on the file contents above. Do not run shell commands."
-                    messages.append({"role": "system", "content": comparison_msg})
-                else:
-                    # Single file - normal handling
-                    messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}\n\nAnswer based strictly on this content when relevant. Do not run shell commands."})
+                messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}\n\nAnswer based strictly on this content when relevant. Do not run shell commands."})
             missing = api_results.get("files_missing")
             if missing:
                 messages.append({"role": "system", "content": f"User mentioned file(s) not found: {missing}. Respond explicitly that the file was not found and avoid speculation."})
@@ -4936,92 +3772,6 @@ JSON:"""
                         final_response = "I searched but found no matches. The search returned no results."
                         logger.warning("🚨 Hallucination prevented: LLM tried to make up results when shell output was empty")
 
-            # ========================================
-            # PHASE 2: THINKING BLOCKS
-            # Show reasoning process for complex queries
-            # ========================================
-            thinking_text = ""
-            try:
-                thinking_context = {
-                    'tools_used': tools_used,
-                    'api_results': api_results,
-                    'conversation_history': self.conversation_history[-3:] if self.conversation_history else []
-                }
-
-                thinking_text = await generate_and_format_thinking(
-                    request.question,
-                    thinking_context,
-                    show_full=False  # Compact version
-                )
-
-                if thinking_text:
-                    logger.info(f"💭 Generated thinking process for query")
-
-            except Exception as e:
-                logger.error(f"Thinking generation failed: {e}")
-
-            # ========================================
-            # PHASE 1 QUALITY PIPELINE
-            # Process response through quality improvements
-            # ========================================
-            try:
-                pipeline_context = {
-                    'tools_used': tools_used,
-                    'api_results': api_results,
-                    'query_type': request_analysis.get('type'),
-                    'shell_output_type': 'generic'
-                }
-
-                processed = await ResponsePipeline.process(
-                    final_response,
-                    request.question,
-                    pipeline_context,
-                    response_type="generic"
-                )
-
-                final_response = processed.final_response
-
-                # Log quality improvements
-                if processed.improvements_applied:
-                    logger.info(f"✨ Quality improvements: {', '.join(processed.improvements_applied)}")
-                    logger.info(f"📊 Quality score: {processed.quality_score:.2f}")
-
-            except Exception as e:
-                # If pipeline fails, log but continue with original response
-                logger.error(f"Quality pipeline failed: {e}, using original response")
-
-            # ========================================
-            # PHASE 2: CONFIDENCE CALIBRATION
-            # Assess confidence and add caveats if needed
-            # ========================================
-            try:
-                confidence_context = {
-                    'tools_used': tools_used,
-                    'api_results': api_results,
-                    'query_type': request_analysis.get('type')
-                }
-
-                final_response, confidence_assessment = assess_and_apply_caveat(
-                    final_response,
-                    request.question,
-                    confidence_context
-                )
-
-                logger.info(
-                    f"🎯 Confidence: {confidence_assessment.confidence_level} "
-                    f"({confidence_assessment.confidence_score:.2f})"
-                )
-
-                if confidence_assessment.should_add_caveat:
-                    logger.info(f"⚠️ Added caveat due to low confidence")
-
-            except Exception as e:
-                logger.error(f"Confidence calibration failed: {e}")
-
-            # Prepend thinking blocks if generated
-            if thinking_text:
-                final_response = thinking_text + "\n\n" + final_response
-
             expected_tools: Set[str] = set()
             if "finsight" in request_analysis.get("apis", []):
                 expected_tools.add("finsight_api")
@@ -5057,25 +3807,20 @@ JSON:"""
             
         except Exception as e:
             import traceback
+            details = str(e)
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug_mode:
                 print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()
-
-            # ========================================
-            # PHASE 1 GRACEFUL ERROR HANDLING
-            # Never expose technical details to users
-            # ========================================
-            user_friendly_message = GracefulErrorHandler.create_fallback_response(
-                request.question,
-                e
-            )
-
+            message = (
+                "⚠️ Something went wrong while orchestrating your request, but no actions were performed. "
+                "Please retry, and if the issue persists share this detail with the team: {details}."
+            ).format(details=details)
             return ChatResponse(
-                response=user_friendly_message,
+                response=message,
                 timestamp=datetime.now().isoformat(),
                 confidence_score=0.0,
-                error_message=str(e) if debug_mode else None  # Only include technical error in debug mode
+                error_message=details
             )
     
     async def process_request_streaming(self, request: ChatRequest):
@@ -5158,19 +3903,9 @@ JSON:"""
             mentioned = _extract_filenames(request.question)
             file_previews: List[Dict[str, Any]] = []
             files_forbidden: List[str] = []
-
-            # Check if query is asking about specific functions/methods/classes OR file metadata
-            # If so, SKIP auto-preview and let shell planning handle it
-            query_lower = request.question.lower()
-            asking_about_code_element = any(pattern in query_lower for pattern in [
-                'method', 'function', 'class', 'def ', 'what does', 'how does',
-                'explain the', 'find the', 'show me the', 'purpose of', 'implementation of',
-                'how many lines', 'count lines', 'number of lines', 'wc -l', 'line count'
-            ])
-
             base_dir = Path.cwd().resolve()
             sensitive_roots = {Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'), Path('/usr'), Path('/bin'), Path('/sbin'), Path('/var')}
-
+            
             def _is_safe_path(path_str: str) -> bool:
                 try:
                     rp = Path(path_str).resolve()
@@ -5179,57 +3914,39 @@ JSON:"""
                     return str(rp).startswith(str(base_dir))
                 except Exception:
                     return False
-
-            # Only auto-preview if NOT asking about specific code elements or metadata
-            if not asking_about_code_element:
-                for m in mentioned:
-                    if not _is_safe_path(m):
-                        files_forbidden.append(m)
-                        continue
-                    pr = await self._preview_file(m)
-                    # Only add successful previews (not errors)
-                    if pr and pr.get("type") != "error":
-                        file_previews.append(pr)
-            else:
-                # Query is about specific code elements - let shell planning handle with grep/wc
-                files_forbidden = [m for m in mentioned if not _is_safe_path(m)]
-
+                    
+            for m in mentioned:
+                if not _is_safe_path(m):
+                    files_forbidden.append(m)
+                    continue
+                pr = await self._preview_file(m)
+                if pr:
+                    file_previews.append(pr)
+                    
             if file_previews:
                 api_results["files"] = file_previews
-                tools_used.append("read_file")  # Track that files were read
-                # Build grounded context from ALL text previews (for comparisons)
                 text_previews = [fp for fp in file_previews if fp.get("type") == "text" and fp.get("preview")]
                 files_context = ""
                 if text_previews:
-                    # Detect comparison queries - include MORE context
-                    is_comparison = len(text_previews) > 1 or any(word in request.question.lower() for word in ['compare', 'difference', 'contrast', 'vs', 'versus'])
-                    line_limit = 200 if is_comparison else 100  # More lines for comparisons
-
-                    # Include all files with appropriate context
-                    file_contexts = []
-                    for fp in text_previews:
-                        quoted = "\n".join(fp["preview"].splitlines()[:line_limit])
-                        file_contexts.append(f"File: {fp['path']}\n{quoted}")
-                    files_context = "\n\n---\n\n".join(file_contexts)
+                    fp = text_previews[0]
+                    quoted = "\n".join(fp["preview"].splitlines()[:20])
+                    files_context = f"File: {fp['path']} (first lines)\n" + quoted
                 api_results["files_context"] = files_context
-            elif mentioned and not asking_about_code_element:
-                # Mentioned files but none found (only set if we actually tried to preview them)
+            elif mentioned:
                 api_results["files_missing"] = mentioned
             if files_forbidden:
                 api_results["files_forbidden"] = files_forbidden
 
             # Workspace listing
             workspace_listing: Optional[Dict[str, Any]] = None
-            # Only show workspace listing if NOT looking for specific missing files
-            if not file_previews and not api_results.get("files_missing"):
+            if not file_previews:
                 file_browse_keywords = ("list files", "show files", "what files")
                 describe_files = ("file" in question_lower or "directory" in question_lower)
                 if any(keyword in question_lower for keyword in file_browse_keywords) or describe_files:
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            # Don't show workspace listing if there are missing files (prioritize error)
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("files_missing"):
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
                 result = self._respond_with_workspace_listing(request, workspace_listing)
                 async def workspace_gen():
                     yield result.response
@@ -5261,63 +3978,10 @@ JSON:"""
             # Build messages
             system_prompt = self._build_system_prompt(request_analysis, memory_context, api_results)
             messages = [{"role": "system", "content": system_prompt}]
-
-            # CRITICAL: Inject research papers IMMEDIATELY after system prompt (highest priority)
-            research_data = api_results.get("research")
-            if research_data and research_data.get("results"):
-                papers_text = "🚨 PAPERS ALREADY FOUND - SYNTHESIZE THESE NOW:\n\n"
-                papers_text += "DO NOT say 'we will search' - the search is COMPLETE.\n"
-                papers_text += "DO NOT say 'attempting' - papers are ALREADY HERE.\n"
-                papers_text += "YOUR JOB: Synthesize these papers into a comprehensive literature review (500+ words).\n\n"
-
-                for i, paper in enumerate(research_data["results"][:5], 1):
-                    papers_text += f"\n═══ PAPER {i} ═══\n"
-                    papers_text += f"Title: {paper.get('title', 'No title')}\n"
-                    # Handle authors as either list of dicts or list of strings
-                    authors = paper.get('authors', [])
-                    if authors:
-                        if isinstance(authors[0], dict):
-                            author_names = [a.get('name', 'Unknown') for a in authors[:3]]
-                        else:
-                            author_names = authors[:3]
-                        papers_text += f"Authors: {', '.join(author_names)}\n"
-                    papers_text += f"Year: {paper.get('year', 'N/A')}\n"
-                    if paper.get('abstract'):
-                        papers_text += f"\nAbstract:\n{paper['abstract']}\n"
-                    if paper.get('tldr'):
-                        papers_text += f"\nTL;DR: {paper['tldr']}\n"
-                    papers_text += "\n"
-
-                papers_text += "\n🚨 SYNTHESIZE THESE PAPERS NOW - Include:\n"
-                papers_text += "- Overview of the research area\n"
-                papers_text += "- Key findings from each paper's abstract\n"
-                papers_text += "- Methods and approaches used\n"
-                papers_text += "- Comparison and contrast of different approaches\n"
-                papers_text += "- Implications and future directions\n"
-                papers_text += "\nMINIMUM 500 WORDS. Use the abstracts above."
-
-                messages.append({"role": "system", "content": papers_text})
-
+            
             fc = api_results.get("files_context")
             if fc:
-                # Count how many files are being compared
-                file_count = len([fp for fp in api_results.get("files", []) if fp.get("type") == "text"])
-
-                if file_count > 1:
-                    # Multi-file comparison - make it VERY explicit
-                    comparison_msg = "🚨 MULTIPLE FILES PROVIDED FOR COMPARISON:\n\n"
-                    comparison_msg += fc
-                    comparison_msg += "\n\n🚨 CRITICAL INSTRUCTIONS FOR COMPARISON:\n"
-                    comparison_msg += "1. Read ALL file contents above carefully\n"
-                    comparison_msg += "2. Extract specific data points, numbers, percentages from EACH file\n"
-                    comparison_msg += "3. Compare and contrast the ACTUAL content (not just filenames)\n"
-                    comparison_msg += "4. If asked about differences, cite EXACT lines or values from BOTH files\n"
-                    comparison_msg += "5. Do NOT make general statements - be specific with examples from the files\n"
-                    comparison_msg += "\nAnswer based STRICTLY on the file contents above. Do not run shell commands."
-                    messages.append({"role": "system", "content": comparison_msg})
-                else:
-                    # Single file - normal handling
-                    messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}"})
+                messages.append({"role": "system", "content": f"Grounding from mentioned file(s):\n{fc}"})
             
             # Add conversation history (abbreviated - just recent)
             if len(self.conversation_history) > 6:
