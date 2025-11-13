@@ -2394,7 +2394,6 @@ class EnhancedNocturnalAgent:
 
                     if is_combined_request:
                         # Extract the search query part (before "and add/push/save")
-                        import re
                         # Split on integration patterns
                         split_patterns = [
                             r'\s+and\s+(add|push|save|send|put|export|store)',
