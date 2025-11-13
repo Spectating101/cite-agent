@@ -2306,45 +2306,8 @@ class EnhancedNocturnalAgent:
         return await self.query_analyzer.analyze_request_type(question)
     
     def _is_query_too_vague_for_apis(self, question: str) -> bool:
-        """
-        Detect if query is too vague to warrant API calls
-        Returns True if we should skip APIs and just ask clarifying questions
-        """
-        question_lower = question.lower()
-        
-        # Pattern 1: Multiple years without SPECIFIC topic (e.g., "2008, 2015, 2019")
-        # import re removed - using module-level import
-        years_pattern = r'\b(19\d{2}|20\d{2})\b'
-        years = re.findall(years_pattern, question)
-        if len(years) >= 2:
-            # Multiple years - check if there's a SPECIFIC topic beyond just "papers on"
-            # Generic terms that don't add specificity
-            generic_terms = ['papers', 'about', 'on', 'regarding', 'concerning', 'related to']
-            # Remove generic terms and check what's left
-            words = question_lower.split()
-            content_words = [w for w in words if w not in generic_terms and not re.match(r'\d{4}', w)]
-            # If fewer than 2 meaningful content words, it's too vague
-            if len(content_words) < 2:
-                return True  # Too vague: "papers on 2008, 2015, 2019" needs topic
-        
-        # Pattern 2: Market share without market specified
-        if 'market share' in question_lower:
-            market_indicators = ['analytics', 'software', 'government', 'data', 'cloud', 'sector', 'industry']
-            if not any(indicator in question_lower for indicator in market_indicators):
-                return True  # Too vague: needs market specification
-        
-        # Pattern 3: Comparison without metric (compare X and Y)
-        if any(word in question_lower for word in ['compare', 'versus', 'vs', 'vs.']):
-            metric_indicators = ['revenue', 'market cap', 'sales', 'growth', 'profit', 'valuation']
-            if not any(indicator in question_lower for indicator in metric_indicators):
-                return True  # Too vague: needs metric specification
-        
-        # Pattern 4: Ultra-short queries without specifics (< 4 words)
-        word_count = len(question.split())
-        if word_count <= 3 and '?' in question:
-            return True  # Too short and questioning - likely needs clarification
-        
-        return False  # Query seems specific enough for API calls
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_query_too_vague_for_apis(question)
     
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
