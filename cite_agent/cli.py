@@ -681,8 +681,10 @@ class NocturnalCLI:
                 self.console.print(f"   Tags: {', '.join(paper.tags)}")
             self.console.print()
 
-    async def single_query_with_workflow(self, question: str, save_to_library: bool = False, 
-                                         copy_to_clipboard: bool = False, export_format: Optional[str] = None):
+    async def single_query_with_workflow(self, question: str, save_to_library: bool = False,
+                                         copy_to_clipboard: bool = False, export_format: Optional[str] = None,
+                                         push_to: Optional[str] = None, collection: Optional[str] = None,
+                                         tags_push: Optional[str] = None):
         """Process a single query with workflow integration"""
         if not await self.initialize(non_interactive=True):
             return
@@ -753,7 +755,56 @@ class NocturnalCLI:
                         self.console.print(f"[success]✅ Saved to library (ID: {paper.paper_id[:8]})[/success]")
                     else:
                         self.console.print("[error]❌ Failed to save to library[/error]")
-        
+
+            # Integration push
+            if push_to:
+                from cite_agent.integration_commands import push_papers_to_integration, format_integration_result
+
+                # Try to extract papers from response
+                # For now, assume response contains paper data or we need to query the API
+                # This is a simplified version - you might want to extract multiple papers
+                paper = parse_paper_from_response(response.response)
+
+                if paper:
+                    # Convert tags_push string to list
+                    tags_list = None
+                    if tags_push:
+                        tags_list = [tag.strip() for tag in tags_push.split(',')]
+
+                    # Convert Paper object to dict for integration
+                    paper_dict = {
+                        "title": paper.title,
+                        "authors": paper.authors,
+                        "year": paper.year,
+                        "doi": paper.doi,
+                        "url": paper.url,
+                        "abstract": paper.abstract,
+                        "venue": paper.venue,
+                        "citation_count": paper.citation_count,
+                        "tags": paper.tags or [],
+                        "added_date": paper.added_date
+                    }
+
+                    self.console.print(f"\n🔄 Pushing to {push_to.capitalize()}...")
+
+                    try:
+                        result = await push_papers_to_integration(
+                            [paper_dict],
+                            target=push_to,
+                            collection_name=collection,
+                            tags=tags_list
+                        )
+
+                        output = format_integration_result(result)
+                        self.console.print(output)
+
+                    except Exception as e:
+                        self.console.print(f"[error]❌ Push failed: {str(e)}[/error]")
+                        self.console.print("[dim]Run 'cite-agent --setup-integrations' to configure credentials[/dim]")
+                else:
+                    self.console.print(f"[warning]⚠️ Could not extract paper data for {push_to} push[/warning]")
+                    self.console.print("[dim]Make sure your query returns academic paper information[/dim]")
+
         finally:
             if self.agent:
                 await self.agent.close()
@@ -913,6 +964,43 @@ Examples:
         help='Filter library by tag'
     )
 
+    # Integration arguments
+    parser.add_argument(
+        '--setup-integrations',
+        action='store_true',
+        help='Setup academic tool integrations (Zotero, Mendeley, Notion)'
+    )
+
+    parser.add_argument(
+        '--test-integrations',
+        action='store_true',
+        help='Test all configured integrations'
+    )
+
+    parser.add_argument(
+        '--push-to',
+        choices=['zotero', 'mendeley', 'notion'],
+        help='Push query results to integration (use with query)'
+    )
+
+    parser.add_argument(
+        '--collection',
+        metavar='NAME',
+        help='Collection/folder name for integration push'
+    )
+
+    parser.add_argument(
+        '--tags-push',
+        metavar='TAGS',
+        help='Comma-separated tags for integration push'
+    )
+
+    parser.add_argument(
+        '--authorize-mendeley',
+        action='store_true',
+        help='Run Mendeley OAuth authorization flow'
+    )
+
     parser.add_argument(
         '--doctor',
         action='store_true',
@@ -1008,7 +1096,25 @@ Examples:
         cli = NocturnalCLI()
         success = cli.setup_wizard()
         sys.exit(0 if success else 1)
-    
+
+    # Handle integration setup
+    if args.setup_integrations:
+        from cite_agent.integration_commands import setup_integration_credentials
+        setup_integration_credentials()
+        sys.exit(0)
+
+    # Handle integration testing
+    if args.test_integrations:
+        from cite_agent.integration_commands import test_integrations
+        asyncio.run(test_integrations())
+        sys.exit(0)
+
+    # Handle Mendeley authorization
+    if args.authorize_mendeley:
+        from cite_agent.integration_commands import authorize_mendeley
+        asyncio.run(authorize_mendeley())
+        sys.exit(0)
+
     # Handle updates
     if args.update or args.check_updates:
         updater = NocturnalUpdater()
@@ -1090,13 +1196,16 @@ Examples:
         cli_instance = NocturnalCLI()
         
         if args.query and not args.interactive:
-            # Check if workflow flags are set
-            if args.save or args.copy or args.format:
+            # Check if workflow or integration flags are set
+            if args.save or args.copy or args.format or args.push_to:
                 await cli_instance.single_query_with_workflow(
                     args.query,
                     save_to_library=args.save,
                     copy_to_clipboard=args.copy,
-                    export_format=args.format
+                    export_format=args.format,
+                    push_to=args.push_to,
+                    collection=args.collection,
+                    tags_push=args.tags_push
                 )
             else:
                 await cli_instance.single_query(args.query)
