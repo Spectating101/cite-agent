@@ -94,11 +94,12 @@ class EnhancedNocturnalAgent:
         self.archive = ConversationArchive()
 
         # Integration handler for Zotero, Mendeley, Notion
-        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler
+        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler, FinancialHandler
         self.integration_handler = IntegrationHandler()
         self.query_analyzer = QueryAnalyzer()
         self.file_ops = FileOperations()
         self.shell_handler = ShellHandler()
+        self.financial_handler = FinancialHandler()
 
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
@@ -781,17 +782,8 @@ class EnhancedNocturnalAgent:
             execution_results=execution_results
         )
     def _format_currency_value(self, value: float) -> str:
-        try:
-            abs_val = abs(value)
-            if abs_val >= 1e12:
-                return f"${value / 1e12:.2f} trillion"
-            if abs_val >= 1e9:
-                return f"${value / 1e9:.2f} billion"
-            if abs_val >= 1e6:
-                return f"${value / 1e6:.2f} million"
-            return f"${value:,.2f}"
-        except Exception:
-            return str(value)
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.format_currency_value(value)
 
     def _respond_with_financial_metrics(self, request: ChatRequest, payload: Dict[str, Any]) -> ChatResponse:
         ticker, metrics = next(iter(payload.items()))
@@ -1465,67 +1457,14 @@ class EnhancedNocturnalAgent:
         )
 
     def _extract_tickers_from_text(self, text: str) -> List[str]:
-        """Find tickers either as explicit symbols or from known company names."""
-        text_lower = text.lower()
-        # Explicit ticker-like symbols
-        ticker_candidates: List[str] = []
-        for token in re.findall(r"\b[A-Z]{1,5}(?:\d{0,2})\b", text):
-            ticker_candidates.append(token)
-        # Company name matches
-        for name, sym in self.company_name_to_ticker.items():
-            if name and name in text_lower:
-                ticker_candidates.append(sym)
-        # Deduplicate preserve order
-        seen = set()
-        ordered: List[str] = []
-        for t in ticker_candidates:
-            if t not in seen:
-                seen.add(t)
-                ordered.append(t)
-        return ordered[:4]
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.extract_tickers_from_text(text, self.company_name_to_ticker)
 
     def _plan_financial_request(self, question: str, session_key: Optional[str] = None) -> Tuple[List[str], List[str]]:
-        """Derive ticker and metric targets for a financial query."""
-        tickers = list(self._extract_tickers_from_text(question))
-        question_lower = question.lower()
-
-        if not tickers:
-            if "apple" in question_lower:
-                tickers.append("AAPL")
-            if "microsoft" in question_lower:
-                tickers.append("MSFT" if "AAPL" not in tickers else "MSFT")
-
-        metrics_to_fetch: List[str] = []
-        keyword_map = [
-            ("revenue", ["revenue", "sales", "top line"]),
-            ("grossProfit", ["gross profit", "gross margin", "margin"]),
-            ("operatingIncome", ["operating income", "operating profit", "ebit"]),
-            ("netIncome", ["net income", "profit", "earnings", "bottom line"]),
-        ]
-
-        for metric, keywords in keyword_map:
-            if any(kw in question_lower for kw in keywords):
-                metrics_to_fetch.append(metric)
-
-        if session_key:
-            last_topic = self._session_topics.get(session_key)
-        else:
-            last_topic = None
-
-        if not metrics_to_fetch and last_topic and last_topic.get("metrics"):
-            metrics_to_fetch = list(last_topic["metrics"])
-
-        if not metrics_to_fetch:
-            metrics_to_fetch = ["revenue", "grossProfit"]
-
-        deduped: List[str] = []
-        seen: Set[str] = set()
-        for symbol in tickers:
-            if symbol and symbol not in seen:
-                seen.add(symbol)
-                deduped.append(symbol)
-
-        return deduped[:2], metrics_to_fetch
+        """Delegate to FinancialHandler"""
+        return self.financial_handler.plan_financial_request(
+            question, self.company_name_to_ticker, self._session_topics, session_key
+        )
     
     async def initialize(self, force_reload: bool = False):
         """Initialize the agent with API keys and shell session."""
