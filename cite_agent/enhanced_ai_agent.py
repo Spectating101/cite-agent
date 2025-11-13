@@ -94,10 +94,11 @@ class EnhancedNocturnalAgent:
         self.archive = ConversationArchive()
 
         # Integration handler for Zotero, Mendeley, Notion
-        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations
+        from .handlers import IntegrationHandler, QueryAnalyzer, FileOperations, ShellHandler
         self.integration_handler = IntegrationHandler()
         self.query_analyzer = QueryAnalyzer()
         self.file_ops = FileOperations()
+        self.shell_handler = ShellHandler()
 
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
@@ -2287,144 +2288,20 @@ class EnhancedNocturnalAgent:
         return await self.integration_handler.push_to_integration(target, papers, collection)
 
     def _looks_like_user_prompt(self, command: str) -> bool:
-        command_lower = command.strip().lower()
-        if not command_lower:
-            return True
-        phrases = [
-            "ask the user",
-            "can you run",
-            "please run",
-            "tell the user",
-            "ask them",
-        ]
-        return any(phrase in command_lower for phrase in phrases)
+        """Delegate to ShellHandler"""
+        return self.shell_handler.looks_like_user_prompt(command)
 
     def _infer_shell_command(self, question: str) -> str:
-        question_lower = question.lower()
-        if any(word in question_lower for word in ["list", "show", "files", "directory", "folder", "ls"]):
-            return "ls -lah"
-        if any(word in question_lower for word in ["where", "pwd", "current directory", "location"]):
-            return "pwd"
-        if "read" in question_lower and any(ext in question_lower for ext in [".py", ".txt", ".csv", "file"]):
-            return "ls -lah"
-        return "pwd"
+        """Delegate to ShellHandler"""
+        return self.shell_handler.infer_shell_command(question)
 
     def execute_command(self, command: str) -> str:
-        """Execute command and return output - improved with echo markers"""
-        try:
-            if self.shell_session is None:
-                return "ERROR: Shell session not initialized"
-            
-            # Clean command - remove natural language prefixes
-            command = command.strip()
-            prefixes_to_remove = [
-                'run this bash:', 'execute this:', 'run command:', 'execute:', 
-                'run this:', 'run:', 'bash:', 'command:', 'this bash:', 'this:',
-                'r code to', 'R code to', 'python code to', 'in r:', 'in R:',
-                'in python:', 'in bash:', 'with r:', 'with bash:'
-            ]
-            for prefix in prefixes_to_remove:
-                if command.lower().startswith(prefix.lower()):
-                    command = command[len(prefix):].strip()
-                    # Try again in case of nested prefixes
-                    for prefix2 in prefixes_to_remove:
-                        if command.lower().startswith(prefix2.lower()):
-                            command = command[len(prefix2):].strip()
-                            break
-                    break
-            
-            # Use echo markers to detect when command is done
-            import uuid
-            marker = f"CMD_DONE_{uuid.uuid4().hex[:8]}"
-            
-            # Send command with marker
-            terminator = "\r\n" if self._is_windows else "\n"
-            if self._is_windows:
-                full_command = f"{command}; echo '{marker}'{terminator}"
-            else:
-                full_command = f"{command}; echo '{marker}'{terminator}"
-            self.shell_session.stdin.write(full_command)
-            self.shell_session.stdin.flush()
-
-            # Read until we see the marker
-            output_lines = []
-            start_time = time.time()
-            timeout = 30  # Increased for R scripts
-            
-            while time.time() - start_time < timeout:
-                try:
-                    line = self.shell_session.stdout.readline()
-                    if not line:
-                        break
-                    
-                    line = line.rstrip()
-                    
-                    # Check if we hit the marker
-                    if marker in line:
-                        break
-                    
-                    output_lines.append(line)
-                except Exception:
-                    break
-            
-            output = '\n'.join(output_lines).strip()
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            
-            # Log execution details in debug mode
-            if debug_mode:
-                output_preview = output[:200] if output else "(no output)"
-                print(f"✅ Command executed: {command}")
-                print(f"📤 Output ({len(output)} chars): {output_preview}...")
-            
-            return output if output else "Command executed (no output)"
-
-        except Exception as e:
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-            if debug_mode:
-                print(f"❌ Command failed: {command}")
-                print(f"❌ Error: {e}")
-            return f"ERROR: {e}"
+        """Delegate to ShellHandler"""
+        return self.shell_handler.execute_command(command, self.shell_session, self._is_windows)
 
     def _format_shell_output(self, output: str, command: str) -> Dict[str, Any]:
-        """
-        Format shell command output for display.
-        Returns dictionary with formatted preview and full output.
-        """
-        lines = output.split('\n') if output else []
-        
-        # Detect output type based on command
-        command_lower = command.lower()
-        
-        formatted = {
-            "type": "shell_output",
-            "command": command,
-            "line_count": len(lines),
-            "byte_count": len(output),
-            "preview": '\n'.join(lines[:10]) if lines else "(no output)",
-            "full_output": output
-        }
-        
-        # Enhanced formatting based on command type
-        if any(cmd in command_lower for cmd in ['ls', 'dir']):
-            formatted["type"] = "directory_listing"
-            formatted["preview"] = f"📁 Found {len([l for l in lines if l.strip()])} items"
-        elif any(cmd in command_lower for cmd in ['find', 'locate', 'search']):
-            formatted["type"] = "search_results"
-            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matches"
-        elif any(cmd in command_lower for cmd in ['grep', 'match']):
-            formatted["type"] = "search_results"
-            formatted["preview"] = f"🔍 Found {len([l for l in lines if l.strip()])} matching lines"
-        elif any(cmd in command_lower for cmd in ['cat', 'head', 'tail']):
-            formatted["type"] = "file_content"
-            formatted["preview"] = f"📄 {len(lines)} lines of content"
-        elif any(cmd in command_lower for cmd in ['pwd', 'cd']):
-            formatted["type"] = "directory_change"
-            formatted["preview"] = f"📍 {output.strip()}"
-        elif any(cmd in command_lower for cmd in ['mkdir', 'touch', 'create']):
-            formatted["type"] = "file_creation"
-            formatted["preview"] = f"✨ Created: {output.strip()}"
-        
-        return formatted
+        """Delegate to ShellHandler"""
+        return self.shell_handler.format_shell_output(output, command)
 
     # ========================================================================
     # DIRECT FILE OPERATIONS (Claude Code / Cursor Parity)
@@ -2466,71 +2343,8 @@ class EnhancedNocturnalAgent:
     # ========================================================================
 
     def _classify_command_safety(self, cmd: str) -> str:
-        """
-        Classify command by safety level for smart execution.
-        Returns: 'SAFE', 'WRITE', 'DANGEROUS', or 'BLOCKED'
-        """
-        cmd = cmd.strip()
-        if not cmd:
-            return 'BLOCKED'
-        
-        cmd_lower = cmd.lower()
-        cmd_parts = cmd.split()
-        cmd_base = cmd_parts[0] if cmd_parts else ''
-        cmd_with_sub = ' '.join(cmd_parts[:2]) if len(cmd_parts) >= 2 else ''
-        
-        # BLOCKED: Catastrophic commands
-        nuclear_patterns = [
-            'rm -rf /',
-            'rm -rf ~',
-            'rm -rf /*',
-            'dd if=/dev/zero',
-            'mkfs',
-            'fdisk',
-            ':(){ :|:& };:',  # Fork bomb
-            'chmod -r 777 /',
-            '> /dev/sda',
-        ]
-        for pattern in nuclear_patterns:
-            if pattern in cmd_lower:
-                return 'BLOCKED'
-        
-        # SAFE: Read-only commands
-        safe_commands = {
-            'pwd', 'ls', 'cd', 'cat', 'head', 'tail', 'grep', 'find', 'which', 'type',
-            'wc', 'diff', 'echo', 'ps', 'top', 'df', 'du', 'file', 'stat', 'tree',
-            'whoami', 'hostname', 'date', 'cal', 'uptime', 'printenv', 'env',
-        }
-        safe_git = {'git status', 'git log', 'git diff', 'git branch', 'git show', 'git remote'}
-        
-        if cmd_base in safe_commands or cmd_with_sub in safe_git:
-            return 'SAFE'
-        
-        # WRITE: File creation/modification (allowed but tracked)
-        write_commands = {'mkdir', 'touch', 'cp', 'mv', 'tee'}
-        if cmd_base in write_commands:
-            return 'WRITE'
-        
-        # WRITE: Redirection operations (echo > file, cat > file)
-        if '>' in cmd or '>>' in cmd:
-            # Allow redirection to regular files, block to devices
-            if '/dev/' not in cmd_lower:
-                return 'WRITE'
-            else:
-                return 'BLOCKED'
-        
-        # DANGEROUS: Deletion and permission changes
-        dangerous_commands = {'rm', 'rmdir', 'chmod', 'chown', 'chgrp'}
-        if cmd_base in dangerous_commands:
-            return 'DANGEROUS'
-        
-        # WRITE: Git write operations
-        write_git = {'git add', 'git commit', 'git push', 'git pull', 'git checkout', 'git merge'}
-        if cmd_with_sub in write_git:
-            return 'WRITE'
-        
-        # Default: Treat unknown commands as requiring user awareness
-        return 'WRITE'
+        """Delegate to ShellHandler"""
+        return self.shell_handler.classify_command_safety(cmd)
 
     def _format_archive_summary(
         self,
@@ -2565,12 +2379,8 @@ class EnhancedNocturnalAgent:
         }
 
     def _is_safe_shell_command(self, cmd: str) -> bool:
-        """
-        Compatibility wrapper for old safety check.
-        Now uses tiered classification system.
-        """
-        classification = self._classify_command_safety(cmd)
-        return classification in ['SAFE', 'WRITE']  # Allow SAFE and WRITE, block DANGEROUS and BLOCKED
+        """Delegate to ShellHandler"""
+        return self.shell_handler.is_safe_shell_command(cmd)
     
     def _check_token_budget(self, estimated_tokens: int) -> bool:
         """Check if we have enough token budget"""
