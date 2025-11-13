@@ -94,9 +94,10 @@ class EnhancedNocturnalAgent:
         self.archive = ConversationArchive()
 
         # Integration handler for Zotero, Mendeley, Notion
-        from .handlers import IntegrationHandler
+        from .handlers import IntegrationHandler, QueryAnalyzer
         self.integration_handler = IntegrationHandler()
-        
+        self.query_analyzer = QueryAnalyzer()
+
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
             'last_file': None,           # Last file mentioned/read
@@ -953,24 +954,12 @@ class EnhancedNocturnalAgent:
         return False
 
     def _is_simple_greeting(self, text: str) -> bool:
-        greetings = {"hi", "hello", "hey", "hola", "howdy", "greetings"}
-        normalized = text.lower().strip()
-        return any(normalized.startswith(greet) for greet in greetings)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_simple_greeting(text)
 
     def _is_casual_acknowledgment(self, text: str) -> bool:
-        acknowledgments = {
-            "thanks",
-            "thank you",
-            "thx",
-            "ty",
-            "appreciate it",
-            "got it",
-            "cool",
-            "great",
-            "awesome"
-        }
-        normalized = text.lower().strip()
-        return any(normalized.startswith(ack) for ack in acknowledgments)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_casual_acknowledgment(text)
 
     def _detect_language_preference(self, text: str) -> None:
         """
@@ -996,32 +985,12 @@ class EnhancedNocturnalAgent:
                 self.language_preference = 'en'
 
     def _is_generic_test_prompt(self, text: str) -> bool:
-        """Detect simple 'test' style probes that don't need full analysis."""
-        normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-        words = [w for w in normalized.split() if w]
-        if not words or "test" not in words:
-            return False
-        if len(words) > 4:
-            return False
-        allowed = {"test", "testing", "just", "this", "is", "a", "only"}
-        return all(w in allowed for w in words)
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_generic_test_prompt(text)
 
     def _is_location_query(self, text: str) -> bool:
-        """Detect requests asking for the current working directory."""
-        normalized = re.sub(r"[^a-z0-9/._\s-]", " ", text.lower())
-        normalized = " ".join(normalized.split())
-        location_phrases = [
-            "where are we",
-            "where am i",
-            "where are we right now",
-            "what directory",
-            "current directory",
-            "current folder",
-            "current path",
-        ]
-        if any(phrase in normalized for phrase in location_phrases):
-            return True
-        return normalized in {"pwd", "pwd?"}
+        """Delegate to QueryAnalyzer"""
+        return self.query_analyzer.is_location_query(text)
 
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
