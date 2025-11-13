@@ -316,3 +316,154 @@ async def test_notion_real_connection():
     async with NotionClient(config) as client:
         result = await client.test_connection()
         assert result["success"] is True
+
+
+class TestConversationalIntegrations:
+    """Test conversational integration features in enhanced_ai_agent"""
+
+    def test_detect_integration_request_zotero(self):
+        """Test detection of Zotero push requests"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        # Test various Zotero patterns
+        test_cases = [
+            "add to zotero",
+            "push these papers to zotero",
+            "save it to zotero",
+            "put in zotero library",
+            "send to zotero in ML collection"
+        ]
+
+        for query in test_cases:
+            result = agent._detect_integration_request(query)
+            assert result is not None, f"Failed to detect: {query}"
+            assert result["target"] == "zotero"
+            assert result["action"] == "push"
+
+        # Test with collection
+        result = agent._detect_integration_request("add to zotero in collection Deep Learning")
+        assert result is not None
+        assert result["target"] == "zotero"
+        assert result["collection"] is not None
+
+    def test_detect_integration_request_mendeley(self):
+        """Test detection of Mendeley push requests"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        test_cases = [
+            "add to mendeley",
+            "push to mendeley library",
+            "save them to mendeley"
+        ]
+
+        for query in test_cases:
+            result = agent._detect_integration_request(query)
+            assert result is not None
+            assert result["target"] == "mendeley"
+
+    def test_detect_integration_request_notion(self):
+        """Test detection of Notion push requests"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        test_cases = [
+            "add to notion",
+            "create in notion database",
+            "save to notion"
+        ]
+
+        for query in test_cases:
+            result = agent._detect_integration_request(query)
+            assert result is not None
+            assert result["target"] == "notion"
+
+    def test_detect_no_integration_request(self):
+        """Test that non-integration queries return None"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        test_cases = [
+            "find papers on transformers",
+            "what is machine learning",
+            "search for research on AI",
+            "hello"
+        ]
+
+        for query in test_cases:
+            result = agent._detect_integration_request(query)
+            assert result is None, f"False positive for: {query}"
+
+    def test_extract_papers_from_context(self, sample_papers):
+        """Test paper extraction from api_results"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        # Test with research results in api_results
+        api_results = {
+            "research": {
+                "results": sample_papers
+            }
+        }
+
+        papers = agent._extract_papers_from_context(api_results, "add these to zotero")
+        assert len(papers) == 2
+        assert papers[0]["title"] == "Attention Is All You Need"
+
+    def test_extract_papers_empty_context(self):
+        """Test paper extraction with no papers in context"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        papers = agent._extract_papers_from_context({}, "add to zotero")
+        assert len(papers) == 0
+
+    @pytest.mark.asyncio
+    async def test_push_to_integration_conversational_no_papers(self):
+        """Test conversational push with no papers"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        result = await agent._push_to_integration_conversational(
+            target="zotero",
+            papers=[],
+            collection=None
+        )
+
+        assert result["success"] is False
+        assert "No papers found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_push_to_integration_conversational_success(self, sample_papers):
+        """Test conversational push with mocked success"""
+        from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent
+
+        agent = EnhancedNocturnalAgent()
+
+        # Mock the integration push function
+        async def mock_push_to_zotero(papers, collection_name=None, tags=None):
+            return {
+                "success": True,
+                "message": f"Added {len(papers)} papers to Zotero",
+                "added": len(papers),
+                "failed": 0
+            }
+
+        with patch('cite_agent.integrations.push_to_zotero', new=mock_push_to_zotero):
+            result = await agent._push_to_integration_conversational(
+                target="zotero",
+                papers=sample_papers,
+                collection="ML Papers"
+            )
+
+            assert result["success"] is True
+            assert "Added 2 papers" in result["message"]
+            assert result["integration"] == "zotero"
