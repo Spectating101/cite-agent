@@ -1075,18 +1075,24 @@ Examples:
     # Handle query or interactive mode
     async def run_cli():
         cli_instance = NocturnalCLI()
-        
-        if args.query and not args.interactive:
+
+        # Check if stdin has data (piped input)
+        query_to_process = args.query
+        if not query_to_process and not sys.stdin.isatty():
+            # Read from stdin (pipe)
+            query_to_process = sys.stdin.read().strip()
+
+        if query_to_process and not args.interactive:
             # Check if workflow flags are set
             if args.save or args.copy or args.format:
                 await cli_instance.single_query_with_workflow(
-                    args.query,
+                    query_to_process,
                     save_to_library=args.save,
                     copy_to_clipboard=args.copy,
                     export_format=args.format
                 )
             else:
-                await cli_instance.single_query(args.query)
+                await cli_instance.single_query(query_to_process)
         else:
             await cli_instance.interactive_mode()
     
