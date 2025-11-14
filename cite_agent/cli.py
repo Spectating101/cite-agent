@@ -1153,35 +1153,40 @@ Examples:
                 latest = update_info["latest"]
                 
                 print(f"\n🔄 Updating Cite Agent: v{current} → v{latest}...")
-                
+                print("📦 Downloading and installing update...")
+
                 # Detect if installed via pipx or pip
                 import shutil
                 if shutil.which("pipx"):
                     # Try pipx upgrade first
+                    print("   Using pipx upgrade...")
                     result = subprocess.run(
                         ["pipx", "upgrade", "cite-agent"],
-                        capture_output=True,
-                        text=True,
-                        timeout=60
+                        capture_output=False,  # Show output for transparency
+                        timeout=120
                     )
                     if result.returncode == 0:
-                        print(f"✅ Updated to v{latest} (via pipx)")
+                        print(f"\n✅ Updated to v{latest} (via pipx)")
                         print("🔄 Restart cite-agent to use the new version\n")
                         return
-                
+                    else:
+                        print(f"⚠️  pipx upgrade failed (exit code {result.returncode})")
+                        print("   Trying pip install...")
+
                 # Fall back to pip install --user
+                print("   Using pip install --upgrade...")
                 result = subprocess.run(
                     [sys.executable, "-m", "pip", "install", "--upgrade", "--user", "cite-agent"],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
+                    capture_output=False,  # Show output for transparency
+                    timeout=120
                 )
-                
+
                 if result.returncode == 0:
-                    print(f"✅ Updated to v{latest}")
+                    print(f"\n✅ Updated to v{latest}")
                     print("🔄 Restart cite-agent to use the new version\n")
                 else:
-                    # Silent fail - don't show errors to users
+                    print(f"\n❌ Update failed (exit code {result.returncode})")
+                    print("   Try manually: pip install --upgrade cite-agent")
                     pass
         except:
             pass  # Silently fail, don't block startup
