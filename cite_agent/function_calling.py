@@ -35,6 +35,57 @@ class FunctionCallingResponse:
     assistant_message: Optional[Any] = None  # Original assistant message with tool_calls
 
 
+def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
+    """
+    Format tool results into concise, structured summaries for synthesis.
+    Reduces token usage and improves LLM understanding.
+    """
+    if "error" in result:
+        return f"Error: {result['error']}"
+
+    # Format based on tool type
+    if tool_name == "search_papers":
+        papers = result.get("papers", [])
+        count = len(papers)
+        if count == 0:
+            return "No papers found"
+
+        # Concise paper list (title, year, citations only)
+        paper_summaries = []
+        for p in papers[:5]:  # Max 5 papers in summary
+            title = p.get("title", "Unknown")[:80]  # Truncate long titles
+            year = p.get("year", "N/A")
+            citations = p.get("citations_count", 0)
+            paper_summaries.append(f"- {title} ({year}, {citations} cites)")
+
+        return f"Found {count} papers:\n" + "\n".join(paper_summaries)
+
+    elif tool_name == "get_financial_data":
+        ticker = result.get("ticker", "Unknown")
+        data = result.get("data", {})
+
+        # Extract key metrics
+        summaries = []
+        for metric, info in data.items():
+            if isinstance(info, dict):
+                value = info.get("value", "N/A")
+                period = info.get("period", "")
+                summaries.append(f"{metric}: ${value:,.0f}" if isinstance(value, (int, float)) else f"{metric}: {value}")
+
+        return f"{ticker} - " + ", ".join(summaries) if summaries else json.dumps(result)[:200]
+
+    elif tool_name == "list_directory":
+        listing = result.get("listing", "")
+        lines = listing.split("\n")[:10]  # Max 10 lines
+        return "\n".join(lines) + ("...[more files]" if len(listing.split("\n")) > 10 else "")
+
+    elif tool_name == "chat":
+        return result.get("message", "")
+
+    # Default: truncated JSON
+    return json.dumps(result)[:400]
+
+
 class FunctionCallingAgent:
     """
     Handles function calling workflow with Cerebras/OpenAI compatible APIs.
@@ -262,11 +313,11 @@ class FunctionCallingAgent:
 
             # Return chat response directly without second LLM call
             result = tool_execution_results.get(tool_calls[0].id, {})
-            if "response" in result:
+            if "message" in result:
                 if self.debug_mode:
                     print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
                 return FunctionCallingResponse(
-                    response=result["response"],
+                    response=result["message"],
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
                     tokens_used=0,  # No second LLM call
@@ -295,16 +346,12 @@ class FunctionCallingAgent:
                 ]
             })
 
-        # Add tool responses (truncated for token efficiency)
+        # Add tool responses (formatted for efficiency and clarity)
         for tool_call in tool_calls:
             result = tool_execution_results.get(tool_call.id, {})
-            result_str = json.dumps(result)
 
-            # Truncate long results to save tokens (keep first 2000 chars)
-            # This is enough context for synthesis while reducing token waste
-            MAX_RESULT_LENGTH = 2000
-            if len(result_str) > MAX_RESULT_LENGTH:
-                result_str = result_str[:MAX_RESULT_LENGTH] + "... [truncated]"
+            # Format result into structured summary (reduces tokens, improves synthesis)
+            result_str = format_tool_result(tool_call.name, result)
 
             messages.append({
                 "role": "tool",

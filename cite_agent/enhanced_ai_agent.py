@@ -3618,60 +3618,14 @@ class EnhancedNocturnalAgent:
             if debug_mode:
                 print(f"🔍 [Function Calling] Processing query: {request.question[:100]}...")
 
-            # Step 1: Get tool calls from LLM
-            fc_response = await self._function_calling_agent.process_query(
-                query=request.question,
-                conversation_history=self.conversation_history[-10:] if hasattr(self, 'conversation_history') else []
-            )
+            # Multi-step execution: allow up to 3 rounds of tool calls
+            MAX_ITERATIONS = 3
+            all_tool_calls = []
+            all_tools_used = []
+            all_tool_results = {}
+            total_tokens = 0
 
-            # If no tool calls, return direct response
-            if not fc_response.tool_calls:
-                if debug_mode:
-                    print(f"🔍 [Function Calling] Direct response (no tools)")
-
-                # Update conversation history
-                if hasattr(self, 'conversation_history'):
-                    self.conversation_history.append({
-                        "role": "user",
-                        "content": request.question
-                    })
-                    self.conversation_history.append({
-                        "role": "assistant",
-                        "content": fc_response.response
-                    })
-
-                return ChatResponse(
-                    response=fc_response.response,
-                    tokens_used=fc_response.tokens_used,
-                    tools_used=["chat"],
-                    confidence_score=0.8,
-                    api_results={}
-                )
-
-            # Step 2: Execute tools
-            if debug_mode:
-                print(f"🔍 [Function Calling] Executing {len(fc_response.tool_calls)} tool(s)")
-
-            tool_execution_results = {}
-            tools_used = []
-
-            for tool_call in fc_response.tool_calls:
-                result = await self._tool_executor.execute_tool(
-                    tool_name=tool_call.name,
-                    arguments=tool_call.arguments
-                )
-                tool_execution_results[tool_call.id] = result
-                tools_used.append(tool_call.name)
-
-                if debug_mode:
-                    print(f"🔍 [Function Calling] Tool {tool_call.name} executed: "
-                          f"{'error' if 'error' in result else 'success'}")
-
-            # Step 3: Get final response from LLM with tool results
-            if debug_mode:
-                print(f"🔍 [Function Calling] Getting final response with tool results")
-
-            # Build conversation for finalize
+            # Build conversation context
             conversation = []
             if hasattr(self, 'conversation_history'):
                 conversation = self.conversation_history[-10:].copy()
@@ -3680,13 +3634,123 @@ class EnhancedNocturnalAgent:
                 "content": request.question
             })
 
+            current_query = request.question
+            last_assistant_message = None
+
+            for iteration in range(MAX_ITERATIONS):
+                if debug_mode:
+                    print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
+
+                # Step 1: Get tool calls from LLM
+                fc_response = await self._function_calling_agent.process_query(
+                    query=current_query,
+                    conversation_history=conversation
+                )
+
+                total_tokens += fc_response.tokens_used
+
+                # If no tool calls, break the loop
+                if not fc_response.tool_calls:
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] No tool calls in iteration {iteration + 1}")
+
+                    # If this is first iteration with no tools, return direct response
+                    if iteration == 0:
+                        if hasattr(self, 'conversation_history'):
+                            self.conversation_history.append({
+                                "role": "user",
+                                "content": request.question
+                            })
+                            self.conversation_history.append({
+                                "role": "assistant",
+                                "content": fc_response.response
+                            })
+
+                        return ChatResponse(
+                            response=fc_response.response,
+                            tokens_used=fc_response.tokens_used,
+                            tools_used=["chat"],
+                            confidence_score=0.8,
+                            api_results={}
+                        )
+                    else:
+                        # No more tool calls, proceed to final synthesis
+                        break
+
+                # Step 2: Execute tools
+                if debug_mode:
+                    print(f"🔍 [Function Calling] Executing {len(fc_response.tool_calls)} tool(s)")
+
+                iteration_results = {}
+                for tool_call in fc_response.tool_calls:
+                    result = await self._tool_executor.execute_tool(
+                        tool_name=tool_call.name,
+                        arguments=tool_call.arguments
+                    )
+                    iteration_results[tool_call.id] = result
+                    all_tool_results[tool_call.id] = result
+                    all_tools_used.append(tool_call.name)
+
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] Tool {tool_call.name} executed: "
+                              f"{'error' if 'error' in result else 'success'}")
+
+                all_tool_calls.extend(fc_response.tool_calls)
+                last_assistant_message = fc_response.assistant_message
+
+                # Add assistant message with tool calls to conversation
+                if fc_response.assistant_message and hasattr(fc_response.assistant_message, 'tool_calls'):
+                    conversation.append({
+                        "role": "assistant",
+                        "content": fc_response.assistant_message.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in fc_response.assistant_message.tool_calls
+                        ]
+                    })
+
+                # Add tool results to conversation
+                for tool_call in fc_response.tool_calls:
+                    result = iteration_results.get(tool_call.id, {})
+                    conversation.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.name,
+                        "content": json.dumps(result)[:800]  # Truncate for next iteration
+                    })
+
+                # Update query for next iteration (ask if more tools needed)
+                current_query = "Based on the tool results, do you need to call more tools, or are you ready to provide the final response?"
+
+            # Step 3: Get final response from LLM with all tool results
+            if debug_mode:
+                print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
+
+            # Rebuild conversation for final synthesis
+            final_conversation = []
+            if hasattr(self, 'conversation_history'):
+                final_conversation = self.conversation_history[-10:].copy()
+            final_conversation.append({
+                "role": "user",
+                "content": request.question
+            })
+
             final_response = await self._function_calling_agent.finalize_response(
                 original_query=request.question,
-                conversation_history=conversation,
-                tool_calls=fc_response.tool_calls,
-                tool_execution_results=tool_execution_results,
-                assistant_message=fc_response.assistant_message  # Pass original assistant message
+                conversation_history=final_conversation,
+                tool_calls=all_tool_calls,
+                tool_execution_results=all_tool_results,
+                assistant_message=last_assistant_message
             )
+
+            total_tokens += final_response.tokens_used
 
             # Update conversation history
             if hasattr(self, 'conversation_history'):
@@ -3704,10 +3768,10 @@ class EnhancedNocturnalAgent:
 
             return ChatResponse(
                 response=final_response.response,
-                tokens_used=fc_response.tokens_used + final_response.tokens_used,
-                tools_used=tools_used,
+                tokens_used=total_tokens,
+                tools_used=all_tools_used,
                 confidence_score=0.85,
-                api_results=tool_execution_results
+                api_results=all_tool_results
             )
 
         except Exception as e:
