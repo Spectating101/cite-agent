@@ -249,6 +249,84 @@ TOOLS: List[Dict[str, Any]] = [
     },
 
     # =========================================================================
+    # CITATION MANAGEMENT TOOLS
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "export_to_zotero",
+            "description": (
+                "Export papers to Zotero-compatible formats (BibTeX or RIS). "
+                "Use when user wants to: export citations, save to Zotero, generate BibTeX, "
+                "create bibliography, export references for LaTeX/Word. "
+                "Examples: 'export to BibTeX', 'save these papers to Zotero', "
+                "'generate bibliography for these papers'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "papers": {
+                        "type": "array",
+                        "description": "List of papers to export (paper objects from previous search)",
+                        "items": {"type": "object"}
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Export format (bibtex or ris)",
+                        "enum": ["bibtex", "ris"],
+                        "default": "bibtex"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Output filename (optional)",
+                        "default": None
+                    }
+                },
+                "required": ["papers"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "find_related_papers",
+            "description": (
+                "Find papers related to a given paper via citation networks. "
+                "Discovers papers that cite the same references (co-citations) or "
+                "are cited by similar papers. Great for literature review expansion. "
+                "Use when user wants: related papers, similar research, citation network, "
+                "papers building on this work, what cites this paper. "
+                "Examples: 'find related papers to BERT', 'what papers cite this', "
+                "'expand my literature review'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_id": {
+                        "type": "string",
+                        "description": "Paper ID, DOI, or title to find related papers for"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "How to find related papers",
+                        "enum": ["citations", "references", "similar"],
+                        "default": "similar"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of related papers to return",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 50
+                    }
+                },
+                "required": ["paper_id"]
+            }
+        }
+    },
+
+    # =========================================================================
     # CONVERSATIONAL TOOL
     # =========================================================================
     {

@@ -79,6 +79,33 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
         lines = listing.split("\n")[:10]  # Max 10 lines
         return "\n".join(lines) + ("...[more files]" if len(listing.split("\n")) > 10 else "")
 
+    elif tool_name == "export_to_zotero":
+        if result.get("success"):
+            filename = result.get("filename", "")
+            count = result.get("papers_count", 0)
+            format_type = result.get("format", "")
+            return f"✅ Exported {count} papers to {filename} ({format_type.upper()} format). Import via File → Import in Zotero."
+        return result.get("message", json.dumps(result)[:200])
+
+    elif tool_name == "find_related_papers":
+        count = result.get("count", 0)
+        method = result.get("method", "")
+        if count == 0:
+            return "No related papers found"
+
+        papers = result.get("related_papers", [])
+        paper_summaries = []
+        for p in papers[:5]:  # Max 5 in summary
+            title = p.get("title", "Unknown")[:80]
+            year = p.get("year", "N/A")
+            citations = p.get("citations_count", 0)
+            paper_summaries.append(f"- {title} ({year}, {citations} cites)")
+
+        base_paper = result.get("base_paper", {})
+        base_title = base_paper.get("title", "")[:60] if base_paper else "query"
+
+        return f"Found {count} papers related to '{base_title}' via {method}:\n" + "\n".join(paper_summaries)
+
     elif tool_name == "chat":
         return result.get("message", "")
 
