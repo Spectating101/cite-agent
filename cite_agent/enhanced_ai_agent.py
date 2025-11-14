@@ -2029,11 +2029,13 @@ class EnhancedNocturnalAgent:
         """Call Archive API endpoint with retry mechanism"""
         max_retries = 3
         retry_delay = 1
-        
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("Archive", f"POST {endpoint}", False, detail)
-            return {"error": f"Archive backend unavailable: {detail or 'backend offline'}"}
+
+        # SKIP health check for Archive API - it causes false negatives when Files API is localhost
+        # The Archive API has its own retry logic and error handling
+        # ok, detail = await self._ensure_backend_ready()
+        # if not ok:
+        #     self._record_data_source("Archive", f"POST {endpoint}", False, detail)
+        #     return {"error": f"Archive backend unavailable: {detail or 'backend offline'}"}
 
         for attempt in range(max_retries):
             try:
@@ -2117,11 +2119,12 @@ class EnhancedNocturnalAgent:
         """Call FinSight API endpoint with retry mechanism"""
         max_retries = 3
         retry_delay = 1
-        
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("FinSight", f"GET {endpoint}", False, detail)
-            return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
+
+        # SKIP health check - same reason as Archive API
+        # ok, detail = await self._ensure_backend_ready()
+        # if not ok:
+        #     self._record_data_source("FinSight", f"GET {endpoint}", False, detail)
+        #     return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
 
         for attempt in range(max_retries):
             try:
@@ -2182,10 +2185,11 @@ class EnhancedNocturnalAgent:
     
     async def _call_finsight_api_post(self, endpoint: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """Call FinSight API endpoint with POST request"""
-        ok, detail = await self._ensure_backend_ready()
-        if not ok:
-            self._record_data_source("FinSight", f"POST {endpoint}", False, detail)
-            return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
+        # SKIP health check
+        # ok, detail = await self._ensure_backend_ready()
+        # if not ok:
+        #     self._record_data_source("FinSight", f"POST {endpoint}", False, detail)
+        #     return {"error": f"FinSight backend unavailable: {detail or 'backend offline'}"}
 
         try:
             if not self.session:
