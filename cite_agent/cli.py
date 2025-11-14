@@ -160,7 +160,10 @@ class NocturnalCLI:
         elif not had_config:
             # config.setup_environment() may have populated env vars from file silently
             self.console.print("[success]⚙️  Loaded saved credentials for this device.[/success]")
-        
+
+        # CLI should use LOCAL keys mode (not backend API mode)
+        os.environ["USE_LOCAL_KEYS"] = "true"
+
         self.agent = EnhancedNocturnalAgent()
         success = await self.agent.initialize()
         
