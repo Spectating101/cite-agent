@@ -2515,18 +2515,26 @@ class EnhancedNocturnalAgent:
                     )
 
             # ========================================================================
-            # PRIORITY 1: SHELL PLANNING (Reasoning Layer - Runs FIRST for ALL modes)
+            # PRIORITY 0: ANALYZE REQUEST TYPE FIRST
             # ========================================================================
-            # This determines USER INTENT before fetching any data
-            # Prevents waste: "find cm522" won't trigger Archive API, "look into it" won't web search
-            # Works in BOTH production and dev modes
-            
+            # Determine what kind of query this is BEFORE deciding to run shell planner
+            # Prevents shell planner from running on research/financial queries
+            request_analysis_early = await self._analyze_request_type(request.question)
+            apis_needed = set(request_analysis_early.get("apis", []))
+
+            # ========================================================================
+            # PRIORITY 1: SHELL PLANNING (Only for shell/system queries)
+            # ========================================================================
+            # Skip shell planner if this is clearly an API query (research/financial)
             shell_action = "none"  # Will be: execute|none
             question_lower = request.question.lower()
 
-            # ALWAYS run LLM planner if shell is available - let gpt-oss-120b decide intelligently
-            # No more hardcoded keyword matching - trust the model's intelligence
-            if self.shell_session:
+            # Only run shell planner if:
+            # 1. Shell session available
+            # 2. NOT a pure API query (research/financial)
+            skip_shell_planning = (apis_needed & {"archive", "finsight"}) and not (apis_needed & {"shell"})
+
+            if self.shell_session and not skip_shell_planning:
                 # Get current directory and context for intelligent planning
                 try:
                     current_dir = self.execute_command("pwd").strip()
@@ -3075,9 +3083,9 @@ JSON:"""
             # ========================================================================
             # If shell_action = pwd/ls/find, we might still want data APIs
             # But we skip vague queries to save tokens
-            
-            # Analyze what data APIs are needed (only if not pure shell command)
-            request_analysis = await self._analyze_request_type(request.question)
+
+            # Use early request analysis (already done before shell planning)
+            request_analysis = request_analysis_early
             if debug_mode:
                 print(f"🔍 Request analysis: {request_analysis}")
             
