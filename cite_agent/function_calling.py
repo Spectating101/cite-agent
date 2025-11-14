@@ -39,7 +39,7 @@ class FunctionCallingAgent:
     Handles function calling workflow with Cerebras/OpenAI compatible APIs.
     """
 
-    def __init__(self, client, model: str = "llama-3.3-70b", provider: str = "cerebras"):
+    def __init__(self, client, model: str = "gpt-oss-120b", provider: str = "cerebras"):
         """
         Initialize function calling agent.
 

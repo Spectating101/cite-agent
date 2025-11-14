@@ -13,7 +13,7 @@ from pathlib import Path
 @dataclass
 class RateLimitConfig:
     """Rate limit configuration for different tiers"""
-    # Groq limits for llama-3.3-70b-versatile (Free tier)
+    # LLM provider limits (Free tier)
     rpm: int  # Requests per minute
     rpd: int  # Requests per day
     tpm: int  # Tokens per minute
@@ -28,7 +28,7 @@ class RateLimitConfig:
 # Rate limit tiers
 RATE_LIMITS = {
     'free': RateLimitConfig(
-        # Groq limits (llama-3.3-70b-versatile)
+        # LLM provider limits (free tier)
         rpm=30,
         rpd=1000,
         tpm=12000,

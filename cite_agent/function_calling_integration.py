@@ -184,7 +184,7 @@ async def process_request_with_function_calling(self, request: ChatRequest) -> C
 def _get_model_name(self) -> str:
     """Get the appropriate model name for the current provider"""
     if self.llm_provider == "cerebras":
-        return "llama-3.3-70b"
+        return "gpt-oss-120b"
     elif self.llm_provider == "groq":
         return "llama-3.1-70b-versatile"
     else:
