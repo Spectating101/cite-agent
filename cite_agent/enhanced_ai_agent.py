@@ -3698,6 +3698,15 @@ class EnhancedNocturnalAgent:
                 all_tool_calls.extend(fc_response.tool_calls)
                 last_assistant_message = fc_response.assistant_message
 
+                # OPTIMIZATION: Break early for simple chat queries (skip extra iterations)
+                if (iteration == 0 and  # First iteration
+                    len(fc_response.tool_calls) == 1 and  # Single tool call
+                    fc_response.tool_calls[0].name == "chat" and  # Chat tool
+                    len(request.question.split()) <= 3):  # Simple query
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] Simple chat detected, skipping additional iterations")
+                    break  # Skip to final synthesis
+
                 # Add assistant message with tool calls to conversation
                 if fc_response.assistant_message and hasattr(fc_response.assistant_message, 'tool_calls'):
                     conversation.append({
