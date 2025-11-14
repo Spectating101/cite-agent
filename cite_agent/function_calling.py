@@ -89,26 +89,14 @@ class FunctionCallingAgent:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         else:
-            # Default system prompt
+            # Default system prompt (compressed for token efficiency)
             messages.append({
                 "role": "system",
                 "content": (
-                    "You are a helpful AI research assistant with access to powerful tools.\n\n"
-                    "CRITICAL TOOL SELECTION RULES:\n"
-                    "1. If user asks about PAPERS/RESEARCH → MUST use 'search_papers' tool\n"
-                    "   Examples: 'find papers on X', 'research about Y', 'what do studies say'\n\n"
-                    "2. If user asks about COMPANY FINANCIALS → MUST use 'get_financial_data' tool\n"
-                    "   Examples: 'Apple revenue', 'Tesla stock price', 'Microsoft earnings'\n\n"
-                    "3. If user asks about FILES/FOLDERS → MUST use 'list_directory' tool\n"
-                    "   Examples: 'what folders', 'list files', 'show directory'\n\n"
-                    "4. If user asks to RUN COMMANDS → MUST use 'execute_shell_command' tool\n"
-                    "   Examples: 'run ls', 'execute pwd', 'check disk space'\n\n"
-                    "5. If user asks about CURRENT EVENTS → MUST use 'web_search' tool\n"
-                    "   Examples: 'latest news on X', 'current price of Y'\n\n"
-                    "6. ONLY use 'chat' tool for: simple greetings ('hi', 'hello'), "
-                    "acknowledgments ('thanks', 'ok'), or meta questions about the agent itself "
-                    "('what can you do', 'who are you').\n\n"
-                    "ALWAYS prefer action tools over chat. When in doubt, use the action tool."
+                    "Route queries to tools: papers/research→search_papers, "
+                    "financials/stocks→get_financial_data, files/folders→list_directory, "
+                    "shell commands→execute_shell_command, news/current events→web_search. "
+                    "Use chat only for greetings/thanks. Prefer action tools."
                 )
             })
 
@@ -267,6 +255,24 @@ class FunctionCallingAgent:
         Returns:
             Final response from LLM
         """
+        # OPTIMIZATION: Skip synthesis for simple chat responses (saves ~700 tokens)
+        if (len(tool_calls) == 1 and
+            tool_calls[0].name == "chat" and
+            len(original_query.split()) <= 3):  # Simple greetings like "hi", "hello", "thanks"
+
+            # Return chat response directly without second LLM call
+            result = tool_execution_results.get(tool_calls[0].id, {})
+            if "response" in result:
+                if self.debug_mode:
+                    print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
+                return FunctionCallingResponse(
+                    response=result["response"],
+                    tool_calls=tool_calls,
+                    tool_results=tool_execution_results,
+                    tokens_used=0,  # No second LLM call
+                    model=self.model
+                )
+
         # Build messages for second LLM call
         messages = conversation_history.copy()
 
@@ -289,14 +295,22 @@ class FunctionCallingAgent:
                 ]
             })
 
-        # Add tool responses
+        # Add tool responses (truncated for token efficiency)
         for tool_call in tool_calls:
             result = tool_execution_results.get(tool_call.id, {})
+            result_str = json.dumps(result)
+
+            # Truncate long results to save tokens (keep first 2000 chars)
+            # This is enough context for synthesis while reducing token waste
+            MAX_RESULT_LENGTH = 2000
+            if len(result_str) > MAX_RESULT_LENGTH:
+                result_str = result_str[:MAX_RESULT_LENGTH] + "... [truncated]"
+
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "name": tool_call.name,
-                "content": json.dumps(result)
+                "content": result_str
             })
 
         if self.debug_mode:
