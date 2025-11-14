@@ -1605,18 +1605,17 @@ class EnhancedNocturnalAgent:
                     temp_api_key_from_session = None
 
             # Priority order for key mode:
-            # 1. USE_LOCAL_KEYS env var (explicit override)
-            # 2. Temp API key from session (fast mode)
-            # 3. Default to backend if session exists
+            # 1. USE_LOCAL_KEYS=true (force local dev mode)
+            # 2. Temp API key from session (PAID FEATURE - always use!)
+            # 3. USE_LOCAL_KEYS=false (force backend, only if no temp key)
+            # 4. Default to backend if session exists
 
             if use_local_keys_env == "true":
-                # Explicit local keys mode - always respect this
+                # Explicit local dev mode - always respect this
                 use_local_keys = True
-            elif use_local_keys_env == "false":
-                # Explicit backend mode
-                use_local_keys = False
             elif temp_api_key_from_session:
-                # Session exists with valid temp key → use local mode (fast!)
+                # PRIORITY: Valid temp key → use it! (10x faster for paid users)
+                # This overrides USE_LOCAL_KEYS=false
                 use_local_keys = True
                 # Store it for later use
                 self.temp_api_key = temp_api_key_from_session
@@ -1625,6 +1624,9 @@ class EnhancedNocturnalAgent:
                 debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
                 if debug_mode:
                     print(f"✅ Using temporary local key for fast mode!")
+            elif use_local_keys_env == "false":
+                # Explicit backend mode (only if no temp key available)
+                use_local_keys = False
             elif has_session:
                 # Session exists but no temp key → use backend mode
                 use_local_keys = False
