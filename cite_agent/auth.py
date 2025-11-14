@@ -30,18 +30,15 @@ class AuthManager:
     def login(self, email: str, password: str) -> Dict:
         """
         Authenticate user with email and password
-        Returns user session data
+        Returns user session data including temp API key for local mode
         """
-        # Hash password
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
         try:
-            # Call auth API
+            # Call auth API - send plain password (backend hashes it)
             response = requests.post(
-                f"{self.api_base}/auth/login",
+                f"{self.api_base}/api/auth/login",
                 json={
                     "email": email,
-                    "password_hash": password_hash
+                    "password": password  # Send plain password over HTTPS
                 },
                 timeout=10
             )
@@ -57,16 +54,17 @@ class AuthManager:
                 
         except requests.RequestException as e:
             # Fallback: offline mode with local validation
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
             return self._offline_login(email, password_hash)
     
     def register(self, email: str, password: str) -> Dict:
         """
         Register new user with email and password only (no license key for beta)
-        Returns user session data
+        Returns user session data including temp API key for local mode
         """
         try:
             response = requests.post(
-                f"{self.api_base}/auth/register",
+                f"{self.api_base}/api/auth/register",
                 json={
                     "email": email,
                     "password": password  # Send plain password over HTTPS (backend will hash)
@@ -136,15 +134,33 @@ class AuthManager:
         return False
     
     def _save_session(self, session_data: Dict):
-        """Save session to file"""
-        # Add expiration (30 days from now)
-        if 'expires_at' not in session_data:
+        """
+        Save session to file with proper field mapping for agent compatibility
+        Maps backend response fields to agent-expected fields
+        """
+        # Map backend response to agent-expected format
+        mapped_session = {
+            'email': session_data.get('email'),
+            'auth_token': session_data.get('access_token'),  # Agent expects 'auth_token'
+            'account_id': session_data.get('user_id'),  # Agent expects 'account_id'
+            'daily_token_limit': session_data.get('daily_token_limit', 25000),
+            'expires_at': session_data.get('expires_at'),
+        }
+
+        # Add temp API key fields if present (for local mode)
+        if 'temp_api_key' in session_data and session_data['temp_api_key']:
+            mapped_session['temp_api_key'] = session_data['temp_api_key']
+            mapped_session['temp_key_expires'] = session_data.get('temp_key_expires')
+            mapped_session['temp_key_provider'] = session_data.get('temp_key_provider', 'cerebras')
+
+        # Add expiration if not present (30 days from now)
+        if not mapped_session.get('expires_at'):
             expires_at = datetime.now() + timedelta(days=30)
-            session_data['expires_at'] = expires_at.isoformat()
-        
+            mapped_session['expires_at'] = expires_at.isoformat()
+
         with open(self.session_file, 'w') as f:
-            json.dump(session_data, f, indent=2)
-        
+            json.dump(mapped_session, f, indent=2)
+
         # Secure permissions (owner only)
         os.chmod(self.session_file, 0o600)
     
