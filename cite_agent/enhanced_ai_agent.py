@@ -1505,6 +1505,11 @@ class EnhancedNocturnalAgent:
             # 2. Temp API key from session (fast mode)
             # 3. Default to backend if session exists
 
+            # Debug temp key detection
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            if debug_mode:
+                print(f"🔍 initialize: has_session={has_session}, hasattr(temp_api_key)={hasattr(self, 'temp_api_key')}, temp_api_key={getattr(self, 'temp_api_key', None)}")
+
             if use_local_keys_env == "true":
                 # Explicit local keys mode - always respect this
                 use_local_keys = True
@@ -1514,9 +1519,13 @@ class EnhancedNocturnalAgent:
             elif has_session and hasattr(self, 'temp_api_key') and self.temp_api_key:
                 # Session exists with temp key → use local mode (fast!)
                 use_local_keys = True
+                if debug_mode:
+                    print(f"✅ Detected temp key - using LOCAL mode!")
             elif has_session:
                 # Session exists but no temp key → use backend mode
                 use_local_keys = False
+                if debug_mode:
+                    print(f"ℹ️  Session exists but no temp key - using BACKEND mode")
             else:
                 # No session, no explicit setting → default to backend
                 use_local_keys = False
@@ -2325,13 +2334,7 @@ class EnhancedNocturnalAgent:
             tools_used = []
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
 
-            if self._is_generic_test_prompt(request.question):
-                return self._quick_reply(
-                    request,
-                    "Looks like you're just testing. Let me know what you'd like me to dig into and I'll jump on it.",
-                    tools_used=["quick_reply"],
-                    confidence=0.4,
-                )
+            # Removed hardcoded test reply - let agent respond naturally
 
             if self._is_location_query(request.question):
                 cwd_line = ""
