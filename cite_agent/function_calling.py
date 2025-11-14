@@ -327,38 +327,43 @@ class FunctionCallingAgent:
         # Build messages for second LLM call
         messages = conversation_history.copy()
 
-        # Add assistant message with tool_calls if provided
-        # This is REQUIRED by OpenAI's chat completion API
-        if assistant_message and hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
-            messages.append({
-                "role": "assistant",
-                "content": assistant_message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
+        # If tool_calls is empty, conversation_history already has everything
+        # (multi-step execution case)
+        if tool_calls:
+            # Single-step case: Add assistant message and tool results
+
+            # Add assistant message with tool_calls if provided
+            # This is REQUIRED by OpenAI's chat completion API
+            if assistant_message and hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
                         }
-                    }
-                    for tc in assistant_message.tool_calls
-                ]
-            })
+                        for tc in assistant_message.tool_calls
+                    ]
+                })
 
-        # Add tool responses (formatted for efficiency and clarity)
-        for tool_call in tool_calls:
-            result = tool_execution_results.get(tool_call.id, {})
+            # Add tool responses (formatted for efficiency and clarity)
+            for tool_call in tool_calls:
+                result = tool_execution_results.get(tool_call.id, {})
 
-            # Format result into structured summary (reduces tokens, improves synthesis)
-            result_str = format_tool_result(tool_call.name, result)
+                # Format result into structured summary (reduces tokens, improves synthesis)
+                result_str = format_tool_result(tool_call.name, result)
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "name": tool_call.name,
-                "content": result_str
-            })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "content": result_str
+                })
 
         if self.debug_mode:
             print(f"🔍 [Function Calling] Sending tool results back to LLM for synthesis")

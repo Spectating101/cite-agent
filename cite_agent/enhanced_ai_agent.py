@@ -11,6 +11,8 @@ import logging
 import os
 import re
 import shlex
+import socket
+import ssl
 import subprocess
 import time
 from importlib import resources
@@ -1777,7 +1779,34 @@ class EnhancedNocturnalAgent:
                 if self.session and not self.session.closed:
                     await self.session.close()
                 default_headers = dict(getattr(self, "_default_headers", {}))
-                self.session = aiohttp.ClientSession(headers=default_headers)
+
+                # Configure SSL context for better compatibility
+                ssl_context = ssl.create_default_context()
+                # For development: allow self-signed certs if NOCTURNAL_DEV_MODE is set
+                if os.getenv("NOCTURNAL_DEV_MODE"):
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+
+                # Get proxy from environment (curl uses this automatically, aiohttp doesn't)
+                # In Claude Code containers, HTTPS_PROXY is set to egress proxy at 21.0.0.99:15004
+                proxy_url = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+
+                # Configure TCPConnector with ThreadedResolver for system DNS
+                connector = aiohttp.TCPConnector(
+                    family=socket.AF_INET,       # Force IPv4
+                    use_dns_cache=False,         # Don't cache DNS results
+                    ttl_dns_cache=300,           # If cache is used, expire after 5 min
+                    ssl=ssl_context,             # Use configured SSL context
+                    resolver=aiohttp.ThreadedResolver()  # Use system DNS resolver
+                )
+
+                # Create session with proxy if available
+                self.session = aiohttp.ClientSession(
+                    headers=default_headers,
+                    connector=connector,
+                    timeout=aiohttp.ClientTimeout(total=60, connect=10),
+                    trust_env=True  # Trust environment proxy settings
+                )
 
             self._initialized = True
             return True
@@ -2229,6 +2258,16 @@ class EnhancedNocturnalAgent:
             data = {"query": query, "limit": limit, "sources": sources}
             tried.append(list(sources))
             result = await self._call_archive_api("search", data)
+
+            # DEBUG: Log actual API response
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            if debug_mode:
+                print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
+                if "error" in result:
+                    print(f"🔍 [DEBUG] Archive API ERROR: {result['error']}")
+                papers_key = "papers" if "papers" in result else "results" if "results" in result else None
+                if papers_key:
+                    print(f"🔍 [DEBUG] Found {len(result.get(papers_key, []))} papers under key '{papers_key}'")
 
             if "error" in result:
                 provider_errors.append({"sources": sources, "error": result["error"]})
@@ -3746,22 +3785,34 @@ class EnhancedNocturnalAgent:
             if debug_mode:
                 print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
 
-            # Rebuild conversation for final synthesis
-            final_conversation = []
-            if hasattr(self, 'conversation_history'):
-                final_conversation = self.conversation_history[-10:].copy()
-            final_conversation.append({
-                "role": "user",
-                "content": request.question
-            })
+            # For multi-step: Use the full conversation that was built during iterations
+            # For single-step: Build a fresh conversation
+            if len(all_tool_calls) > 1 or MAX_ITERATIONS > 1:
+                # Multi-step: conversation already has all the messages in proper order
+                final_response = await self._function_calling_agent.finalize_response(
+                    original_query=request.question,
+                    conversation_history=conversation,
+                    tool_calls=[],  # Empty - all tool calls already in conversation
+                    tool_execution_results={},  # Empty - all results already in conversation
+                    assistant_message=None  # Don't add another assistant message
+                )
+            else:
+                # Single-step: Build fresh conversation for finalize
+                final_conversation = []
+                if hasattr(self, 'conversation_history'):
+                    final_conversation = self.conversation_history[-10:].copy()
+                final_conversation.append({
+                    "role": "user",
+                    "content": request.question
+                })
 
-            final_response = await self._function_calling_agent.finalize_response(
-                original_query=request.question,
-                conversation_history=final_conversation,
-                tool_calls=all_tool_calls,
-                tool_execution_results=all_tool_results,
-                assistant_message=last_assistant_message
-            )
+                final_response = await self._function_calling_agent.finalize_response(
+                    original_query=request.question,
+                    conversation_history=final_conversation,
+                    tool_calls=all_tool_calls,
+                    tool_execution_results=all_tool_results,
+                    assistant_message=last_assistant_message
+                )
 
             total_tokens += final_response.tokens_used
 
