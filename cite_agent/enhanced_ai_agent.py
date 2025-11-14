@@ -3473,7 +3473,8 @@ JSON:"""
                 api_results["files_forbidden"] = files_forbidden
 
             workspace_listing: Optional[Dict[str, Any]] = None
-            if not file_previews:
+            # Only use workspace listing if shell command wasn't already executed
+            if not file_previews and not api_results.get("shell_info"):
                 file_browse_keywords = (
                     "list files",
                     "show files",
@@ -3493,7 +3494,8 @@ JSON:"""
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
-            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"}:
+            # Only return workspace listing if no shell command was executed
+            if workspace_listing and set(request_analysis.get("apis", [])) <= {"shell"} and not api_results.get("shell_info"):
                 return self._respond_with_workspace_listing(request, workspace_listing)
             
             if "finsight" in request_analysis["apis"]:
