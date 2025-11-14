@@ -190,14 +190,14 @@ class SessionManager:
         )
         
         if has_session or has_config_creds:
-            # User is logged in → FORCE production mode
-            os.environ["USE_LOCAL_KEYS"] = "false"
+            # User is logged in → Check for temp API key first before forcing backend mode
+            # DON'T set USE_LOCAL_KEYS here - let the agent detect temp key from session
             if "NOCTURNAL_API_URL" not in os.environ:
                 os.environ["NOCTURNAL_API_URL"] = "https://cite-agent-api-720dfadd602c.herokuapp.com/api"
-            
+
             debug = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug:
-                print(f"🔍 Production mode: User has credentials, ignoring .env.local")
+                print(f"🔍 Production mode: User has credentials, temp key will be auto-detected")
         else:
             # No production credentials → Allow dev mode from .env.local
             try:
@@ -214,8 +214,7 @@ class SessionManager:
                     print(f"⚠️ Failed to load .env.local: {e}")
             
             # Default to production if no explicit dev mode
-            if "USE_LOCAL_KEYS" not in os.environ:
-                os.environ["USE_LOCAL_KEYS"] = "false"
+            # DON'T force USE_LOCAL_KEYS - let agent detect temp key from session
             if "NOCTURNAL_API_URL" not in os.environ:
                 os.environ["NOCTURNAL_API_URL"] = "https://cite-agent-api-720dfadd602c.herokuapp.com/api"
     

@@ -1091,7 +1091,15 @@ class EnhancedNocturnalAgent:
             "Cite sources: papers (title+authors), files (path:line), API data.",
             "shell_info shows already-executed commands. Present RESULTS concisely - no commands shown.",
             "For follow-up questions with pronouns ('it', 'that'), infer from conversation context.",
-            "Ambiguous query? Ask clarification OR infer from context if reasonable.",
+            "",
+            "🚨 CRITICAL - VAGUE QUERY HANDLING:",
+            "• If api_results contains query_analysis with is_vague=True: The query is TOO VAGUE.",
+            "• DO NOT guess, search files, or make assumptions.",
+            "• RESPOND NATURALLY: Ask what they meant or acknowledge their message.",
+            "• Examples: 'test' → 'Sure, what would you like to test?'",
+            "•           'hello' → 'Hi! How can I help you today?'",
+            "•           'thanks' → 'You're welcome! Let me know if you need anything else.'",
+            "",
             "Be honest about uncertainty.",
             "",
             "CRITICAL - ANSWER WHAT WAS ASKED:",
@@ -1509,6 +1517,7 @@ class EnhancedNocturnalAgent:
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
             if debug_mode:
                 print(f"🔍 initialize: has_session={has_session}, hasattr(temp_api_key)={hasattr(self, 'temp_api_key')}, temp_api_key={getattr(self, 'temp_api_key', None)}")
+                print(f"🔍 initialize: use_local_keys_env='{use_local_keys_env}'")
 
             if use_local_keys_env == "true":
                 # Explicit local keys mode - always respect this
@@ -2167,8 +2176,11 @@ class EnhancedNocturnalAgent:
 
     @staticmethod
     def _hash_identifier(value: Optional[str]) -> Optional[str]:
-        """Delegate to AgentUtilities"""
-        return AgentUtilities.hash_identifier(value)
+        """Hash identifier for privacy - returns first 16 chars of SHA256 hash"""
+        if not value:
+            return None
+        import hashlib
+        return hashlib.sha256(value.encode()).hexdigest()[:16]
 
     def _emit_telemetry(
         self,
@@ -2509,18 +2521,12 @@ class EnhancedNocturnalAgent:
             # Prevents waste: "find cm522" won't trigger Archive API, "look into it" won't web search
             # Works in BOTH production and dev modes
             
-            shell_action = "none"  # Will be: pwd|ls|find|none
-            
-            # Quick check if query might need shell
+            shell_action = "none"  # Will be: execute|none
             question_lower = request.question.lower()
-            might_need_shell = any(word in question_lower for word in [
-                'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
-                'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
-                'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
-                'git', 'grep', 'navigate', 'go to', 'change to'
-            ])
-            
-            if might_need_shell and self.shell_session:
+
+            # ALWAYS run LLM planner if shell is available - let gpt-oss-120b decide intelligently
+            # No more hardcoded keyword matching - trust the model's intelligence
+            if self.shell_session:
                 # Get current directory and context for intelligent planning
                 try:
                     current_dir = self.execute_command("pwd").strip()
@@ -2629,13 +2635,8 @@ JSON:"""
                     if verbose_planning:
                         print(f"🔍 SHELL PLAN: {plan}")
 
-                    # GENERIC COMMAND EXECUTION - No more hardcoded actions!
-                    if shell_action != "execute" and might_need_shell:
-                        command = self._infer_shell_command(request.question)
-                        shell_action = "execute"
-                        updates_context = False
-                        if verbose_planning:
-                            print(f"🔄 Planner opted out; inferred fallback command: {command}")
+                    # GENERIC COMMAND EXECUTION - Trust the planner's decision
+                    # If planner says "none", respect that - no fallback inference
 
                     if shell_action == "execute" and not command:
                         command = self._infer_shell_command(request.question)
@@ -3010,7 +3011,7 @@ JSON:"""
                         # import re removed - using module-level import
                         
                         file_path = plan.get("file_path", "")
-                        if not file_path and might_need_shell:
+                        if not file_path:
                             # Try to infer from query (e.g., "show me calculate_betas.R")
                             filenames = re.findall(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', request.question)
                             if filenames:
@@ -3398,22 +3399,8 @@ JSON:"""
                 else:
                     memory_context = archive_context
 
-            # Ultra-light handling for small talk to save tokens entirely
-            if self._is_simple_greeting(request.question):
-                return self._quick_reply(
-                    request,
-                    "Hi there! I'm up and ready whenever you want to dig into finance or research.",
-                    tools_used=["quick_reply"],
-                    confidence=0.5
-                )
-
-            if self._is_casual_acknowledgment(request.question):
-                return self._quick_reply(
-                    request,
-                    "Happy to help! Feel free to fire off another question whenever you're ready.",
-                    tools_used=["quick_reply"],
-                    confidence=0.55
-                )
+            # Let LLM handle greetings and acknowledgments naturally via vague query detection
+            # (Removed hardcoded quick replies - trust gpt-oss-120b intelligence)
             
             # Check for workflow commands (natural language)
             workflow_response = await self._handle_workflow_commands(request)
