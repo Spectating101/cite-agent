@@ -168,15 +168,63 @@ class EnhancedNocturnalAgent:
     def _load_authentication(self):
         """Load authentication from session file"""
         use_local_keys = os.getenv("USE_LOCAL_KEYS", "false").lower() == "true"
-        
+
         debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         if debug_mode:
             print(f"🔍 _load_authentication: USE_LOCAL_KEYS={os.getenv('USE_LOCAL_KEYS')}, use_local_keys={use_local_keys}")
-        
+
+        # Check for temp API key FIRST (before deciding on backend vs local mode)
+        temp_api_key_available = False
+        from pathlib import Path
+        session_file = Path.home() / ".nocturnal_archive" / "session.json"
+
+        if session_file.exists():
+            try:
+                import json
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                    temp_key = session_data.get('temp_api_key')
+                    temp_key_expires = session_data.get('temp_key_expires')
+
+                    if temp_key and temp_key_expires:
+                        from datetime import datetime, timezone
+                        try:
+                            expires_at = datetime.fromisoformat(temp_key_expires.replace('Z', '+00:00'))
+                            now = datetime.now(timezone.utc)
+
+                            if now < expires_at:
+                                # Valid temp key found - OVERRIDE to local mode!
+                                self.temp_api_key = temp_key
+                                self.temp_key_provider = session_data.get('temp_key_provider', 'cerebras')
+                                temp_api_key_available = True
+                                if debug_mode:
+                                    time_left = (expires_at - now).total_seconds() / 3600
+                                    print(f"✅ Using temporary local key (expires in {time_left:.1f}h)")
+                                    print(f"🔍 Temp key OVERRIDES use_local_keys - switching to LOCAL MODE")
+                            else:
+                                if debug_mode:
+                                    print(f"⏰ Temporary key expired, using backend mode")
+                                self._remove_expired_temp_key(session_file)
+                                self.temp_api_key = None
+                        except Exception as e:
+                            if debug_mode:
+                                print(f"⚠️ Error parsing temp key expiration: {e}")
+                            self.temp_api_key = None
+                    else:
+                        self.temp_api_key = None
+            except Exception as e:
+                if debug_mode:
+                    print(f"🔍 _load_authentication: ERROR loading temp key: {e}")
+                self.temp_api_key = None
+
+        # OVERRIDE: If temp API key is available, force local mode
+        if temp_api_key_available:
+            use_local_keys = True
+            if debug_mode:
+                print(f"🔍 _load_authentication: Temp API key found, forcing use_local_keys=True")
+
         if not use_local_keys:
             # Backend mode - load auth token from session
-            from pathlib import Path
-            session_file = Path.home() / ".nocturnal_archive" / "session.json"
             if debug_mode:
                 print(f"🔍 _load_authentication: session_file exists={session_file.exists()}")
             if session_file.exists():
@@ -187,37 +235,6 @@ class EnhancedNocturnalAgent:
                         self.auth_token = session_data.get('auth_token')
                         self.user_id = session_data.get('account_id')
 
-                        # NEW: Check for temporary local API key with expiration
-                        temp_key = session_data.get('temp_api_key')
-                        temp_key_expires = session_data.get('temp_key_expires')
-
-                        if temp_key and temp_key_expires:
-                            # Check if key is still valid
-                            from datetime import datetime, timezone
-                            try:
-                                expires_at = datetime.fromisoformat(temp_key_expires.replace('Z', '+00:00'))
-                                now = datetime.now(timezone.utc)
-
-                                if now < expires_at:
-                                    # Key is still valid - use local mode for speed!
-                                    self.temp_api_key = temp_key
-                                    self.temp_key_provider = session_data.get('temp_key_provider', 'cerebras')
-                                    if debug_mode:
-                                        time_left = (expires_at - now).total_seconds() / 3600
-                                        print(f"✅ Using temporary local key (expires in {time_left:.1f}h)")
-                                else:
-                                    # Key expired - remove it and fall back to backend
-                                    if debug_mode:
-                                        print(f"⏰ Temporary key expired, using backend mode")
-                                    self._remove_expired_temp_key(session_file)
-                                    self.temp_api_key = None
-                            except Exception as e:
-                                if debug_mode:
-                                    print(f"⚠️ Error parsing temp key expiration: {e}")
-                                self.temp_api_key = None
-                        else:
-                            self.temp_api_key = None
-
                         if debug_mode:
                             print(f"🔍 _load_authentication: loaded auth_token={self.auth_token}, user_id={self.user_id}")
                 except Exception as e:
@@ -225,7 +242,6 @@ class EnhancedNocturnalAgent:
                         print(f"🔍 _load_authentication: ERROR loading session: {e}")
                     self.auth_token = None
                     self.user_id = None
-                    self.temp_api_key = None
             else:
                 # FALLBACK: Check if config.env has credentials but session.json is missing
                 # This handles cases where old setup didn't create session.json
