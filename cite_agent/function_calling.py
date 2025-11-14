@@ -115,21 +115,36 @@ class FunctionCallingAgent:
 
         # Step 1: Initial LLM call with tools
         try:
+            if self.debug_mode:
+                print(f"🔍 [Function Calling] Calling {self.provider} with model {self.model}")
+
+            # Add timeout to prevent hanging
+            import httpx
+            timeout = httpx.Timeout(30.0, connect=10.0)  # 30s total, 10s connect
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",  # Let LLM decide
-                temperature=0.2  # Low temperature for more consistent tool selection
+                temperature=0.2,  # Low temperature for more consistent tool selection
+                timeout=timeout
             )
+
+            if self.debug_mode:
+                print(f"🔍 [Function Calling] Got response from {self.provider}")
+
         except Exception as e:
             if self.debug_mode:
-                print(f"❌ [Function Calling] LLM call failed: {e}")
+                print(f"❌ [Function Calling] LLM call failed: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
             # Fallback: return error as chat response
             return FunctionCallingResponse(
-                response=f"I encountered an error: {str(e)}",
+                response=f"I encountered an error calling the LLM: {str(e)}",
                 tool_calls=[],
-                tool_results={}
+                tool_results={},
+                tokens_used=0
             )
 
         message = response.choices[0].message
