@@ -1678,6 +1678,9 @@ class EnhancedNocturnalAgent:
                     # Use temporary key provided by backend
                     self.api_keys = [self.temp_api_key]
                     self.llm_provider = getattr(self, 'temp_key_provider', 'cerebras')
+                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    if debug_mode:
+                        print(f"🔍 Using temp API key: {self.temp_api_key[:10]}... (provider: {self.llm_provider})")
                 else:
                     # Fallback: Load permanent keys from environment (dev mode only)
                     self.auth_token = None
@@ -1722,8 +1725,12 @@ class EnhancedNocturnalAgent:
                             self.client = Groq(api_key=self.api_keys[0])
                         self.current_api_key = self.api_keys[0]
                         self.current_key_index = 0
+                        if debug_mode:
+                            print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
                     except Exception as e:
                         print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
+                        if debug_mode:
+                            print(f"   This means you'll fall back to BACKEND MODE")
 
             # Initialize shell session for BOTH production and dev mode
             # Production users need code execution too (like Cursor/Aider)
@@ -3297,7 +3304,30 @@ class EnhancedNocturnalAgent:
 
     async def _analyze_request_type(self, question: str) -> Dict[str, Any]:
         """Analyze what type of request this is and what APIs to use"""
-        
+
+        question_lower = question.lower()
+
+        # PRIORITY 1: Detect meta/conversational queries about the agent itself
+        # These should NOT trigger Archive API searches
+        meta_query_indicators = [
+            'did you', 'do you', 'are you', 'can you', 'will you', 'have you',
+            'hardcode', 'programmed', 'your code', 'your response', 'your answer',
+            'what are you', 'how do you work', 'who made you', 'who built you',
+            'what can you do', 'what do you do', 'tell me about yourself',
+            'your capabilities', 'your features', 'how were you made'
+        ]
+
+        is_meta_query = any(indicator in question_lower for indicator in meta_query_indicators)
+
+        # If it's a meta query, return early as general (no APIs)
+        if is_meta_query:
+            return {
+                "type": "general",
+                "apis": [],
+                "confidence": 0.7,
+                "analysis_mode": "conversational"
+            }
+
         # Financial indicators - COMPREHENSIVE list to ensure FinSight is used
         financial_keywords = [
             # Core metrics
@@ -3343,16 +3373,16 @@ class EnhancedNocturnalAgent:
             'author', 'publication', 'peer review', 'scientific'
         ]
         
-        # Qualitative indicators (NEW)
+        # Qualitative indicators (research-specific only)
         qualitative_keywords = [
-            'theme', 'themes', 'thematic', 'code', 'coding', 'qualitative',
-            'interview', 'interviews', 'transcript', 'case study', 'narrative',
-            'discourse', 'content analysis', 'quote', 'quotes', 'excerpt',
-            'participant', 'respondent', 'informant', 'ethnography',
-            'grounded theory', 'phenomenology', 'what do people say',
-            'how do participants', 'sentiment', 'perception', 'experience',
-            'lived experience', 'meaning', 'interpret', 'understand',
-            'focus group', 'observation', 'field notes', 'memoir', 'diary'
+            'theme', 'themes', 'thematic', 'qualitative coding', 'qualitative',
+            'interview', 'interviews', 'transcript', 'case study', 'narrative analysis',
+            'discourse analysis', 'content analysis', 'quote', 'quotes', 'excerpt',
+            'participant', 'respondent', 'informant', 'ethnography', 'ethnographic',
+            'grounded theory', 'phenomenology', 'phenomenological',
+            'what do people say', 'how do participants',
+            'lived experience', 'meaning making', 'interpretive',
+            'focus group', 'field notes', 'memoir', 'diary study'
         ]
         
         # Quantitative indicators (explicit stats/math)
@@ -3446,12 +3476,13 @@ class EnhancedNocturnalAgent:
         if any(keyword in question_lower for keyword in research_keywords):
             matched_types.append("research")
             apis_to_use.append("archive")
-        
-        # Qualitative queries often involve research
-        if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types:
-            matched_types.append("research")
-            if "archive" not in apis_to_use:
-                apis_to_use.append("archive")
+
+        # REMOVED: Auto-adding Archive for qualitative mode caused false positives
+        # Qualitative queries should have explicit research keywords to trigger Archive
+        # Old buggy logic:
+        # if analysis_mode in ("qualitative", "mixed") and "research" not in matched_types:
+        #     matched_types.append("research")
+        #     apis_to_use.append("archive")
 
         if any(keyword in question_lower for keyword in system_keywords):
             matched_types.append("system")
@@ -4412,9 +4443,11 @@ JSON:"""
             # PRODUCTION MODE: Call backend LLM with all gathered data
             if self.client is None:
                 # DEBUG: Log what we're sending
-                if debug_mode and api_results.get("shell_info"):
-                    print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
-                
+                if debug_mode:
+                    print(f"🔍 Using BACKEND MODE (self.client is None)")
+                    if api_results.get("shell_info"):
+                        print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
+
                 # Call backend and UPDATE CONVERSATION HISTORY
                 response = await self.call_backend_query(
                     query=request.question,
@@ -4499,8 +4532,11 @@ JSON:"""
                     log_workflow=False,
                 )
 
-            # DEV MODE ONLY: Direct Groq calls (only works with local API keys)
-            # This code path won't execute in production since self.client = None
+            # LOCAL MODE: Direct LLM calls using temp key or dev keys
+            # Executes when self.client is NOT None (temp key loaded or USE_LOCAL_KEYS=true)
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            if debug_mode:
+                print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
 
             if not self._check_query_budget(request.user_id):
                 effective_limit = self.daily_query_limit if self.daily_query_limit > 0 else self.per_user_query_limit
