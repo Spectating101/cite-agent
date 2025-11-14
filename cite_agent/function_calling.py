@@ -32,6 +32,7 @@ class FunctionCallingResponse:
     tool_results: Dict[str, Any]  # Results from tool executions
     tokens_used: int = 0
     model: str = ""
+    assistant_message: Optional[Any] = None  # Original assistant message with tool_calls
 
 
 class FunctionCallingAgent:
@@ -249,7 +250,8 @@ class FunctionCallingAgent:
             tool_calls=tool_calls_list,
             tool_results=tool_results,
             tokens_used=tokens_used,
-            model=self.model
+            model=self.model,
+            assistant_message=message  # Include original assistant message for finalize
         )
 
     async def finalize_response(
@@ -257,7 +259,8 @@ class FunctionCallingAgent:
         original_query: str,
         conversation_history: List[Dict[str, str]],
         tool_calls: List[ToolCall],
-        tool_execution_results: Dict[str, Any]
+        tool_execution_results: Dict[str, Any],
+        assistant_message: Optional[Any] = None
     ) -> FunctionCallingResponse:
         """
         Get final response from LLM after tools have been executed.
@@ -267,12 +270,32 @@ class FunctionCallingAgent:
             conversation_history: Conversation history
             tool_calls: Tool calls that were made
             tool_execution_results: Results from executing tools
+            assistant_message: Original assistant message with tool_calls (optional)
 
         Returns:
             Final response from LLM
         """
         # Build messages for second LLM call
         messages = conversation_history.copy()
+
+        # Add assistant message with tool_calls if provided
+        # This is REQUIRED by OpenAI's chat completion API
+        if assistant_message and hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+            messages.append({
+                "role": "assistant",
+                "content": assistant_message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in assistant_message.tool_calls
+                ]
+            })
 
         # Add tool responses
         for tool_call in tool_calls:

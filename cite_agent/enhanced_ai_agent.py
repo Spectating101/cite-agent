@@ -3712,7 +3712,8 @@ class EnhancedNocturnalAgent:
                 original_query=request.question,
                 conversation_history=conversation,
                 tool_calls=fc_response.tool_calls,
-                tool_execution_results=tool_execution_results
+                tool_execution_results=tool_execution_results,
+                assistant_message=fc_response.assistant_message  # Pass original assistant message
             )
 
             # Update conversation history
