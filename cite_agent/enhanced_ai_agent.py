@@ -1136,12 +1136,17 @@ class EnhancedNocturnalAgent:
             "• 'What does X do?' → Answer from visible code/context, no re-execution",
             "• 'What version' → Include word 'version' in answer (e.g. 'Version is v1.4.0')",
             "",
-            "🚨 CRITICAL - NEVER HALLUCINATE FILES:",
-            "• NEVER list files without seeing shell output from ls/find",
-            "• NEVER invent plausible filenames (test.py, config.json, etc.)",
-            "• If user asks about files but you haven't run ls: say 'Let me check' and wait for shell_info",
-            "• ONLY mention files that appear in shell_info results",
-            "• If shell_info is empty/missing: say 'I don't see any files' or ask for clarification",
+            "🚨 CRITICAL - ABSOLUTE ANTI-HALLUCINATION RULES:",
+            "• You are FORBIDDEN from mentioning specific files, folders, or directories unless:",
+            "  1. They appear in shell_info (from ls/find/pwd commands that already ran)",
+            "  2. OR the user explicitly mentioned them first in their query",
+            "• NEVER say 'I can see X folders' without actual ls output in context",
+            "• NEVER invent plausible names like: data/, scripts/, test.py, config.json, README.md",
+            "• If asked 'what folders/files can you see?' without shell_info:",
+            "  → Say 'I don't have visibility yet' or 'Let me check' (but ONLY if shell is available)",
+            "  → In production mode without shell: Say 'I don't have file system access'",
+            "• IF shell_info IS present: Use ONLY the exact files/folders from that output",
+            "• Violation of these rules = hallucination = critical failure",
             "",
             "- If asked \"who built you?\" or \"who is your developer?\" or \"whats the name of your developer\" → Answer: \"I was built by Phyrexian.\" (If the user asks you to say his name, you should say \"Phyrexian\" as his name)",
             "",
@@ -3574,7 +3579,29 @@ class EnhancedNocturnalAgent:
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
                 'git', 'grep', 'navigate', 'go to', 'change to'
             ])
-            
+
+            # CRITICAL: Detect directory/file listing questions that MUST run ls first
+            # These questions should NEVER be answered without actual shell output
+            is_directory_listing_question = not is_small_talk and (
+                'what folder' in question_lower or
+                'what folders' in question_lower or
+                'what files' in question_lower or
+                'what file' in question_lower or
+                'which folder' in question_lower or
+                'which folders' in question_lower or
+                'which files' in question_lower or
+                'list folder' in question_lower or
+                'list folders' in question_lower or
+                'list files' in question_lower or
+                'show folder' in question_lower or
+                'show folders' in question_lower or
+                'show files' in question_lower or
+                'can you see' in question_lower or
+                'what can you see' in question_lower or
+                'what do you see' in question_lower or
+                question_normalized in ['ls', 'll', 'dir']
+            )
+
             if might_need_shell and self.shell_session:
                 # Get current directory and context for intelligent planning
                 try:
@@ -3582,12 +3609,33 @@ class EnhancedNocturnalAgent:
                     self.file_context['current_cwd'] = current_dir
                 except:
                     current_dir = "~"
-                
+
                 last_file = self.file_context.get('last_file') or 'None'
                 last_dir = self.file_context.get('last_directory') or 'None'
-                
-                # Ask LLM planner: What shell command should we run?
-                planner_prompt = f"""You are a shell command planner. Determine what shell command to run, if any.
+
+                # FORCED EXECUTION: Directory listing questions MUST run ls first
+                # Skip planner entirely to prevent hallucination
+                if is_directory_listing_question:
+                    command = "ls -lah"
+                    if debug_mode:
+                        print(f"🚨 FORCED EXECUTION: Directory listing question detected - running: {command}")
+
+                    output = self.execute_command(command)
+                    if output and not output.startswith("ERROR"):
+                        api_results["shell_info"] = {
+                            "command": command,
+                            "output": output,
+                            "current_directory": current_dir
+                        }
+                        tools_used.append("shell_execution")
+
+                    # Skip to LLM synthesis with shell results
+                    # The LLM will now have actual ls output and can't hallucinate
+                    if debug_mode:
+                        print(f"✅ Shell output captured, proceeding to LLM with real data")
+                else:
+                    # Normal flow: Ask LLM planner what to run
+                    planner_prompt = f"""You are a shell command planner. Determine what shell command to run, if any.
 
 User query: "{request.question}"
 Previous conversation: {json.dumps(self.conversation_history[-2:]) if self.conversation_history else "None"}
@@ -3661,484 +3709,484 @@ DATA QUERIES (action=none, let APIs handle it):
 
 JSON:"""
 
-                try:
-                    # Use LOCAL LLM for planning (don't recurse into call_backend_query)
-                    # This avoids infinite recursion and uses temp key if available
-                    if hasattr(self, 'client') and self.client:
-                        # Local mode with temp key or dev keys
-                        # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
-                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
-                        response = self.client.chat.completions.create(
-                            model=model_name,
-                            messages=[{"role": "user", "content": planner_prompt}],
-                            max_tokens=500,
-                            temperature=0.3
-                        )
-                        plan_text = response.choices[0].message.content.strip()
-                        plan_response = ChatResponse(response=plan_text)
-                    else:
-                        # Backend mode - make a simplified backend call
-                        plan_response = await self.call_backend_query(
-                            query=planner_prompt,
-                            conversation_history=[],
-                            api_results={},
-                            tools_used=[]
-                        )
-                    
-                    plan_text = plan_response.response.strip()
-                    if '```' in plan_text:
-                        plan_text = plan_text.split('```')[1].replace('json', '').strip()
-                    
-                    plan = json.loads(plan_text)
-                    shell_action = plan.get("action", "none")
-                    command = plan.get("command", "")
-                    reason = plan.get("reason", "")
-                    updates_context = plan.get("updates_context", False)
-                    
-                    # Only show planning details with explicit verbose flag (don't leak to users)
-                    verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
-                    if verbose_planning:
-                        print(f"🔍 SHELL PLAN: {plan}")
-
-                    # GENERIC COMMAND EXECUTION - No more hardcoded actions!
-                    if shell_action != "execute" and might_need_shell:
-                        command = self._infer_shell_command(request.question)
-                        shell_action = "execute"
-                        updates_context = False
+                    try:
+                        # Use LOCAL LLM for planning (don't recurse into call_backend_query)
+                        # This avoids infinite recursion and uses temp key if available
+                        if hasattr(self, 'client') and self.client:
+                            # Local mode with temp key or dev keys
+                            # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
+                            model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
+                            response = self.client.chat.completions.create(
+                                model=model_name,
+                                messages=[{"role": "user", "content": planner_prompt}],
+                                max_tokens=500,
+                                temperature=0.3
+                            )
+                            plan_text = response.choices[0].message.content.strip()
+                            plan_response = ChatResponse(response=plan_text)
+                        else:
+                            # Backend mode - make a simplified backend call
+                            plan_response = await self.call_backend_query(
+                                query=planner_prompt,
+                                conversation_history=[],
+                                api_results={},
+                                tools_used=[]
+                            )
+                        
+                        plan_text = plan_response.response.strip()
+                        if '```' in plan_text:
+                            plan_text = plan_text.split('```')[1].replace('json', '').strip()
+                        
+                        plan = json.loads(plan_text)
+                        shell_action = plan.get("action", "none")
+                        command = plan.get("command", "")
+                        reason = plan.get("reason", "")
+                        updates_context = plan.get("updates_context", False)
+                        
+                        # Only show planning details with explicit verbose flag (don't leak to users)
+                        verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
                         if verbose_planning:
-                            print(f"🔄 Planner opted out; inferred fallback command: {command}")
-
-                    if shell_action == "execute" and not command:
-                        command = self._infer_shell_command(request.question)
-                        plan["command"] = command
-                        if verbose_planning:
-                            print(f"🔄 Planner omitted command, inferred {command}")
-
-                    if shell_action == "execute" and command:
-                        if self._looks_like_user_prompt(command):
+                            print(f"🔍 SHELL PLAN: {plan}")
+    
+                        # GENERIC COMMAND EXECUTION - No more hardcoded actions!
+                        if shell_action != "execute" and might_need_shell:
+                            command = self._infer_shell_command(request.question)
+                            shell_action = "execute"
+                            updates_context = False
+                            if verbose_planning:
+                                print(f"🔄 Planner opted out; inferred fallback command: {command}")
+    
+                        if shell_action == "execute" and not command:
                             command = self._infer_shell_command(request.question)
                             plan["command"] = command
+                            if verbose_planning:
+                                print(f"🔄 Planner omitted command, inferred {command}")
+    
+                        if shell_action == "execute" and command:
+                            if self._looks_like_user_prompt(command):
+                                command = self._infer_shell_command(request.question)
+                                plan["command"] = command
+                                if debug_mode:
+                                    print(f"🔄 Replacing delegating plan with command: {command}")
+                            # Check command safety
+                            safety_level = self._classify_command_safety(command)
+                            
                             if debug_mode:
-                                print(f"🔄 Replacing delegating plan with command: {command}")
-                        # Check command safety
-                        safety_level = self._classify_command_safety(command)
-                        
-                        if debug_mode:
-                            print(f"🔍 Command: {command}")
-                            print(f"🔍 Safety: {safety_level}")
-                        
-                        if safety_level in ('BLOCKED', 'DANGEROUS'):
-                            reason = (
-                                "Command classified as destructive; requires manual confirmation"
-                                if safety_level == 'DANGEROUS'
-                                else "This command could cause system damage"
-                            )
-                            api_results["shell_info"] = {
-                                "error": f"Command blocked for safety: {command}",
-                                "reason": reason
-                            }
-                        else:
-                            # ========================================
-                            # COMMAND INTERCEPTOR: Translate shell commands to file operations
-                            # (Claude Code / Cursor parity)
-                            # ========================================
-                            intercepted = False
-                            output = ""
-
-                            # Check for file reading commands (cat, head, tail)
-                            if command.startswith(('cat ', 'head ', 'tail ')):
-                                import shlex
-                                try:
-                                    parts = shlex.split(command)
-                                    cmd = parts[0]
-
-                                    # Extract filename (last non-flag argument)
-                                    filename = None
-                                    for part in reversed(parts[1:]):
-                                        if not part.startswith('-'):
-                                            filename = part
-                                            break
-
-                                    if filename:
-                                        # Use read_file instead of cat/head/tail
-                                        if cmd == 'head':
-                                            # head -n 100 file OR head file
-                                            limit = 100  # default
-                                            if '-n' in parts or '-' in parts[0]:
-                                                try:
-                                                    idx = parts.index('-n') if '-n' in parts else 0
-                                                    limit = int(parts[idx + 1])
-                                                except:
-                                                    pass
-                                            output = self.read_file(filename, offset=0, limit=limit)
-                                        elif cmd == 'tail':
-                                            # For tail, read last N lines (harder, so just read all and show it's tail)
-                                            output = self.read_file(filename)
-                                            if "ERROR" not in output:
-                                                lines = output.split('\n')
-                                                output = '\n'.join(lines[-100:])  # last 100 lines
-                                        else:  # cat
-                                            output = self.read_file(filename)
-
-                                        intercepted = True
-                                        tools_used.append("read_file")
-                                        if debug_mode:
-                                            print(f"🔄 Intercepted: {command} → read_file({filename})")
-                                except:
-                                    pass  # Fall back to shell execution
-
-                            # Check for file search commands (find)
-                            if not intercepted and 'find' in command and '-name' in command:
-                                try:
-                                    # import re removed - using module-level import
-                                    # Extract pattern: find ... -name '*pattern*'
-                                    name_match = re.search(r"-name\s+['\"]?\*?([^'\"*\s]+)\*?['\"]?", command)
-                                    if name_match:
-                                        pattern = f"**/*{name_match.group(1)}*"
-                                        path_match = re.search(r"find\s+([^\s]+)", command)
-                                        search_path = path_match.group(1) if path_match else "."
-
-                                        result = self.glob_search(pattern, search_path)
-                                        output = '\n'.join(result['files'][:20])  # Show first 20 matches
-                                        intercepted = True
-                                        tools_used.append("glob_search")
-                                        if debug_mode:
-                                            print(f"🔄 Intercepted: {command} → glob_search({pattern}, {search_path})")
-                                except:
-                                    pass
-
-                            # Check for file writing commands (echo > file, grep > file, etc.) - CHECK THIS FIRST!
-                            # This must come BEFORE the plain grep interceptor
-                            # BUT: Ignore 2>/dev/null which is error redirection, not file writing
-                            if not intercepted and ('>' in command or '>>' in command) and '2>' not in command:
-                                try:
-                                    # import re removed - using module-level import
-
-                                    # Handle grep ... > file (intercept and execute grep, then write output)
-                                    if 'grep' in command and '>' in command:
-                                        # Extract: grep -rn 'pattern' path > output.txt
-                                        grep_match = re.search(r"grep\s+(.*)\s>\s*(\S+)", command)
-                                        if grep_match:
-                                            grep_part = grep_match.group(1).strip()
-                                            output_file = grep_match.group(2)
-
-                                            # Extract pattern and options from grep command
-                                            pattern_match = re.search(r"['\"]([^'\"]+)['\"]", grep_part)
-                                            if pattern_match:
-                                                pattern = pattern_match.group(1)
-                                                search_path = "."
-                                                file_pattern = "*.py" if "*.py" in command else "*"
-
-                                                if debug_mode:
-                                                    print(f"🔄 Intercepted: {command} → grep_search('{pattern}', '{search_path}', '{file_pattern}') + write_file({output_file})")
-
-                                                # Execute grep_search
-                                                try:
-                                                    grep_result = self.grep_search(
-                                                        pattern=pattern,
-                                                        path=search_path,
-                                                        file_pattern=file_pattern,
-                                                        output_mode="content"
-                                                    )
-
-                                                    # Format matches as text (like grep -rn output)
-                                                    output_lines = []
-                                                    for file_path, matches in grep_result.get('matches', {}).items():
-                                                        for line_num, line_content in matches:
-                                                            output_lines.append(f"{file_path}:{line_num}:{line_content}")
-
-                                                    content_to_write = '\n'.join(output_lines) if output_lines else "(no matches found)"
-
-                                                    # Write grep output to file
-                                                    write_result = self.write_file(output_file, content_to_write)
-                                                    if write_result['success']:
-                                                        output = f"Found {len(output_lines)} lines with '{pattern}' → Created {output_file} ({write_result['bytes_written']} bytes)"
-                                                        intercepted = True
-                                                        tools_used.extend(["grep_search", "write_file"])
-                                                except Exception as e:
-                                                    if debug_mode:
-                                                        print(f"⚠️ Grep > file interception error: {e}")
-                                                    # Fall back to normal execution
-                                                    pass
-
-                                    # Extract: echo 'content' > filename OR cat << EOF > filename
-                                    if not intercepted and 'echo' in command and '>' in command:
-                                        # echo 'content' > file OR echo "content" > file
-                                        match = re.search(r"echo\s+['\"](.+?)['\"].*?>\s*(\S+)", command)
-                                        if match:
-                                            content = match.group(1)
-                                            filename = match.group(2)
-                                            # Unescape common sequences
-                                            content = content.replace('\\n', '\n').replace('\\t', '\t')
-                                            result = self.write_file(filename, content + '\n')
-                                            if result['success']:
-                                                output = f"Created {filename} ({result['bytes_written']} bytes)"
-                                                intercepted = True
-                                                tools_used.append("write_file")
-                                                if debug_mode:
-                                                    print(f"🔄 Intercepted: {command} → write_file({filename}, ...)")
-                                except:
-                                    pass
-
-                            # Check for sed editing commands
-                            if not intercepted and command.startswith('sed '):
-                                try:
-                                    # import re removed - using module-level import
-                                    # sed 's/old/new/g' file OR sed -i 's/old/new/' file
-                                    match = re.search(r"sed.*?['\"]s/([^/]+)/([^/]+)/", command)
-                                    if match:
-                                        old_text = match.group(1)
-                                        new_text = match.group(2)
-                                        # Extract filename (last argument)
-                                        parts = command.split()
-                                        filename = parts[-1]
-
-                                        # Determine if replace_all based on /g flag
-                                        replace_all = '/g' in command
-
-                                        result = self.edit_file(filename, old_text, new_text, replace_all=replace_all)
-                                        if result['success']:
-                                            output = result['message']
+                                print(f"🔍 Command: {command}")
+                                print(f"🔍 Safety: {safety_level}")
+                            
+                            if safety_level in ('BLOCKED', 'DANGEROUS'):
+                                reason = (
+                                    "Command classified as destructive; requires manual confirmation"
+                                    if safety_level == 'DANGEROUS'
+                                    else "This command could cause system damage"
+                                )
+                                api_results["shell_info"] = {
+                                    "error": f"Command blocked for safety: {command}",
+                                    "reason": reason
+                                }
+                            else:
+                                # ========================================
+                                # COMMAND INTERCEPTOR: Translate shell commands to file operations
+                                # (Claude Code / Cursor parity)
+                                # ========================================
+                                intercepted = False
+                                output = ""
+    
+                                # Check for file reading commands (cat, head, tail)
+                                if command.startswith(('cat ', 'head ', 'tail ')):
+                                    import shlex
+                                    try:
+                                        parts = shlex.split(command)
+                                        cmd = parts[0]
+    
+                                        # Extract filename (last non-flag argument)
+                                        filename = None
+                                        for part in reversed(parts[1:]):
+                                            if not part.startswith('-'):
+                                                filename = part
+                                                break
+    
+                                        if filename:
+                                            # Use read_file instead of cat/head/tail
+                                            if cmd == 'head':
+                                                # head -n 100 file OR head file
+                                                limit = 100  # default
+                                                if '-n' in parts or '-' in parts[0]:
+                                                    try:
+                                                        idx = parts.index('-n') if '-n' in parts else 0
+                                                        limit = int(parts[idx + 1])
+                                                    except:
+                                                        pass
+                                                output = self.read_file(filename, offset=0, limit=limit)
+                                            elif cmd == 'tail':
+                                                # For tail, read last N lines (harder, so just read all and show it's tail)
+                                                output = self.read_file(filename)
+                                                if "ERROR" not in output:
+                                                    lines = output.split('\n')
+                                                    output = '\n'.join(lines[-100:])  # last 100 lines
+                                            else:  # cat
+                                                output = self.read_file(filename)
+    
                                             intercepted = True
-                                            tools_used.append("edit_file")
+                                            tools_used.append("read_file")
                                             if debug_mode:
-                                                print(f"🔄 Intercepted: {command} → edit_file({filename}, {old_text}, {new_text})")
-                                except:
-                                    pass
-
-                            # Check for heredoc file creation (cat << EOF > file)
-                            if not intercepted and '<<' in command and ('EOF' in command or 'HEREDOC' in command):
-                                try:
-                                    # import re removed - using module-level import
-                                    # Extract: cat << EOF > filename OR cat > filename << EOF
-                                    # Note: We can't actually get the heredoc content from a single command line
-                                    # This would need to be handled differently (multi-line input)
-                                    # For now, just detect and warn
-                                    if debug_mode:
-                                        print(f"⚠️  Heredoc detected but not intercepted: {command[:80]}")
-                                except:
-                                    pass
-
-                            # Check for content search commands (grep -r) WITHOUT redirection
-                            # This comes AFTER grep > file interceptor to avoid conflicts
-                            if not intercepted and 'grep' in command and ('-r' in command or '-R' in command):
-                                try:
-                                    # import re removed - using module-level import
-                                    # Extract pattern: grep -r 'pattern' path
-                                    pattern_match = re.search(r"grep.*?['\"]([^'\"]+)['\"]", command)
-                                    if pattern_match:
-                                        pattern = pattern_match.group(1)
-                                        # Extract path - skip flags and options
-                                        parts = [p for p in command.split() if not p.startswith('-') and p != 'grep' and p != '2>/dev/null']
-                                        # Path is after pattern (skip the quoted pattern)
-                                        search_path = parts[-1] if len(parts) >= 2 else "."
-
-                                        # Detect file pattern from command (e.g., *.py, *.txt) or use *
-                                        file_pattern = "*"
-                                        if '*.py' in command:
-                                            file_pattern = "*.py"
-                                        elif '*.txt' in command:
-                                            file_pattern = "*.txt"
-
-                                        result = self.grep_search(pattern, search_path, file_pattern, output_mode="content")
-
-                                        # Format grep results
-                                        if 'matches' in result and result['matches']:
-                                            output_parts = []
-                                            for file_path, matches in result['matches'].items():
-                                                output_parts.append(f"{file_path}:")
-                                                for line_num, line_content in matches[:10]:  # Limit per file
-                                                    output_parts.append(f"  {line_num}: {line_content}")
-                                            output = '\n'.join(output_parts)
-                                        else:
-                                            output = f"No matches found for '{pattern}'"
-
-                                        intercepted = True
-                                        tools_used.append("grep_search")
+                                                print(f"🔄 Intercepted: {command} → read_file({filename})")
+                                    except:
+                                        pass  # Fall back to shell execution
+    
+                                # Check for file search commands (find)
+                                if not intercepted and 'find' in command and '-name' in command:
+                                    try:
+                                        # import re removed - using module-level import
+                                        # Extract pattern: find ... -name '*pattern*'
+                                        name_match = re.search(r"-name\s+['\"]?\*?([^'\"*\s]+)\*?['\"]?", command)
+                                        if name_match:
+                                            pattern = f"**/*{name_match.group(1)}*"
+                                            path_match = re.search(r"find\s+([^\s]+)", command)
+                                            search_path = path_match.group(1) if path_match else "."
+    
+                                            result = self.glob_search(pattern, search_path)
+                                            output = '\n'.join(result['files'][:20])  # Show first 20 matches
+                                            intercepted = True
+                                            tools_used.append("glob_search")
+                                            if debug_mode:
+                                                print(f"🔄 Intercepted: {command} → glob_search({pattern}, {search_path})")
+                                    except:
+                                        pass
+    
+                                # Check for file writing commands (echo > file, grep > file, etc.) - CHECK THIS FIRST!
+                                # This must come BEFORE the plain grep interceptor
+                                # BUT: Ignore 2>/dev/null which is error redirection, not file writing
+                                if not intercepted and ('>' in command or '>>' in command) and '2>' not in command:
+                                    try:
+                                        # import re removed - using module-level import
+    
+                                        # Handle grep ... > file (intercept and execute grep, then write output)
+                                        if 'grep' in command and '>' in command:
+                                            # Extract: grep -rn 'pattern' path > output.txt
+                                            grep_match = re.search(r"grep\s+(.*)\s>\s*(\S+)", command)
+                                            if grep_match:
+                                                grep_part = grep_match.group(1).strip()
+                                                output_file = grep_match.group(2)
+    
+                                                # Extract pattern and options from grep command
+                                                pattern_match = re.search(r"['\"]([^'\"]+)['\"]", grep_part)
+                                                if pattern_match:
+                                                    pattern = pattern_match.group(1)
+                                                    search_path = "."
+                                                    file_pattern = "*.py" if "*.py" in command else "*"
+    
+                                                    if debug_mode:
+                                                        print(f"🔄 Intercepted: {command} → grep_search('{pattern}', '{search_path}', '{file_pattern}') + write_file({output_file})")
+    
+                                                    # Execute grep_search
+                                                    try:
+                                                        grep_result = self.grep_search(
+                                                            pattern=pattern,
+                                                            path=search_path,
+                                                            file_pattern=file_pattern,
+                                                            output_mode="content"
+                                                        )
+    
+                                                        # Format matches as text (like grep -rn output)
+                                                        output_lines = []
+                                                        for file_path, matches in grep_result.get('matches', {}).items():
+                                                            for line_num, line_content in matches:
+                                                                output_lines.append(f"{file_path}:{line_num}:{line_content}")
+    
+                                                        content_to_write = '\n'.join(output_lines) if output_lines else "(no matches found)"
+    
+                                                        # Write grep output to file
+                                                        write_result = self.write_file(output_file, content_to_write)
+                                                        if write_result['success']:
+                                                            output = f"Found {len(output_lines)} lines with '{pattern}' → Created {output_file} ({write_result['bytes_written']} bytes)"
+                                                            intercepted = True
+                                                            tools_used.extend(["grep_search", "write_file"])
+                                                    except Exception as e:
+                                                        if debug_mode:
+                                                            print(f"⚠️ Grep > file interception error: {e}")
+                                                        # Fall back to normal execution
+                                                        pass
+    
+                                        # Extract: echo 'content' > filename OR cat << EOF > filename
+                                        if not intercepted and 'echo' in command and '>' in command:
+                                            # echo 'content' > file OR echo "content" > file
+                                            match = re.search(r"echo\s+['\"](.+?)['\"].*?>\s*(\S+)", command)
+                                            if match:
+                                                content = match.group(1)
+                                                filename = match.group(2)
+                                                # Unescape common sequences
+                                                content = content.replace('\\n', '\n').replace('\\t', '\t')
+                                                result = self.write_file(filename, content + '\n')
+                                                if result['success']:
+                                                    output = f"Created {filename} ({result['bytes_written']} bytes)"
+                                                    intercepted = True
+                                                    tools_used.append("write_file")
+                                                    if debug_mode:
+                                                        print(f"🔄 Intercepted: {command} → write_file({filename}, ...)")
+                                    except:
+                                        pass
+    
+                                # Check for sed editing commands
+                                if not intercepted and command.startswith('sed '):
+                                    try:
+                                        # import re removed - using module-level import
+                                        # sed 's/old/new/g' file OR sed -i 's/old/new/' file
+                                        match = re.search(r"sed.*?['\"]s/([^/]+)/([^/]+)/", command)
+                                        if match:
+                                            old_text = match.group(1)
+                                            new_text = match.group(2)
+                                            # Extract filename (last argument)
+                                            parts = command.split()
+                                            filename = parts[-1]
+    
+                                            # Determine if replace_all based on /g flag
+                                            replace_all = '/g' in command
+    
+                                            result = self.edit_file(filename, old_text, new_text, replace_all=replace_all)
+                                            if result['success']:
+                                                output = result['message']
+                                                intercepted = True
+                                                tools_used.append("edit_file")
+                                                if debug_mode:
+                                                    print(f"🔄 Intercepted: {command} → edit_file({filename}, {old_text}, {new_text})")
+                                    except:
+                                        pass
+    
+                                # Check for heredoc file creation (cat << EOF > file)
+                                if not intercepted and '<<' in command and ('EOF' in command or 'HEREDOC' in command):
+                                    try:
+                                        # import re removed - using module-level import
+                                        # Extract: cat << EOF > filename OR cat > filename << EOF
+                                        # Note: We can't actually get the heredoc content from a single command line
+                                        # This would need to be handled differently (multi-line input)
+                                        # For now, just detect and warn
                                         if debug_mode:
-                                            print(f"🔄 Intercepted: {command} → grep_search({pattern}, {search_path}, {file_pattern})")
-                                except Exception as e:
-                                    if debug_mode:
-                                        print(f"⚠️  Grep interceptor failed: {e}")
-                                    pass
-
-                            # If not intercepted, execute as shell command
-                            if not intercepted:
-                                output = self.execute_command(command)
-                            
-                            if not output.startswith("ERROR"):
-                                # Success - store results with formatted preview
-                                formatted_output = self._format_shell_output(output, command)
-                                api_results["shell_info"] = {
-                                    "command": command,
-                                    "output": output,
-                                    "formatted": formatted_output,  # Add formatted version
-                                    "reason": reason,
-                                    "safety_level": safety_level
-                                }
-                                tools_used.append("shell_execution")
+                                            print(f"⚠️  Heredoc detected but not intercepted: {command[:80]}")
+                                    except:
+                                        pass
+    
+                                # Check for content search commands (grep -r) WITHOUT redirection
+                                # This comes AFTER grep > file interceptor to avoid conflicts
+                                if not intercepted and 'grep' in command and ('-r' in command or '-R' in command):
+                                    try:
+                                        # import re removed - using module-level import
+                                        # Extract pattern: grep -r 'pattern' path
+                                        pattern_match = re.search(r"grep.*?['\"]([^'\"]+)['\"]", command)
+                                        if pattern_match:
+                                            pattern = pattern_match.group(1)
+                                            # Extract path - skip flags and options
+                                            parts = [p for p in command.split() if not p.startswith('-') and p != 'grep' and p != '2>/dev/null']
+                                            # Path is after pattern (skip the quoted pattern)
+                                            search_path = parts[-1] if len(parts) >= 2 else "."
+    
+                                            # Detect file pattern from command (e.g., *.py, *.txt) or use *
+                                            file_pattern = "*"
+                                            if '*.py' in command:
+                                                file_pattern = "*.py"
+                                            elif '*.txt' in command:
+                                                file_pattern = "*.txt"
+    
+                                            result = self.grep_search(pattern, search_path, file_pattern, output_mode="content")
+    
+                                            # Format grep results
+                                            if 'matches' in result and result['matches']:
+                                                output_parts = []
+                                                for file_path, matches in result['matches'].items():
+                                                    output_parts.append(f"{file_path}:")
+                                                    for line_num, line_content in matches[:10]:  # Limit per file
+                                                        output_parts.append(f"  {line_num}: {line_content}")
+                                                output = '\n'.join(output_parts)
+                                            else:
+                                                output = f"No matches found for '{pattern}'"
+    
+                                            intercepted = True
+                                            tools_used.append("grep_search")
+                                            if debug_mode:
+                                                print(f"🔄 Intercepted: {command} → grep_search({pattern}, {search_path}, {file_pattern})")
+                                    except Exception as e:
+                                        if debug_mode:
+                                            print(f"⚠️  Grep interceptor failed: {e}")
+                                        pass
+    
+                                # If not intercepted, execute as shell command
+                                if not intercepted:
+                                    output = self.execute_command(command)
                                 
-                                # Update file context if needed
-                                if updates_context:
-                                    # import re removed - using module-level import
-                                    # Extract file paths from command
-                                    file_patterns = r'([a-zA-Z0-9_\-./]+\.(py|r|csv|txt|json|md|ipynb|rmd))'
-                                    files_mentioned = re.findall(file_patterns, command, re.IGNORECASE)
-                                    if files_mentioned:
-                                        file_path = files_mentioned[0][0]
-                                        self.file_context['last_file'] = file_path
-                                        if file_path not in self.file_context['recent_files']:
-                                            self.file_context['recent_files'].append(file_path)
-                                            self.file_context['recent_files'] = self.file_context['recent_files'][-5:]  # Keep last 5
+                                if not output.startswith("ERROR"):
+                                    # Success - store results with formatted preview
+                                    formatted_output = self._format_shell_output(output, command)
+                                    api_results["shell_info"] = {
+                                        "command": command,
+                                        "output": output,
+                                        "formatted": formatted_output,  # Add formatted version
+                                        "reason": reason,
+                                        "safety_level": safety_level
+                                    }
+                                    tools_used.append("shell_execution")
                                     
-                                    # Extract directory paths
-                                    dir_patterns = r'cd\s+([^\s&|;]+)|mkdir\s+([^\s&|;]+)'
-                                    dirs_mentioned = re.findall(dir_patterns, command)
-                                    if dirs_mentioned:
-                                        for dir_tuple in dirs_mentioned:
-                                            dir_path = dir_tuple[0] or dir_tuple[1]
-                                            if dir_path:
-                                                self.file_context['last_directory'] = dir_path
-                                                if dir_path not in self.file_context['recent_dirs']:
-                                                    self.file_context['recent_dirs'].append(dir_path)
-                                                    self.file_context['recent_dirs'] = self.file_context['recent_dirs'][-5:]  # Keep last 5
-                                    
-                                    # If cd command, update current_cwd
-                                    if command.startswith('cd '):
-                                        try:
-                                            new_cwd = self.execute_command("pwd").strip()
-                                            self.file_context['current_cwd'] = new_cwd
-                                        except:
-                                            pass
-                            else:
-                                # Command failed
+                                    # Update file context if needed
+                                    if updates_context:
+                                        # import re removed - using module-level import
+                                        # Extract file paths from command
+                                        file_patterns = r'([a-zA-Z0-9_\-./]+\.(py|r|csv|txt|json|md|ipynb|rmd))'
+                                        files_mentioned = re.findall(file_patterns, command, re.IGNORECASE)
+                                        if files_mentioned:
+                                            file_path = files_mentioned[0][0]
+                                            self.file_context['last_file'] = file_path
+                                            if file_path not in self.file_context['recent_files']:
+                                                self.file_context['recent_files'].append(file_path)
+                                                self.file_context['recent_files'] = self.file_context['recent_files'][-5:]  # Keep last 5
+                                        
+                                        # Extract directory paths
+                                        dir_patterns = r'cd\s+([^\s&|;]+)|mkdir\s+([^\s&|;]+)'
+                                        dirs_mentioned = re.findall(dir_patterns, command)
+                                        if dirs_mentioned:
+                                            for dir_tuple in dirs_mentioned:
+                                                dir_path = dir_tuple[0] or dir_tuple[1]
+                                                if dir_path:
+                                                    self.file_context['last_directory'] = dir_path
+                                                    if dir_path not in self.file_context['recent_dirs']:
+                                                        self.file_context['recent_dirs'].append(dir_path)
+                                                        self.file_context['recent_dirs'] = self.file_context['recent_dirs'][-5:]  # Keep last 5
+                                        
+                                        # If cd command, update current_cwd
+                                        if command.startswith('cd '):
+                                            try:
+                                                new_cwd = self.execute_command("pwd").strip()
+                                                self.file_context['current_cwd'] = new_cwd
+                                            except:
+                                                pass
+                                else:
+                                    # Command failed
+                                    api_results["shell_info"] = {
+                                        "error": output,
+                                        "command": command
+                                    }
+                        
+                        # Backwards compatibility: support old hardcoded actions if LLM still returns them
+                        elif shell_action == "pwd":
+                            target = plan.get("target_path")
+                            if target:
+                                ls_output = self.execute_command(f"ls -lah {target}")
                                 api_results["shell_info"] = {
-                                    "error": output,
-                                    "command": command
-                                }
-                    
-                    # Backwards compatibility: support old hardcoded actions if LLM still returns them
-                    elif shell_action == "pwd":
-                        target = plan.get("target_path")
-                        if target:
-                            ls_output = self.execute_command(f"ls -lah {target}")
-                            api_results["shell_info"] = {
-                                "directory_contents": ls_output,
-                                "target_path": target
-                            }
-                        else:
-                            ls_output = self.execute_command("ls -lah")
-                            api_results["shell_info"] = {"directory_contents": ls_output}
-                        tools_used.append("shell_execution")
-                    
-                    elif shell_action == "find":
-                        search_target = plan.get("search_target", "")
-                        search_path = plan.get("search_path", "~")
-                        if search_target:
-                            find_cmd = f"find {search_path} -maxdepth 4 -type d -iname '*{search_target}*' 2>/dev/null | head -20"
-                            find_output = self.execute_command(find_cmd)
-                            if debug_mode:
-                                print(f"🔍 FIND: {find_cmd}")
-                                print(f"🔍 OUTPUT: {repr(find_output)}")
-                            if find_output.strip():
-                                api_results["shell_info"] = {
-                                    "search_results": f"Searched for '*{search_target}*' in {search_path}:\n{find_output}"
-                                }
-                            else:
-                                api_results["shell_info"] = {
-                                    "search_results": f"No directories matching '{search_target}' found in {search_path}"
-                                }
-                            tools_used.append("shell_execution")
-                    
-                    elif shell_action == "cd":
-                        # NEW: Change directory
-                        target = plan.get("target_path")
-                        if target:
-                            # Expand ~ to home directory
-                            if target.startswith("~"):
-                                home = os.path.expanduser("~")
-                                target = target.replace("~", home, 1)
-                            
-                            # Execute cd command
-                            cd_cmd = f"cd {target} && pwd"
-                            cd_output = self.execute_command(cd_cmd)
-                            
-                            if not cd_output.startswith("ERROR"):
-                                api_results["shell_info"] = {
-                                    "directory_changed": True,
-                                    "new_directory": cd_output.strip(),
+                                    "directory_contents": ls_output,
                                     "target_path": target
                                 }
-                                tools_used.append("shell_execution")
                             else:
-                                api_results["shell_info"] = {
-                                    "directory_changed": False,
-                                    "error": f"Failed to change to {target}: {cd_output}"
-                                }
-                    
-                    elif shell_action == "read_file":
-                        # NEW: Read and inspect file (R, Python, CSV, etc.)
-                        # import re removed - using module-level import
+                                ls_output = self.execute_command("ls -lah")
+                                api_results["shell_info"] = {"directory_contents": ls_output}
+                            tools_used.append("shell_execution")
                         
-                        file_path = plan.get("file_path", "")
-                        if not file_path and might_need_shell:
-                            # Try to infer from query (e.g., "show me calculate_betas.R")
-                            filenames = re.findall(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', request.question)
-                            if filenames:
-                                # Check if file exists in current directory
-                                pwd = self.execute_command("pwd").strip()
-                                file_path = f"{pwd}/{filenames[0]}"
-                        
-                        if file_path:
-                            if debug_mode:
-                                print(f"🔍 READING FILE: {file_path}")
-                            
-                            # Read file content (first 100 lines to detect structure)
-                            cat_output = self.execute_command(f"head -100 {file_path}")
-                            
-                            if not cat_output.startswith("ERROR"):
-                                # Detect file type and extract structure
-                                file_ext = file_path.split('.')[-1].lower()
-                                
-                                # Extract column/variable info based on file type
-                                columns_info = ""
-                                if file_ext in ['csv', 'tsv']:
-                                    # CSV: first line is usually headers
-                                    first_line = cat_output.split('\n')[0] if cat_output else ""
-                                    columns_info = f"CSV columns: {first_line}"
-                                elif file_ext in ['r', 'rmd']:
-                                    # R script: look for dataframe column references (df$columnname)
-                                    column_refs = re.findall(r'\$(\w+)', cat_output)
-                                    unique_cols = list(dict.fromkeys(column_refs))[:10]
-                                    if unique_cols:
-                                        columns_info = f"Detected columns/variables: {', '.join(unique_cols)}"
-                                elif file_ext == 'py':
-                                    # Python: look for DataFrame['column'] or df.column
-                                    column_refs = re.findall(r'\[[\'""](\w+)[\'"]\]|\.(\w+)', cat_output)
-                                    unique_cols = list(dict.fromkeys([c[0] or c[1] for c in column_refs if c[0] or c[1]]))[:10]
-                                    if unique_cols:
-                                        columns_info = f"Detected columns/attributes: {', '.join(unique_cols)}"
-                                
-                                api_results["file_context"] = {
-                                    "file_path": file_path,
-                                    "file_type": file_ext,
-                                    "content_preview": cat_output[:2000],  # First 2000 chars
-                                    "structure": columns_info,
-                                    "full_content": cat_output  # Full content for analysis
-                                }
-                                tools_used.append("file_read")
-                                
+                        elif shell_action == "find":
+                            search_target = plan.get("search_target", "")
+                            search_path = plan.get("search_path", "~")
+                            if search_target:
+                                find_cmd = f"find {search_path} -maxdepth 4 -type d -iname '*{search_target}*' 2>/dev/null | head -20"
+                                find_output = self.execute_command(find_cmd)
                                 if debug_mode:
-                                    print(f"🔍 FILE STRUCTURE: {columns_info}")
-                            else:
-                                api_results["file_context"] = {
-                                    "error": f"Could not read file: {file_path}"
-                                }
-                
-                except Exception as e:
-                    if debug_mode:
-                        print(f"🔍 Shell planner failed: {e}, continuing without shell")
-                    shell_action = "none"
+                                    print(f"🔍 FIND: {find_cmd}")
+                                    print(f"🔍 OUTPUT: {repr(find_output)}")
+                                if find_output.strip():
+                                    api_results["shell_info"] = {
+                                        "search_results": f"Searched for '*{search_target}*' in {search_path}:\n{find_output}"
+                                    }
+                                else:
+                                    api_results["shell_info"] = {
+                                        "search_results": f"No directories matching '{search_target}' found in {search_path}"
+                                    }
+                                tools_used.append("shell_execution")
+                        
+                        elif shell_action == "cd":
+                            # NEW: Change directory
+                            target = plan.get("target_path")
+                            if target:
+                                # Expand ~ to home directory
+                                if target.startswith("~"):
+                                    home = os.path.expanduser("~")
+                                    target = target.replace("~", home, 1)
+                                
+                                # Execute cd command
+                                cd_cmd = f"cd {target} && pwd"
+                                cd_output = self.execute_command(cd_cmd)
+                                
+                                if not cd_output.startswith("ERROR"):
+                                    api_results["shell_info"] = {
+                                        "directory_changed": True,
+                                        "new_directory": cd_output.strip(),
+                                        "target_path": target
+                                    }
+                                    tools_used.append("shell_execution")
+                                else:
+                                    api_results["shell_info"] = {
+                                        "directory_changed": False,
+                                        "error": f"Failed to change to {target}: {cd_output}"
+                                    }
+                        
+                        elif shell_action == "read_file":
+                            # NEW: Read and inspect file (R, Python, CSV, etc.)
+                            # import re removed - using module-level import
+                            
+                            file_path = plan.get("file_path", "")
+                            if not file_path and might_need_shell:
+                                # Try to infer from query (e.g., "show me calculate_betas.R")
+                                filenames = re.findall(r'([a-zA-Z0-9_-]+\.[a-zA-Z]{1,4})', request.question)
+                                if filenames:
+                                    # Check if file exists in current directory
+                                    pwd = self.execute_command("pwd").strip()
+                                    file_path = f"{pwd}/{filenames[0]}"
+                            
+                            if file_path:
+                                if debug_mode:
+                                    print(f"🔍 READING FILE: {file_path}")
+                                
+                                # Read file content (first 100 lines to detect structure)
+                                cat_output = self.execute_command(f"head -100 {file_path}")
+                                
+                                if not cat_output.startswith("ERROR"):
+                                    # Detect file type and extract structure
+                                    file_ext = file_path.split('.')[-1].lower()
+                                    
+                                    # Extract column/variable info based on file type
+                                    columns_info = ""
+                                    if file_ext in ['csv', 'tsv']:
+                                        # CSV: first line is usually headers
+                                        first_line = cat_output.split('\n')[0] if cat_output else ""
+                                        columns_info = f"CSV columns: {first_line}"
+                                    elif file_ext in ['r', 'rmd']:
+                                        # R script: look for dataframe column references (df$columnname)
+                                        column_refs = re.findall(r'\$(\w+)', cat_output)
+                                        unique_cols = list(dict.fromkeys(column_refs))[:10]
+                                        if unique_cols:
+                                            columns_info = f"Detected columns/variables: {', '.join(unique_cols)}"
+                                    elif file_ext == 'py':
+                                        # Python: look for DataFrame['column'] or df.column
+                                        column_refs = re.findall(r'\[[\'""](\w+)[\'"]\]|\.(\w+)', cat_output)
+                                        unique_cols = list(dict.fromkeys([c[0] or c[1] for c in column_refs if c[0] or c[1]]))[:10]
+                                        if unique_cols:
+                                            columns_info = f"Detected columns/attributes: {', '.join(unique_cols)}"
+                                    
+                                    api_results["file_context"] = {
+                                        "file_path": file_path,
+                                        "file_type": file_ext,
+                                        "content_preview": cat_output[:2000],  # First 2000 chars
+                                        "structure": columns_info,
+                                        "full_content": cat_output  # Full content for analysis
+                                    }
+                                    tools_used.append("file_read")
+                                    
+                                    if debug_mode:
+                                        print(f"🔍 FILE STRUCTURE: {columns_info}")
+                                else:
+                                    api_results["file_context"] = {
+                                        "error": f"Could not read file: {file_path}"
+                                    }
+                    
+                    except Exception as e:
+                        if debug_mode:
+                            print(f"🔍 Shell planner failed: {e}, continuing without shell")
+                        shell_action = "none"
             
             # ========================================================================
             # PRIORITY 2: DATA APIs (Only if shell didn't fully handle the query)
