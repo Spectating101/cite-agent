@@ -36,7 +36,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=10000, description="User query")
     conversation_history: Optional[List[Dict[str, str]]] = Field(default=None, description="Optional conversation context")
     api_context: Optional[Dict[str, Any]] = Field(default=None, description="API results (Archive, FinSight) for context")
-    model: str = Field(default="llama-3.3-70b-versatile", description="Groq model to use")
+    model: str = Field(default="gpt-oss-120b", description="Model to use (gpt-oss-120b, llama-3.3-70b, etc)")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)  # Low temp for factual accuracy
     max_tokens: Optional[int] = Field(default=4000, ge=1, le=8000)
 

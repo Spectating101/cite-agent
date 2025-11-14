@@ -68,7 +68,7 @@ class LLMProviderManager:
                 name='cerebras',
                 keys=cerebras_keys,
                 endpoint='https://api.cerebras.ai/v1/chat/completions',
-                models=['llama-3.3-70b', 'llama3.1-8b'],
+                models=['gpt-oss-120b', 'llama-3.3-70b', 'llama3.1-8b'],
                 rate_limit_per_day=14400  # per key (verified from cerebras dashboard)
             )
         
