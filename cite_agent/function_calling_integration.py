@@ -17,8 +17,11 @@ async def process_request_with_function_calling(self, request: ChatRequest) -> C
     2. Call LLM with function calling to determine what tools to use
     3. Execute requested tools
     4. Get final response from LLM with tool results
+
+    NOTE: ALL queries go through function calling. No hardcoded bypasses.
+    The LLM intelligently chooses the 'chat' tool for simple greetings.
     """
-    from .function_calling import FunctionCallingAgent, detect_simple_chat_query
+    from .function_calling import FunctionCallingAgent
     from .tool_executor import ToolExecutor
     import os
 
@@ -30,33 +33,7 @@ async def process_request_with_function_calling(self, request: ChatRequest) -> C
         if workflow_response:
             return workflow_response
 
-        # Quick bypass for obvious chat queries (saves tokens)
-        if detect_simple_chat_query(request.question):
-            if debug_mode:
-                print(f"🔍 [Function Calling] Simple chat query detected, quick response")
-
-            responses = {
-                "test": "I'm ready to help. What would you like to work on?",
-                "testing": "I'm ready to help. What would you like to work on?",
-                "hi": "Hello! What can I help you with today?",
-                "hello": "Hello! What can I help you with today?",
-                "hey": "Hi! What can I assist you with?",
-                "thanks": "You're welcome! Let me know if you need anything else.",
-                "thank you": "You're welcome! Let me know if you need anything else.",
-                "ok": "Ready when you are.",
-                "okay": "Ready when you are.",
-            }
-
-            query_lower = request.question.lower().strip()
-            response_text = responses.get(query_lower, "I'm here to help. What would you like to work on?")
-
-            return ChatResponse(
-                response=response_text,
-                tokens_used=0,
-                tools_used=["quick_reply"],
-                confidence_score=0.9,
-                api_results={}
-            )
+        # ALL queries go through function calling - no hardcoded bypasses
 
         # Initialize function calling agent
         if not hasattr(self, '_function_calling_agent'):

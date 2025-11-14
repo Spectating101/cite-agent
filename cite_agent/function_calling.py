@@ -141,29 +141,14 @@ class FunctionCallingAgent:
             # Check if it's a rate limit error (429)
             if "429" in error_str or "rate" in error_str.lower() or "queue" in error_str.lower():
                 if self.debug_mode:
-                    print(f"⚠️ [Function Calling] {self.provider} rate limited (429), using quick response for simple queries")
-
-                # For simple queries like "test", "hi", etc., just return a quick response
-                # instead of erroring out
-                simple_responses = {
-                    "test": "I'm ready to help. What would you like to work on?",
-                    "testing": "I'm ready to help. What would you like to work on?",
-                    "hi": "Hello! What can I help you with today?",
-                    "hello": "Hello! What can I help you with today?",
-                    "hey": "Hi! What can I assist you with?",
-                    "chat": "I'm here to help. What would you like to discuss?",
-                }
-
-                query_lower = query.lower().strip()
-                if query_lower in simple_responses:
-                    if self.debug_mode:
-                        print(f"🔍 [Function Calling] Using fallback response for '{query_lower}'")
-                    return FunctionCallingResponse(
-                        response=simple_responses[query_lower],
-                        tool_calls=[],
-                        tool_results={},
-                        tokens_used=0
-                    )
+                    print(f"⚠️ [Function Calling] {self.provider} rate limited (429)")
+                # Return user-friendly rate limit message
+                return FunctionCallingResponse(
+                    response="The AI service is experiencing high traffic right now. Please try again in a moment.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
 
             if self.debug_mode:
                 print(f"❌ [Function Calling] LLM call failed: {type(e).__name__}: {e}")

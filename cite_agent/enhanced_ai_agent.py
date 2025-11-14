@@ -26,7 +26,7 @@ import platform
 from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
-from .function_calling import FunctionCallingAgent, detect_simple_chat_query
+from .function_calling import FunctionCallingAgent
 from .tool_executor import ToolExecutor
 
 # Suppress noise
@@ -3602,35 +3602,6 @@ class EnhancedNocturnalAgent:
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
-
-            # Quick bypass for obvious chat queries (saves tokens)
-            if detect_simple_chat_query(request.question):
-                if debug_mode:
-                    print(f"🔍 [Function Calling] Simple chat query detected, quick response")
-
-                responses = {
-                    "test": "I'm ready to help. What would you like to work on?",
-                    "testing": "I'm ready to help. What would you like to work on?",
-                    "hi": "Hello! What can I help you with today?",
-                    "hello": "Hello! What can I help you with today?",
-                    "hey": "Hi! What can I assist you with?",
-                    "chat": "I'm here to help. What would you like to discuss?",
-                    "thanks": "You're welcome! Let me know if you need anything else.",
-                    "thank you": "You're welcome! Let me know if you need anything else.",
-                    "ok": "Ready when you are.",
-                    "okay": "Ready when you are.",
-                }
-
-                query_lower = request.question.lower().strip()
-                response_text = responses.get(query_lower, "I'm here to help. What would you like to work on?")
-
-                return ChatResponse(
-                    response=response_text,
-                    tokens_used=0,
-                    tools_used=["quick_reply"],
-                    confidence_score=0.9,
-                    api_results={}
-                )
 
             # Initialize function calling agent
             if not hasattr(self, '_function_calling_agent'):
