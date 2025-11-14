@@ -1136,6 +1136,13 @@ class EnhancedNocturnalAgent:
             "• 'What does X do?' → Answer from visible code/context, no re-execution",
             "• 'What version' → Include word 'version' in answer (e.g. 'Version is v1.4.0')",
             "",
+            "🚨 CRITICAL - NEVER HALLUCINATE FILES:",
+            "• NEVER list files without seeing shell output from ls/find",
+            "• NEVER invent plausible filenames (test.py, config.json, etc.)",
+            "• If user asks about files but you haven't run ls: say 'Let me check' and wait for shell_info",
+            "• ONLY mention files that appear in shell_info results",
+            "• If shell_info is empty/missing: say 'I don't see any files' or ask for clarification",
+            "",
             "- If asked \"who built you?\" or \"who is your developer?\" or \"whats the name of your developer\" → Answer: \"I was built by Phyrexian.\" (If the user asks you to say his name, you should say \"Phyrexian\" as his name)",
             "",
             "- LANGUAGE:",
@@ -1145,7 +1152,6 @@ class EnhancedNocturnalAgent:
             "CONCISE RESPONSE STYLE:",
             "• Direct answers - state result, minimal elaboration",
             "• NO code blocks showing bash/python commands unless explicitly asked",
-            "• NO 'Let me check...' preambles",
             "• File listings: Max 5-10 items (filtered to query)",
             "• Balance: complete but concise"
         ]
@@ -1154,7 +1160,9 @@ class EnhancedNocturnalAgent:
             "",
             "- COMMUNICATION RULES:",
             "- You MUST NOT return an empty response. EVER.",
-            "- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., \"Okay, I'll check the contents of that directory,\" or \"I will search for that file.\")",
+            "- When shell_info/api_results ALREADY present: Just show results directly, NO preambles",
+            "- When you DON'T have data yet: Brief statement of what you'll do is optional but keep it minimal",
+            "- NEVER say 'Let me check' if the data is already in the context - just show it",
         ])
 
         guidelines.extend([
@@ -3548,7 +3556,19 @@ class EnhancedNocturnalAgent:
             
             # Quick check if query might need shell
             question_lower = request.question.lower()
-            might_need_shell = any(word in question_lower for word in [
+            question_normalized = ''.join(c for c in question_lower if c.isalnum() or c.isspace()).strip()
+            words = question_normalized.split()
+
+            # EXCLUDE obvious small talk first
+            is_small_talk = (
+                len(words) == 1 and question_normalized in ['test', 'testing', 'hi', 'hello', 'hey', 'ping', 'thanks', 'thank', 'bye', 'ok', 'okay']
+            ) or (
+                len(words) <= 5 and 'test' in words and all(w in ['test', 'testing', 'just', 'this', 'is', 'a', 'only', 'my'] for w in words)
+            ) or (
+                question_normalized in ['how are you', 'how are you doing', 'hows it going', 'whats up', 'thank you', 'thanks a lot']
+            )
+
+            might_need_shell = not is_small_talk and any(word in question_lower for word in [
                 'directory', 'folder', 'where', 'find', 'list', 'files', 'file', 'look', 'search', 'check', 'into',
                 'show', 'open', 'read', 'display', 'cat', 'view', 'contents', '.r', '.py', '.csv', '.ipynb',
                 'create', 'make', 'mkdir', 'touch', 'new', 'write', 'copy', 'move', 'delete', 'remove',
@@ -3584,7 +3604,13 @@ Respond ONLY with JSON:
 }}
 
 IMPORTANT RULES:
-1. Return "none" for conversational queries ("hello", "test", "thanks", "how are you")
+1. 🚨 SMALL TALK - ALWAYS return "none" for:
+   - Greetings: "hi", "hello", "hey", "good morning"
+   - Testing: "test", "testing", "just testing", "this is a test"
+   - Thanks: "thanks", "thank you", "appreciate it"
+   - Acknowledgments: "ok", "okay", "got it", "I see"
+   - Questions about you: "how are you", "what's up"
+   - Simple responses: "yes", "no", "maybe"
 2. Return "none" when query is ambiguous without more context
 3. Return "none" for questions about data that don't need shell (e.g., "Tesla revenue", "Apple stock price")
 4. Use ACTUAL shell commands (pwd, ls, cd, mkdir, cat, grep, find, touch, etc.)
@@ -3617,9 +3643,19 @@ Examples:
 "show me calc.py completely" → {{"action": "execute", "command": "cat calc.py", "reason": "Display entire file", "updates_context": false}}
 "git status" → {{"action": "execute", "command": "git status", "reason": "Check repository status", "updates_context": false}}
 "what's in that file?" + last_file=data.csv → {{"action": "execute", "command": "head -100 data.csv", "reason": "Show file contents", "updates_context": false}}
-"hello" → {{"action": "none", "reason": "Conversational greeting, no command needed"}}
-"test" → {{"action": "none", "reason": "Ambiguous query, needs clarification"}}
-"thanks" → {{"action": "none", "reason": "Conversational acknowledgment"}}
+
+🚨 SMALL TALK EXAMPLES (action=none):
+"hello" → {{"action": "none", "reason": "Greeting, no command needed"}}
+"hi" → {{"action": "none", "reason": "Greeting, no command needed"}}
+"test" → {{"action": "none", "reason": "Test query, no command needed"}}
+"testing" → {{"action": "none", "reason": "Test query, no command needed"}}
+"just testing" → {{"action": "none", "reason": "Test query, no command needed"}}
+"thanks" → {{"action": "none", "reason": "Acknowledgment, no command needed"}}
+"thank you" → {{"action": "none", "reason": "Acknowledgment, no command needed"}}
+"how are you" → {{"action": "none", "reason": "Small talk, no command needed"}}
+"ok" → {{"action": "none", "reason": "Acknowledgment, no command needed"}}
+
+DATA QUERIES (action=none, let APIs handle it):
 "Tesla revenue" → {{"action": "none", "reason": "Finance query, will use FinSight API not shell"}}
 "what does the error mean?" → {{"action": "none", "reason": "Explanation request, no command needed"}}
 
