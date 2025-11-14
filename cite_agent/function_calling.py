@@ -50,13 +50,23 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
         if count == 0:
             return "No papers found"
 
-        # Concise paper list (title, year, citations only)
+        # Concise paper list with key info (optimized for synthesis)
         paper_summaries = []
-        for p in papers[:5]:  # Max 5 papers in summary
-            title = p.get("title", "Unknown")[:80]  # Truncate long titles
+        for i, p in enumerate(papers[:5], 1):  # Max 5 papers in summary
+            title = p.get("title", "Unknown")[:100]  # Slightly longer titles
             year = p.get("year", "N/A")
             citations = p.get("citations_count", 0)
-            paper_summaries.append(f"- {title} ({year}, {citations} cites)")
+            authors = p.get("authors", [])
+            first_author = authors[0].get("name", "Unknown") if authors else "Unknown"
+            doi = p.get("doi", "")
+
+            # Compact format: Title (FirstAuthor, Year) - citations cites [DOI]
+            summary = f"{i}. {title} ({first_author}, {year})"
+            if citations > 0:
+                summary += f" - {citations:,} citations"
+            if doi:
+                summary += f" [DOI: {doi}]"
+            paper_summaries.append(summary)
 
         return f"Found {count} papers:\n" + "\n".join(paper_summaries)
 
@@ -333,21 +343,49 @@ class FunctionCallingAgent:
         Returns:
             Final response from LLM
         """
-        # OPTIMIZATION: Skip synthesis for simple chat responses (saves ~700 tokens)
-        if (len(tool_calls) == 1 and
-            tool_calls[0].name == "chat" and
-            len(original_query.split()) <= 3):  # Simple greetings like "hi", "hello", "thanks"
-
-            # Return chat response directly without second LLM call
+        # OPTIMIZATION: Skip synthesis for simple/obvious responses (saves 500-1500 tokens each)
+        if len(tool_calls) == 1:
+            tool_name = tool_calls[0].name
             result = tool_execution_results.get(tool_calls[0].id, {})
-            if "message" in result:
+
+            # Case 1: Simple chat (hi, thanks, etc.)
+            if (tool_name == "chat" and len(original_query.split()) <= 3):
+                if "message" in result:
+                    if self.debug_mode:
+                        print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
+                    return FunctionCallingResponse(
+                        response=result["message"],
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=0,  # No second LLM call
+                        model=self.model
+                    )
+
+            # Case 2: Single directory listing (just show the output)
+            elif tool_name == "list_directory" and "listing" in result:
                 if self.debug_mode:
-                    print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
+                    print(f"🔍 [Function Calling] Skipping synthesis for directory listing (token optimization)")
+                path = result.get("path", ".")
+                listing = result.get("listing", "")
                 return FunctionCallingResponse(
-                    response=result["message"],
+                    response=f"Contents of {path}:\n\n{listing}",
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
-                    tokens_used=0,  # No second LLM call
+                    tokens_used=0,
+                    model=self.model
+                )
+
+            # Case 3: Single file read (just show the content)
+            elif tool_name == "read_file" and "content" in result:
+                if self.debug_mode:
+                    print(f"🔍 [Function Calling] Skipping synthesis for file read (token optimization)")
+                file_path = result.get("file_path", "unknown")
+                content = result.get("content", "")
+                return FunctionCallingResponse(
+                    response=f"Contents of {file_path}:\n\n{content}",
+                    tool_calls=tool_calls,
+                    tool_results=tool_execution_results,
+                    tokens_used=0,
                     model=self.model
                 )
 
@@ -394,6 +432,22 @@ class FunctionCallingAgent:
 
         if self.debug_mode:
             print(f"🔍 [Function Calling] Sending tool results back to LLM for synthesis")
+
+        # Add system instruction for high-quality synthesis
+        synthesis_instruction = {
+            "role": "system",
+            "content": (
+                "You are a professional research assistant. Synthesize tool results into clear, "
+                "well-formatted responses suitable for academic/professional use. "
+                "For papers: provide structured summaries with proper citations. "
+                "For data: present findings concisely with context. "
+                "NEVER include raw JSON or tool arguments in your response - only natural language."
+            )
+        }
+
+        # Insert system message at beginning if not already present
+        if not messages or messages[0].get("role") != "system":
+            messages.insert(0, synthesis_instruction)
 
         # Call LLM again with tool results
         try:

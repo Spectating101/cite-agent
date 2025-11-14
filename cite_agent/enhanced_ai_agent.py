@@ -3768,14 +3768,17 @@ class EnhancedNocturnalAgent:
                         ]
                     })
 
-                # Add tool results to conversation
+                # Add tool results to conversation (FORMATTED to prevent JSON leaking)
+                from .function_calling import format_tool_result
                 for tool_call in fc_response.tool_calls:
                     result = iteration_results.get(tool_call.id, {})
+                    # Format result into human-readable summary (prevents raw JSON in responses)
+                    formatted_result = format_tool_result(tool_call.name, result)
                     conversation.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": json.dumps(result)[:800]  # Truncate for next iteration
+                        "content": formatted_result[:800]  # Use formatted result, not raw JSON
                     })
 
                 # Update query for next iteration (ask if more tools needed)
@@ -3786,8 +3789,10 @@ class EnhancedNocturnalAgent:
                 print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
 
             # For multi-step: Use the full conversation that was built during iterations
-            # For single-step: Build a fresh conversation
-            if len(all_tool_calls) > 1 or MAX_ITERATIONS > 1:
+            # For single-step: Build a fresh conversation with formatted results
+            # FIXED: Check actual iteration count, not MAX_ITERATIONS constant
+            actual_iterations = iteration + 1
+            if actual_iterations > 1:
                 # Multi-step: conversation already has all the messages in proper order
                 final_response = await self._function_calling_agent.finalize_response(
                     original_query=request.question,
