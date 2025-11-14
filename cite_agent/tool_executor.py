@@ -75,7 +75,7 @@ class ToolExecutor:
         """Execute search_papers tool"""
         query = args.get("query", "")
         limit = args.get("limit", 5)
-        sources = args.get("sources", ["semantic_scholar", "openalex"])
+        sources = args.get("sources", ["semantic_scholar", "openalex"])  # For logging only
 
         if not query:
             return {"error": "Missing required parameter: query"}
@@ -84,20 +84,22 @@ class ToolExecutor:
             print(f"📚 [Archive API] Searching: {query} (limit={limit}, sources={sources})")
 
         # Call Archive API via agent
+        # Note: search_academic_papers has built-in source fallback, doesn't accept sources param
         try:
-            results = await self.agent.archive_api.search_papers(
+            results = await self.agent.search_academic_papers(
                 query=query,
-                limit=limit,
-                sources=sources
+                limit=limit
             )
 
             if self.debug_mode:
-                print(f"📚 [Archive API] Found {len(results.get('papers', []))} papers")
+                papers = results.get("results", [])
+                print(f"📚 [Archive API] Found {len(papers)} papers")
 
             return {
-                "papers": results.get("papers", []),
-                "count": len(results.get("papers", [])),
-                "query": query
+                "papers": results.get("results", []),
+                "count": len(results.get("results", [])),
+                "query": query,
+                "sources_tried": results.get("sources_tried", [])
             }
 
         except Exception as e:
@@ -116,18 +118,18 @@ class ToolExecutor:
 
         # Call FinSight API via agent
         try:
-            results = await self.agent.finsight_api.get_company_data(
+            results = await self.agent.get_financial_metrics(
                 ticker=ticker,
                 metrics=metrics
             )
 
             if self.debug_mode:
-                print(f"💰 [FinSight API] Retrieved {len(results.get('data', {}))} metrics")
+                print(f"💰 [FinSight API] Retrieved {len(results)} metrics")
 
             return {
                 "ticker": ticker,
-                "data": results.get("data", {}),
-                "company_name": results.get("company_name", ticker)
+                "data": results,
+                "company_name": ticker  # get_financial_metrics doesn't return company name
             }
 
         except Exception as e:
@@ -146,9 +148,9 @@ class ToolExecutor:
 
         # Call web search via agent
         try:
-            results = await self.agent.web_search.search(
+            results = await self.agent.web_search.search_web(
                 query=query,
-                max_results=num_results
+                num_results=num_results
             )
 
             if self.debug_mode:
