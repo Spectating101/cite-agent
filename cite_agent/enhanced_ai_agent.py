@@ -3614,6 +3614,7 @@ class EnhancedNocturnalAgent:
                     "hi": "Hello! What can I help you with today?",
                     "hello": "Hello! What can I help you with today?",
                     "hey": "Hi! What can I assist you with?",
+                    "chat": "I'm here to help. What would you like to discuss?",
                     "thanks": "You're welcome! Let me know if you need anything else.",
                     "thank you": "You're welcome! Let me know if you need anything else.",
                     "ok": "Ready when you are.",

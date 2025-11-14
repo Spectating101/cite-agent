@@ -361,7 +361,7 @@ def detect_simple_chat_query(query: str) -> bool:
 
     # Single word greetings/acknowledgments
     simple_words = {
-        'hi', 'hello', 'hey', 'test', 'testing', 'thanks', 'thank',
+        'hi', 'hello', 'hey', 'chat', 'test', 'testing', 'thanks', 'thank',
         'bye', 'ok', 'okay', 'yes', 'no', 'maybe'
     }
 
