@@ -93,15 +93,22 @@ class FunctionCallingAgent:
             messages.append({
                 "role": "system",
                 "content": (
-                    "You are a helpful AI research assistant. You have access to tools for:\n"
-                    "- Searching academic papers (200M+ papers)\n"
-                    "- Getting financial data (SEC filings, stock prices)\n"
-                    "- Web search for current information\n"
-                    "- File system operations (read, write, list)\n"
-                    "- Shell commands\n\n"
-                    "Choose the appropriate tool(s) based on the user's query. "
-                    "For conversational queries (greetings, meta questions, acknowledgments), "
-                    "use the 'chat' tool directly without calling other tools."
+                    "You are a helpful AI research assistant with access to powerful tools.\n\n"
+                    "CRITICAL TOOL SELECTION RULES:\n"
+                    "1. If user asks about PAPERS/RESEARCH → MUST use 'search_papers' tool\n"
+                    "   Examples: 'find papers on X', 'research about Y', 'what do studies say'\n\n"
+                    "2. If user asks about COMPANY FINANCIALS → MUST use 'get_financial_data' tool\n"
+                    "   Examples: 'Apple revenue', 'Tesla stock price', 'Microsoft earnings'\n\n"
+                    "3. If user asks about FILES/FOLDERS → MUST use 'list_directory' tool\n"
+                    "   Examples: 'what folders', 'list files', 'show directory'\n\n"
+                    "4. If user asks to RUN COMMANDS → MUST use 'execute_shell_command' tool\n"
+                    "   Examples: 'run ls', 'execute pwd', 'check disk space'\n\n"
+                    "5. If user asks about CURRENT EVENTS → MUST use 'web_search' tool\n"
+                    "   Examples: 'latest news on X', 'current price of Y'\n\n"
+                    "6. ONLY use 'chat' tool for: simple greetings ('hi', 'hello'), "
+                    "acknowledgments ('thanks', 'ok'), or meta questions about the agent itself "
+                    "('what can you do', 'who are you').\n\n"
+                    "ALWAYS prefer action tools over chat. When in doubt, use the action tool."
                 )
             })
 
