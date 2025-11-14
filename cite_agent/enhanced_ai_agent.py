@@ -1577,6 +1577,33 @@ class EnhancedNocturnalAgent:
             has_session = session_file.exists()
             use_local_keys_env = os.getenv("USE_LOCAL_KEYS", "").lower()
 
+            # CRITICAL FIX: Load temp_api_key BEFORE deciding mode
+            # Otherwise the check on line 1591 always fails (key not loaded yet)
+            temp_api_key_from_session = None
+            temp_key_provider_from_session = 'cerebras'
+            if has_session:
+                try:
+                    import json
+                    with open(session_file, 'r') as f:
+                        session_data = json.load(f)
+                        temp_api_key_from_session = session_data.get('temp_api_key')
+                        temp_key_expires = session_data.get('temp_key_expires')
+                        temp_key_provider_from_session = session_data.get('temp_key_provider', 'cerebras')
+
+                        # Check if key is still valid
+                        if temp_api_key_from_session and temp_key_expires:
+                            from datetime import datetime, timezone
+                            try:
+                                expires_at = datetime.fromisoformat(temp_key_expires.replace('Z', '+00:00'))
+                                now = datetime.now(timezone.utc)
+                                if now >= expires_at:
+                                    # Key expired, don't use it
+                                    temp_api_key_from_session = None
+                            except:
+                                temp_api_key_from_session = None
+                except:
+                    temp_api_key_from_session = None
+
             # Priority order for key mode:
             # 1. USE_LOCAL_KEYS env var (explicit override)
             # 2. Temp API key from session (fast mode)
@@ -1588,9 +1615,16 @@ class EnhancedNocturnalAgent:
             elif use_local_keys_env == "false":
                 # Explicit backend mode
                 use_local_keys = False
-            elif has_session and hasattr(self, 'temp_api_key') and self.temp_api_key:
-                # Session exists with temp key → use local mode (fast!)
+            elif temp_api_key_from_session:
+                # Session exists with valid temp key → use local mode (fast!)
                 use_local_keys = True
+                # Store it for later use
+                self.temp_api_key = temp_api_key_from_session
+                self.temp_key_provider = temp_key_provider_from_session
+
+                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                if debug_mode:
+                    print(f"✅ Using temporary local key for fast mode!")
             elif has_session:
                 # Session exists but no temp key → use backend mode
                 use_local_keys = False
