@@ -1006,6 +1006,10 @@ class EnhancedNocturnalAgent:
 
             if "output" in shell_info:
                 formatted_parts.append(f"\n📤 Command output (THIS IS THE RESULT):")
+                # Check if this is a file read command
+                command = shell_info.get("command", "")
+                if any(cmd in command for cmd in ["cat", "head", "tail", "less", "read_file"]):
+                    formatted_parts.append(f"FILE CONTENTS BELOW - USE THIS TO ANSWER THE QUESTION:")
                 formatted_parts.append(f"{shell_info['output']}")
 
             if "error" in shell_info:
@@ -1023,10 +1027,19 @@ class EnhancedNocturnalAgent:
             formatted_parts.append("\n" + "=" * 60)
             formatted_parts.append("🚨 CRITICAL INSTRUCTION 🚨")
             formatted_parts.append("The command was ALREADY executed. The output above is the result.")
-            formatted_parts.append("Present the KEY information concisely - summarize, don't paste everything.")
-            formatted_parts.append("For file listings: list key files/directories, skip metadata unless asked.")
-            formatted_parts.append("For search results: answer directly, cite relevant findings.")
-            formatted_parts.append("For file content: show relevant sections only.")
+            # Check if this is a file read to give specific instructions
+            command = shell_info.get("command", "")
+            if any(cmd in command for cmd in ["cat", "head", "tail", "less", "read_file"]):
+                formatted_parts.append("THIS IS A FILE READ OPERATION.")
+                formatted_parts.append("The file contents are provided above.")
+                formatted_parts.append("ANALYZE THE ACTUAL FILE CONTENT and answer based on what you see.")
+                formatted_parts.append("DO NOT say 'based on provided content' or 'the snippet shows' - just answer directly.")
+                formatted_parts.append("DO NOT suggest running commands - the file was already read.")
+            else:
+                formatted_parts.append("Present the KEY information concisely - summarize, don't paste everything.")
+                formatted_parts.append("For file listings: list key files/directories, skip metadata unless asked.")
+                formatted_parts.append("For search results: answer directly, cite relevant findings.")
+                formatted_parts.append("For file content: show relevant sections only.")
             formatted_parts.append("If output is empty: say 'No results found'.")
             formatted_parts.append("DO NOT ask the user to run commands - results are already here.")
             formatted_parts.append("=" * 60)
@@ -2583,9 +2596,10 @@ IMPORTANT RULES:
 3. Return "none" for questions about data that don't need shell (e.g., "Tesla revenue", "Apple stock price")
 4. Use ACTUAL shell commands (pwd, ls, cd, mkdir, cat, grep, find, touch, etc.)
 5. Resolve pronouns using context: "it"={last_file}, "there"/{last_dir}
-6. For reading files, prefer: head -100 filename (shows first 100 lines)
-7. For finding things, use: find ~ -maxdepth 4 -name '*pattern*' 2>/dev/null
-8. For creating files: touch filename OR echo "content" > filename
+6. For reading SPECIFIC FUNCTIONS in a file: grep -A 50 'def function_name' filename (shows function with 50 lines)
+7. For reading entire files: cat filename (for small files) OR head -100 filename (for large files)
+8. For finding files/directories, use: find ~ -maxdepth 4 -name '*pattern*' 2>/dev/null
+9. For creating files: touch filename OR echo "content" > filename
 9. For creating directories: mkdir dirname
 10. ALWAYS include 2>/dev/null to suppress errors from find and grep
 11. 🚨 MULTI-STEP QUERIES: For queries like "read X and do Y", ONLY generate the FIRST step (reading X). The LLM will handle subsequent steps after seeing the file contents.
@@ -2598,6 +2612,8 @@ Examples:
 "find cm522" → {{"action": "execute", "command": "find ~ -maxdepth 4 -name '*cm522*' -type d 2>/dev/null | head -20", "reason": "Search for cm522 directory", "updates_context": false}}
 "go to Downloads" → {{"action": "execute", "command": "cd ~/Downloads && pwd", "reason": "Navigate to Downloads directory", "updates_context": true}}
 "show me calc.R" → {{"action": "execute", "command": "head -100 calc.R", "reason": "Display file contents", "updates_context": true}}
+"read the main function in cli.py" → {{"action": "execute", "command": "grep -A 50 'def main' cli.py", "reason": "Show main function definition", "updates_context": false}}
+"explain the process function in analyzer.py" → {{"action": "execute", "command": "grep -A 50 'def process' analyzer.py", "reason": "Show process function", "updates_context": false}}
 "create test directory" → {{"action": "execute", "command": "mkdir test && echo 'Created test/'", "reason": "Create new directory", "updates_context": true}}
 "create empty config.json" → {{"action": "execute", "command": "touch config.json && echo 'Created config.json'", "reason": "Create empty file", "updates_context": true}}
 "write hello.txt with content Hello World" → {{"action": "execute", "command": "echo 'Hello World' > hello.txt", "reason": "Create file with content", "updates_context": true}}
@@ -2932,6 +2948,7 @@ JSON:"""
                                 tools_used.append("shell_execution")
                                 if debug_mode:
                                     print(f"✅ Stored shell_info: command={command[:50]}..., output_len={len(output)}")
+                                    print(f"🔍 Output preview: {output[:200]}...")
                                 
                                 # Update file context if needed
                                 if updates_context:
@@ -3565,9 +3582,14 @@ JSON:"""
             
             # Build enhanced system prompt with trimmed sections based on detected needs
             system_prompt = self._build_system_prompt(request_analysis, memory_context, api_results)
-            if debug_mode and api_results.get("research"):
-                papers_in_prompt = len(api_results.get("research", {}).get("results", []))
-                print(f"🔍 System prompt includes {papers_in_prompt} papers from Archive API")
+            if debug_mode:
+                if api_results.get("research"):
+                    papers_in_prompt = len(api_results.get("research", {}).get("results", []))
+                    print(f"🔍 System prompt includes {papers_in_prompt} papers from Archive API")
+                if api_results.get("shell_info"):
+                    output_len = len(api_results["shell_info"].get("output", ""))
+                    print(f"🔍 System prompt includes shell_info with {output_len} chars of output")
+                    print(f"🔍 Shell command was: {api_results['shell_info'].get('command', 'NONE')}")
             
             # Build messages
             messages = [
