@@ -1093,6 +1093,46 @@ class EnhancedNocturnalAgent:
 
             return "\n".join(formatted_parts)
 
+        # PRE-CALCULATION: Auto-calculate profit margins when data available
+        if "finsight" in api_results:
+            finsight_data = api_results["finsight"]
+            for ticker_data in finsight_data if isinstance(finsight_data, list) else [finsight_data]:
+                if not isinstance(ticker_data, dict):
+                    continue
+
+                # Extract metrics
+                metrics = ticker_data.get("metrics", {})
+                revenue_data = metrics.get("revenue", {})
+                profit_data = metrics.get("netIncome", {})  # FinSight uses "netIncome" not "net_profit"
+
+                # Calculate margin if both present
+                if revenue_data and profit_data:
+                    revenue_values = revenue_data.get("values", [])
+                    profit_values = profit_data.get("values", [])
+
+                    if revenue_values and profit_values:
+                        # Use most recent matching data
+                        margins = []
+                        for rev_item, prof_item in zip(revenue_values, profit_values):
+                            rev_val = rev_item.get("value")
+                            prof_val = prof_item.get("value")
+                            if rev_val and prof_val and rev_val != 0:
+                                margin_pct = (prof_val / rev_val) * 100
+                                margins.append({
+                                    "period": rev_item.get("period"),
+                                    "value": round(margin_pct, 2),
+                                    "unit": "%"
+                                })
+
+                        if margins:
+                            # Add calculated margins to metrics
+                            if "metrics" not in ticker_data:
+                                ticker_data["metrics"] = {}
+                            ticker_data["metrics"]["profit_margin_calculated"] = {
+                                "values": margins,
+                                "metadata": "Auto-calculated from net_profit/revenue"
+                            }
+
         # Normal formatting for non-shell results
         try:
             serialized = json.dumps(api_results, indent=2)
@@ -1544,6 +1584,25 @@ class EnhancedNocturnalAgent:
         for metric, keywords in keyword_map:
             if any(kw in question_lower for kw in keywords):
                 metrics_to_fetch.append(metric)
+
+        # CALCULATION FIX: Always include revenue+netIncome for margin/ratio queries or comparisons
+        margin_keywords = ["margin", "ratio", "percentage", "%"]
+        comparison_keywords = ["compare", "vs", "versus", "difference", "between"]
+        asks_margin = any(kw in question_lower for kw in margin_keywords)
+        asks_comparison = any(kw in question_lower for kw in comparison_keywords)
+
+        # Add revenue + netIncome if:
+        # 1. User asks about margins/ratios (need both for profit margin calculation)
+        # 2. User wants to compare companies (need consistent metrics)
+        # 3. Multiple tickers detected (likely comparison)
+        needs_full_data = (asks_margin or asks_comparison or len(tickers) > 1)
+
+        if needs_full_data:
+            if "revenue" not in metrics_to_fetch:
+                metrics_to_fetch.insert(0, "revenue")
+            if "netIncome" not in metrics_to_fetch and asks_margin:
+                # Add netIncome for margin calculations
+                metrics_to_fetch.append("netIncome")
 
         if session_key:
             last_topic = self._session_topics.get(session_key)
@@ -5017,12 +5076,18 @@ JSON:"""
                         "tickers": tickers,
                         "metrics": metrics_to_fetch,
                     }
+                    # CALCULATION FIX: Detect if user asked for calculations/comparisons
+                    question_lower = request.question.lower()
+                    calculation_keywords = ["calculate", "compute", "margin", "ratio", "compare", "vs", "versus", "difference"]
+                    needs_calculation = any(kw in question_lower for kw in calculation_keywords)
+
                     direct_finance = (
                         len(financial_payload) == 1
                         and set(request_analysis.get("apis", [])) == {"finsight"}
                         and not api_results.get("research")
                         and not file_previews
                         and not workspace_listing
+                        and not needs_calculation  # Force LLM for calculations
                     )
                     if direct_finance:
                         return self._respond_with_financial_metrics(request, financial_payload)
