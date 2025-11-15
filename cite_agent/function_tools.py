@@ -595,7 +595,611 @@ TOOLS: List[Dict[str, Any]] = [
                 "required": ["message"]
             }
         }
-    }
+    },
+    # =========================================================================
+    # MAGICAL RESEARCH MODULES - Advanced Research Assistant
+    # =========================================================================
+    
+    # ---------------------------------------------------------------------
+    # R Workspace Bridge
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "list_r_objects",
+            "description": "List all objects in R workspace/environment. Use when user wants to see what datasets or variables are available in their R session.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workspace_path": {
+                        "type": "string",
+                        "description": "Path to .RData file (optional, uses active R session if not specified)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_r_dataframe",
+            "description": "Retrieve a dataframe from R workspace without saving to disk first. Use when user has data in R console and wants to analyze it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "object_name": {
+                        "type": "string",
+                        "description": "Name of R object to retrieve (e.g., 'my_data', 'df')"
+                    },
+                    "workspace_path": {
+                        "type": "string",
+                        "description": "Path to .RData file (optional)"
+                    }
+                },
+                "required": ["object_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_r_and_capture",
+            "description": "Execute R code and capture specific objects from the result. Use for complex R operations where you need the output objects.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "r_code": {
+                        "type": "string",
+                        "description": "R code to execute"
+                    },
+                    "capture_objects": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Names of R objects to capture after execution"
+                    }
+                },
+                "required": ["r_code", "capture_objects"]
+            }
+        }
+    },
+    
+    # ---------------------------------------------------------------------
+    # Qualitative Coding Suite
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "create_code",
+            "description": "Create a qualitative code for interview/focus group analysis. Use when user wants to code qualitative data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code_name": {
+                        "type": "string",
+                        "description": "Name of the code (e.g., 'hope', 'barrier', 'motivation')"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description of what this code represents"
+                    },
+                    "parent_code": {
+                        "type": "string",
+                        "description": "Parent code for hierarchical coding (optional)"
+                    }
+                },
+                "required": ["code_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_transcript",
+            "description": "Load interview or focus group transcript for coding. Use when user has qualitative text data to analyze.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {
+                        "type": "string",
+                        "description": "Unique document identifier (e.g., 'interview_01')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full transcript text"
+                    },
+                    "format_type": {
+                        "type": "string",
+                        "enum": ["plain", "interview", "focus_group"],
+                        "description": "Format of transcript (default: plain)"
+                    }
+                },
+                "required": ["doc_id", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "code_segment",
+            "description": "Apply codes to a segment of transcript. Use when coding specific text excerpts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {
+                        "type": "string",
+                        "description": "Document identifier"
+                    },
+                    "line_start": {
+                        "type": "integer",
+                        "description": "Starting line number (1-indexed)"
+                    },
+                    "line_end": {
+                        "type": "integer",
+                        "description": "Ending line number"
+                    },
+                    "codes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of code names to apply"
+                    }
+                },
+                "required": ["doc_id", "line_start", "line_end", "codes"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_coded_excerpts",
+            "description": "Get all text excerpts coded with a specific code. Use to retrieve all instances of a theme.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code_name": {
+                        "type": "string",
+                        "description": "Code name to retrieve excerpts for"
+                    }
+                },
+                "required": ["code_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_extract_themes",
+            "description": "Automatically extract themes from transcripts using n-gram analysis. Use when user wants to find common themes across multiple documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Document IDs to analyze (null = all documents)"
+                    },
+                    "min_frequency": {
+                        "type": "integer",
+                        "description": "Minimum times a theme must appear (default: 3)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_kappa",
+            "description": "Calculate Cohen's Kappa inter-rater reliability between two coders. Use to assess coding agreement.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "coder1_codes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Codes from coder 1"
+                    },
+                    "coder2_codes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Codes from coder 2 (same length as coder1)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["cohen_kappa"],
+                        "description": "Reliability method (default: cohen_kappa)"
+                    }
+                },
+                "required": ["coder1_codes", "coder2_codes"]
+            }
+        }
+    },
+    
+    # ---------------------------------------------------------------------
+    # Data Cleaning Magic
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_data_quality",
+            "description": "Automatically scan dataset for quality issues: missing values, outliers, duplicates, type mismatches, distribution problems. Use before data analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "auto_clean_data",
+            "description": "Automatically fix data quality issues found by scan_data_quality. One-click cleaning for common problems.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fix_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Types to fix: ['missing_values', 'duplicates', 'outliers'] (null = all fixable)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "handle_missing_values",
+            "description": "Handle missing values in specific column with chosen strategy (median, mean, mode, forward_fill, knn).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "column": {
+                        "type": "string",
+                        "description": "Column name to handle missing values"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["median", "mean", "mode", "forward_fill", "knn"],
+                        "description": "Imputation method"
+                    }
+                },
+                "required": ["column", "method"]
+            }
+        }
+    },
+    
+    # ---------------------------------------------------------------------
+    # Advanced Statistics
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "run_pca",
+            "description": "Run Principal Component Analysis for dimensionality reduction. Use when user has many correlated variables and wants to reduce them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "variables": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Variables to include (null = all numeric)"
+                    },
+                    "n_components": {
+                        "type": "integer",
+                        "description": "Number of components to extract (null = all)"
+                    },
+                    "standardize": {
+                        "type": "boolean",
+                        "description": "Whether to standardize variables first (default: true)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_factor_analysis",
+            "description": "Run Exploratory Factor Analysis to identify latent factors. Use when user wants to find underlying constructs in survey/scale data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "variables": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Variables to analyze"
+                    },
+                    "n_factors": {
+                        "type": "integer",
+                        "description": "Number of factors to extract (default: 3)"
+                    },
+                    "rotation": {
+                        "type": "string",
+                        "enum": ["varimax", "promax"],
+                        "description": "Rotation method (default: varimax)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_mediation",
+            "description": "Run mediation analysis to test if M mediates X → Y relationship (Baron & Kenny approach with bootstrap CI). Use for testing indirect effects.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "X": {
+                        "type": "string",
+                        "description": "Independent variable (predictor)"
+                    },
+                    "M": {
+                        "type": "string",
+                        "description": "Mediator variable"
+                    },
+                    "Y": {
+                        "type": "string",
+                        "description": "Dependent variable (outcome)"
+                    },
+                    "bootstrap_samples": {
+                        "type": "integer",
+                        "description": "Number of bootstrap samples for CI (default: 5000)"
+                    }
+                },
+                "required": ["X", "M", "Y"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_moderation",
+            "description": "Run moderation analysis to test if W moderates X → Y relationship (interaction effect). Use to test conditional effects.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "X": {
+                        "type": "string",
+                        "description": "Independent variable (predictor)"
+                    },
+                    "W": {
+                        "type": "string",
+                        "description": "Moderator variable"
+                    },
+                    "Y": {
+                        "type": "string",
+                        "description": "Dependent variable (outcome)"
+                    },
+                    "center_variables": {
+                        "type": "boolean",
+                        "description": "Whether to mean-center X and W (default: true)"
+                    }
+                },
+                "required": ["X", "W", "Y"]
+            }
+        }
+    },
+    
+    # ---------------------------------------------------------------------
+    # Power Analysis
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_sample_size",
+            "description": "Calculate required sample size for a statistical test given effect size and desired power. Use for grant proposals and study planning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "test_type": {
+                        "type": "string",
+                        "enum": ["ttest", "correlation", "anova", "regression"],
+                        "description": "Type of statistical test"
+                    },
+                    "effect_size": {
+                        "type": "number",
+                        "description": "Expected effect size (Cohen's d for t-test, r for correlation, f for ANOVA, f² for regression)"
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level (default: 0.05)"
+                    },
+                    "power": {
+                        "type": "number",
+                        "description": "Desired statistical power (default: 0.80)"
+                    },
+                    "n_groups": {
+                        "type": "integer",
+                        "description": "Number of groups (required for ANOVA)"
+                    },
+                    "n_predictors": {
+                        "type": "integer",
+                        "description": "Number of predictors (required for regression)"
+                    }
+                },
+                "required": ["test_type", "effect_size"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_power",
+            "description": "Calculate achieved statistical power given sample size and effect size. Use to assess whether existing study is adequately powered.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "test_type": {
+                        "type": "string",
+                        "enum": ["ttest", "correlation", "anova", "regression"],
+                        "description": "Type of statistical test"
+                    },
+                    "effect_size": {
+                        "type": "number",
+                        "description": "Effect size"
+                    },
+                    "n": {
+                        "type": "integer",
+                        "description": "Sample size (per group for t-test/ANOVA, total for correlation/regression)"
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level (default: 0.05)"
+                    },
+                    "n_groups": {
+                        "type": "integer",
+                        "description": "Number of groups (for ANOVA)"
+                    },
+                    "n_predictors": {
+                        "type": "integer",
+                        "description": "Number of predictors (for regression)"
+                    }
+                },
+                "required": ["test_type", "effect_size", "n"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_mde",
+            "description": "Calculate minimum detectable effect size given sample size and power. Use to understand what effects can be reliably detected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "test_type": {
+                        "type": "string",
+                        "enum": ["ttest", "anova"],
+                        "description": "Type of statistical test"
+                    },
+                    "n": {
+                        "type": "integer",
+                        "description": "Sample size"
+                    },
+                    "alpha": {
+                        "type": "number",
+                        "description": "Significance level (default: 0.05)"
+                    },
+                    "power": {
+                        "type": "number",
+                        "description": "Desired power (default: 0.80)"
+                    },
+                    "n_groups": {
+                        "type": "integer",
+                        "description": "Number of groups (for ANOVA)"
+                    }
+                },
+                "required": ["test_type", "n"]
+            }
+        }
+    },
+    
+    # ---------------------------------------------------------------------
+    # Literature Synthesis AI
+    # ---------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "add_paper",
+            "description": "Add a paper to literature synthesis for systematic review. Use when building a literature review across multiple papers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_id": {
+                        "type": "string",
+                        "description": "Unique paper identifier"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Paper title"
+                    },
+                    "abstract": {
+                        "type": "string",
+                        "description": "Paper abstract"
+                    },
+                    "year": {
+                        "type": "integer",
+                        "description": "Publication year"
+                    },
+                    "authors": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of author names"
+                    },
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Paper keywords"
+                    },
+                    "findings": {
+                        "type": "string",
+                        "description": "Key findings/conclusion"
+                    }
+                },
+                "required": ["paper_id", "title", "abstract"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_lit_themes",
+            "description": "Extract common themes across all papers in literature synthesis using n-gram analysis. Use to find recurring topics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_papers": {
+                        "type": "integer",
+                        "description": "Minimum papers mentioning theme (default: 3)"
+                    },
+                    "theme_length": {
+                        "type": "integer",
+                        "description": "Length of n-grams for themes (default: 2)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_research_gaps",
+            "description": "Identify research gaps: understudied time periods, underused methods, emerging themes, underrepresented contexts. Use to find dissertation topics.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_synthesis_matrix",
+            "description": "Create synthesis matrix comparing papers across dimensions (method, sample_size, findings, population). Use for systematic review tables.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dimensions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Dimensions to compare (default: ['method', 'findings'])"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_contradictions",
+            "description": "Find papers with contradictory findings on the same topics. Use to identify debates in literature.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
 ]
 
 

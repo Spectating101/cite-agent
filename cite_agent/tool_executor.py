@@ -9,6 +9,12 @@ import json
 from typing import Dict, Any, Optional
 from pathlib import Path
 from .research_assistant import DataAnalyzer, ASCIIPlotter, RExecutor, ProjectDetector
+from .r_workspace_bridge import RWorkspaceBridge
+from .qualitative_coding import QualitativeCodingAssistant
+from .data_cleaning_magic import DataCleaningWizard
+from .advanced_statistics import AdvancedStatistics
+from .power_analysis import PowerAnalyzer
+from .literature_synthesis import LiteratureSynthesizer
 
 
 class ToolExecutor:
@@ -841,3 +847,580 @@ class ToolExecutor:
 
         except Exception as e:
             return {"error": f"Assumption check failed: {str(e)}"}
+    # =====================================================================
+    # MAGICAL RESEARCH MODULES - Advanced Research Assistant Features
+    # =====================================================================
+
+    # ---------------------------------------------------------------------
+    # R Workspace Bridge - Access R console objects
+    # ---------------------------------------------------------------------
+
+    def _execute_list_r_objects(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List all objects in R workspace"""
+        workspace_path = args.get("workspace_path")
+
+        if self.debug_mode:
+            print(f"🔬 [R Bridge] Listing R workspace objects")
+
+        try:
+            if not hasattr(self, '_r_bridge'):
+                self._r_bridge = RWorkspaceBridge()
+
+            result = self._r_bridge.list_objects(workspace_path)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to list R objects: {str(e)}"}
+
+    def _execute_get_r_dataframe(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Retrieve a dataframe from R workspace"""
+        object_name = args.get("object_name", "")
+        workspace_path = args.get("workspace_path")
+
+        if not object_name:
+            return {"error": "Missing required parameter: object_name"}
+
+        if self.debug_mode:
+            print(f"🔬 [R Bridge] Retrieving R object: {object_name}")
+
+        try:
+            if not hasattr(self, '_r_bridge'):
+                self._r_bridge = RWorkspaceBridge()
+
+            result = self._r_bridge.get_dataframe(object_name, workspace_path)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to retrieve R dataframe: {str(e)}"}
+
+    def _execute_execute_r_and_capture(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute R code and capture specific objects"""
+        r_code = args.get("r_code", "")
+        capture_objects = args.get("capture_objects", [])
+
+        if not r_code:
+            return {"error": "Missing required parameter: r_code"}
+
+        if self.debug_mode:
+            print(f"🔬 [R Bridge] Executing R code and capturing {len(capture_objects)} objects")
+
+        try:
+            if not hasattr(self, '_r_bridge'):
+                self._r_bridge = RWorkspaceBridge()
+
+            result = self._r_bridge.execute_and_capture(r_code, capture_objects)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to execute R code: {str(e)}"}
+
+    # ---------------------------------------------------------------------
+    # Qualitative Coding Suite - Qualitative research automation
+    # ---------------------------------------------------------------------
+
+    def _execute_create_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new qualitative code"""
+        code_name = args.get("code_name", "")
+        description = args.get("description", "")
+        parent_code = args.get("parent_code")
+
+        if not code_name:
+            return {"error": "Missing required parameter: code_name"}
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Creating code: {code_name}")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.create_code(code_name, description, parent_code)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to create code: {str(e)}"}
+
+    def _execute_load_transcript(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Load a transcript for qualitative coding"""
+        doc_id = args.get("doc_id", "")
+        content = args.get("content", "")
+        format_type = args.get("format_type", "plain")
+
+        if not doc_id or not content:
+            return {"error": "Missing required parameters: doc_id, content"}
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Loading transcript: {doc_id}")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.load_transcript(doc_id, content, format_type)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to load transcript: {str(e)}"}
+
+    def _execute_code_segment(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Code a segment of text"""
+        doc_id = args.get("doc_id", "")
+        line_start = args.get("line_start")
+        line_end = args.get("line_end")
+        codes = args.get("codes", [])
+
+        if not doc_id or line_start is None or line_end is None or not codes:
+            return {"error": "Missing required parameters: doc_id, line_start, line_end, codes"}
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Coding lines {line_start}-{line_end} in {doc_id}")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.code_segment(doc_id, line_start, line_end, codes)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to code segment: {str(e)}"}
+
+    def _execute_get_coded_excerpts(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get all excerpts coded with a specific code"""
+        code_name = args.get("code_name", "")
+
+        if not code_name:
+            return {"error": "Missing required parameter: code_name"}
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Getting excerpts for code: {code_name}")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.get_coded_excerpts(code_name)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to get excerpts: {str(e)}"}
+
+    def _execute_auto_extract_themes(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Automatically extract themes from coded documents"""
+        doc_ids = args.get("doc_ids")
+        min_frequency = args.get("min_frequency", 3)
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Auto-extracting themes (min_freq={min_frequency})")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.auto_extract_themes(doc_ids, min_frequency)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to extract themes: {str(e)}"}
+
+    def _execute_calculate_kappa(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate inter-rater reliability (Cohen's Kappa)"""
+        coder1_codes = args.get("coder1_codes", [])
+        coder2_codes = args.get("coder2_codes", [])
+        method = args.get("method", "cohen_kappa")
+
+        if not coder1_codes or not coder2_codes:
+            return {"error": "Missing required parameters: coder1_codes, coder2_codes"}
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Calculating {method}")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            # Convert to CodedSegment objects (simplified for this interface)
+            from .qualitative_coding import CodedSegment
+            segments1 = [CodedSegment(doc_id="", line_start=i, line_end=i, codes=[c], text="") for i, c in enumerate(coder1_codes)]
+            segments2 = [CodedSegment(doc_id="", line_start=i, line_end=i, codes=[c], text="") for i, c in enumerate(coder2_codes)]
+
+            result = self._qual_coder.calculate_inter_rater_reliability(segments1, segments2, method)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to calculate kappa: {str(e)}"}
+
+    # ---------------------------------------------------------------------
+    # Data Cleaning Magic - Automated data quality
+    # ---------------------------------------------------------------------
+
+    def _execute_scan_data_quality(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Scan dataset for quality issues"""
+        if self.debug_mode:
+            print(f"🧹 [Data Cleaning] Scanning data quality issues")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            # Create wizard from existing dataframe
+            wizard = DataCleaningWizard(self._data_analyzer.df)
+            result = wizard.scan_all_issues()
+
+            # Store wizard for auto-fix
+            self._data_wizard = wizard
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to scan data quality: {str(e)}"}
+
+    def _execute_auto_clean_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Auto-fix data quality issues"""
+        fix_types = args.get("fix_types")
+
+        if self.debug_mode:
+            print(f"🧹 [Data Cleaning] Auto-fixing data issues")
+
+        try:
+            if not hasattr(self, '_data_wizard'):
+                return {"error": "Run scan_data_quality first"}
+
+            result = self._data_wizard.auto_fix_issues(fix_types)
+
+            # Update the main dataframe
+            self._data_analyzer.df = self._data_wizard.df
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to auto-clean data: {str(e)}"}
+
+    def _execute_handle_missing_values(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle missing values with specific strategy"""
+        column = args.get("column", "")
+        method = args.get("method", "median")
+
+        if not column:
+            return {"error": "Missing required parameter: column"}
+
+        if self.debug_mode:
+            print(f"🧹 [Data Cleaning] Handling missing values in {column} using {method}")
+
+        try:
+            if not hasattr(self, '_data_wizard'):
+                # Create wizard if doesn't exist
+                if not hasattr(self, '_data_analyzer'):
+                    return {"error": "No dataset loaded. Use load_dataset first."}
+                self._data_wizard = DataCleaningWizard(self._data_analyzer.df)
+
+            result = self._data_wizard.handle_missing_values(column, method)
+
+            # Update the main dataframe
+            self._data_analyzer.df = self._data_wizard.df
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to handle missing values: {str(e)}"}
+
+    # ---------------------------------------------------------------------
+    # Advanced Statistics - PCA, Factor Analysis, Mediation, Moderation
+    # ---------------------------------------------------------------------
+
+    def _execute_run_pca(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Run Principal Component Analysis"""
+        variables = args.get("variables")
+        n_components = args.get("n_components")
+        standardize = args.get("standardize", True)
+
+        if self.debug_mode:
+            print(f"📊 [Advanced Stats] Running PCA")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            stats = AdvancedStatistics(self._data_analyzer.df)
+            result = stats.principal_component_analysis(variables, n_components, standardize)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"PCA failed: {str(e)}"}
+
+    def _execute_run_factor_analysis(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Run Exploratory Factor Analysis"""
+        variables = args.get("variables")
+        n_factors = args.get("n_factors", 3)
+        rotation = args.get("rotation", "varimax")
+
+        if self.debug_mode:
+            print(f"📊 [Advanced Stats] Running Factor Analysis ({n_factors} factors)")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            stats = AdvancedStatistics(self._data_analyzer.df)
+            result = stats.exploratory_factor_analysis(variables, n_factors, rotation)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Factor analysis failed: {str(e)}"}
+
+    def _execute_run_mediation(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Run mediation analysis (X → M → Y)"""
+        X = args.get("X", "")
+        M = args.get("M", "")
+        Y = args.get("Y", "")
+        bootstrap_samples = args.get("bootstrap_samples", 5000)
+
+        if not X or not M or not Y:
+            return {"error": "Missing required parameters: X, M, Y"}
+
+        if self.debug_mode:
+            print(f"📊 [Advanced Stats] Running mediation: {X} → {M} → {Y}")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            stats = AdvancedStatistics(self._data_analyzer.df)
+            result = stats.mediation_analysis(X, M, Y, bootstrap_samples)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Mediation analysis failed: {str(e)}"}
+
+    def _execute_run_moderation(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Run moderation analysis (X*W → Y)"""
+        X = args.get("X", "")
+        W = args.get("W", "")
+        Y = args.get("Y", "")
+        center_variables = args.get("center_variables", True)
+
+        if not X or not W or not Y:
+            return {"error": "Missing required parameters: X, W, Y"}
+
+        if self.debug_mode:
+            print(f"📊 [Advanced Stats] Running moderation: {X}*{W} → {Y}")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            stats = AdvancedStatistics(self._data_analyzer.df)
+            result = stats.moderation_analysis(X, W, Y, center_variables)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Moderation analysis failed: {str(e)}"}
+
+    # ---------------------------------------------------------------------
+    # Power Analysis - Sample size and power calculations
+    # ---------------------------------------------------------------------
+
+    def _execute_calculate_sample_size(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate required sample size"""
+        test_type = args.get("test_type", "")
+        effect_size = args.get("effect_size")
+        alpha = args.get("alpha", 0.05)
+        power = args.get("power", 0.80)
+        n_groups = args.get("n_groups")
+        n_predictors = args.get("n_predictors")
+
+        if not test_type or effect_size is None:
+            return {"error": "Missing required parameters: test_type, effect_size"}
+
+        if self.debug_mode:
+            print(f"🔬 [Power Analysis] Calculating sample size for {test_type}")
+
+        try:
+            analyzer = PowerAnalyzer()
+
+            if test_type == "ttest":
+                result = analyzer.sample_size_ttest(effect_size, alpha, power)
+            elif test_type == "correlation":
+                result = analyzer.sample_size_correlation(effect_size, alpha, power)
+            elif test_type == "anova":
+                if n_groups is None:
+                    return {"error": "Missing required parameter: n_groups for ANOVA"}
+                result = analyzer.sample_size_anova(effect_size, n_groups, alpha, power)
+            elif test_type == "regression":
+                if n_predictors is None:
+                    return {"error": "Missing required parameter: n_predictors for regression"}
+                result = analyzer.sample_size_regression(effect_size, n_predictors, alpha, power)
+            else:
+                return {"error": f"Unknown test type: {test_type}"}
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Sample size calculation failed: {str(e)}"}
+
+    def _execute_calculate_power(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate achieved statistical power"""
+        test_type = args.get("test_type", "")
+        effect_size = args.get("effect_size")
+        n = args.get("n")
+        alpha = args.get("alpha", 0.05)
+        n_groups = args.get("n_groups")
+        n_predictors = args.get("n_predictors")
+
+        if not test_type or effect_size is None or n is None:
+            return {"error": "Missing required parameters: test_type, effect_size, n"}
+
+        if self.debug_mode:
+            print(f"🔬 [Power Analysis] Calculating achieved power for {test_type}")
+
+        try:
+            analyzer = PowerAnalyzer()
+
+            kwargs = {}
+            if n_groups is not None:
+                kwargs['n_groups'] = n_groups
+            if n_predictors is not None:
+                kwargs['n_predictors'] = n_predictors
+
+            result = analyzer.calculate_achieved_power(test_type, effect_size, n, alpha, **kwargs)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Power calculation failed: {str(e)}"}
+
+    def _execute_calculate_mde(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate minimum detectable effect"""
+        test_type = args.get("test_type", "")
+        n = args.get("n")
+        alpha = args.get("alpha", 0.05)
+        power = args.get("power", 0.80)
+        n_groups = args.get("n_groups")
+
+        if not test_type or n is None:
+            return {"error": "Missing required parameters: test_type, n"}
+
+        if self.debug_mode:
+            print(f"🔬 [Power Analysis] Calculating minimum detectable effect for {test_type}")
+
+        try:
+            analyzer = PowerAnalyzer()
+
+            kwargs = {}
+            if n_groups is not None:
+                kwargs['n_groups'] = n_groups
+
+            result = analyzer.minimum_detectable_effect(test_type, n, alpha, power, **kwargs)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"MDE calculation failed: {str(e)}"}
+
+    # ---------------------------------------------------------------------
+    # Literature Synthesis AI - Systematic review automation
+    # ---------------------------------------------------------------------
+
+    def _execute_add_paper(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Add a paper to literature synthesis"""
+        paper_id = args.get("paper_id", "")
+        title = args.get("title", "")
+        abstract = args.get("abstract", "")
+        year = args.get("year")
+        authors = args.get("authors")
+        keywords = args.get("keywords")
+        findings = args.get("findings")
+
+        if not paper_id or not title or not abstract:
+            return {"error": "Missing required parameters: paper_id, title, abstract"}
+
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Adding paper: {paper_id}")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                self._lit_synth = LiteratureSynthesizer()
+
+            result = self._lit_synth.add_paper(paper_id, title, abstract, year, authors, keywords, findings)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to add paper: {str(e)}"}
+
+    def _execute_extract_lit_themes(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract common themes across papers"""
+        min_papers = args.get("min_papers", 3)
+        theme_length = args.get("theme_length", 2)
+
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Extracting themes (min_papers={min_papers})")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            result = self._lit_synth.extract_common_themes(min_papers, theme_length)
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to extract themes: {str(e)}"}
+
+    def _execute_find_research_gaps(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Identify research gaps in literature"""
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Identifying research gaps")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            result = self._lit_synth.identify_research_gaps()
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to find research gaps: {str(e)}"}
+
+    def _execute_create_synthesis_matrix(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Create synthesis matrix comparing papers"""
+        dimensions = args.get("dimensions", ["method", "findings"])
+
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Creating synthesis matrix")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            result = self._lit_synth.create_synthesis_matrix(dimensions)
+
+            # Remove dataframe from result (not JSON serializable)
+            if "dataframe" in result:
+                del result["dataframe"]
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to create synthesis matrix: {str(e)}"}
+
+    def _execute_find_contradictions(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Find contradictory findings in literature"""
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Finding contradictory findings")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            result = self._lit_synth.find_contradictory_findings()
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to find contradictions: {str(e)}"}
