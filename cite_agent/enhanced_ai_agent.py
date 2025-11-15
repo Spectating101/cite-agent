@@ -1676,9 +1676,12 @@ class EnhancedNocturnalAgent:
             try:
                 if self.llm_provider == "cerebras":
                     from openai import OpenAI
+                    import httpx
+                    http_client = httpx.Client(verify=True, timeout=60.0, trust_env=True)
                     self.client = OpenAI(
                         api_key=key,
-                        base_url="https://api.cerebras.ai/v1"
+                        base_url="https://api.cerebras.ai/v1",
+                        http_client=http_client
                     )
                 else:
                     self.client = Groq(api_key=key)
@@ -1715,9 +1718,12 @@ class EnhancedNocturnalAgent:
             try:
                 if self.llm_provider == "cerebras":
                     from openai import OpenAI
+                    import httpx
+                    http_client = httpx.Client(verify=True, timeout=60.0, trust_env=True)
                     self.client = OpenAI(
                         api_key=key,
-                        base_url="https://api.cerebras.ai/v1"
+                        base_url="https://api.cerebras.ai/v1",
+                        http_client=http_client
                     )
                 else:
                     self.client = Groq(api_key=key)
@@ -1742,9 +1748,12 @@ class EnhancedNocturnalAgent:
         try:
             if self.llm_provider == "cerebras":
                 from openai import OpenAI
+                import httpx
+                http_client = httpx.Client(verify=True, timeout=60.0, trust_env=True)
                 self.client = OpenAI(
                     api_key=new_key,
-                    base_url="https://api.cerebras.ai/v1"
+                    base_url="https://api.cerebras.ai/v1",
+                    http_client=http_client
                 )
             else:
                 from groq import Groq
@@ -2158,9 +2167,9 @@ class EnhancedNocturnalAgent:
                             if self.llm_provider == "cerebras":
                                 # Cerebras uses OpenAI client with custom base URL
                                 from openai import OpenAI
-                                # Disable proxy for OpenAI client (incompatible with httpx version)
+                                # CRITICAL: trust_env=True needed for container proxy
                                 import httpx
-                                http_client = httpx.Client(verify=True, timeout=60.0)
+                                http_client = httpx.Client(verify=True, timeout=60.0, trust_env=True)
                                 self.client = OpenAI(
                                     api_key=self.api_keys[0],
                                     base_url="https://api.cerebras.ai/v1",
