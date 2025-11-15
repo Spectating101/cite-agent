@@ -2603,8 +2603,14 @@ IMPORTANT RULES:
 9. For creating directories: mkdir dirname
 10. ALWAYS include 2>/dev/null to suppress errors from find and grep
 11. 🚨 MULTI-STEP QUERIES: For queries like "read X and do Y", ONLY generate the FIRST step (reading X). The LLM will handle subsequent steps after seeing the file contents.
-12. 🚨 NEVER use python -m py_compile or other code execution for finding bugs - just read the file with cat/head
-13. 🚨 FOR GREP: When searching in a DIRECTORY (not a specific file), ALWAYS use -r flag for recursive search: grep -rn 'pattern' /path/to/dir 2>/dev/null
+12. 🚨 NEVER EXECUTE CODE: Do NOT run python, node, bash scripts, or any interpreters
+13. 🚨 FOR EXPLANATION QUERIES: "explain function X" → grep -A 50 'def X' filename (READ, don't execute!)
+14. 🚨 FILE PATH INFERENCE: If file mentioned exists in a known subdirectory, include the path
+    - "enhanced_ai_agent.py" → cite_agent/enhanced_ai_agent.py
+    - "cli.py" → cite_agent/cli.py
+    - Use find to locate file if path unknown: find . -name 'filename' 2>/dev/null | head -1
+15. 🚨 NEVER use python -m py_compile or other code execution for finding bugs - just read the file with cat/head
+16. 🚨 FOR GREP: When searching in a DIRECTORY (not a specific file), ALWAYS use -r flag for recursive search: grep -rn 'pattern' /path/to/dir 2>/dev/null
 
 Examples:
 "where am i?" → {{"action": "execute", "command": "pwd", "reason": "Show current directory", "updates_context": false}}
@@ -2614,6 +2620,8 @@ Examples:
 "show me calc.R" → {{"action": "execute", "command": "head -100 calc.R", "reason": "Display file contents", "updates_context": true}}
 "read the main function in cli.py" → {{"action": "execute", "command": "grep -A 50 'def main' cli.py", "reason": "Show main function definition", "updates_context": false}}
 "explain the process function in analyzer.py" → {{"action": "execute", "command": "grep -A 50 'def process' analyzer.py", "reason": "Show process function", "updates_context": false}}
+"explain what _analyze_request_type does in enhanced_ai_agent.py" → {{"action": "execute", "command": "grep -A 50 'def _analyze_request_type' cite_agent/enhanced_ai_agent.py", "reason": "Show function to explain", "updates_context": false}}
+"what libraries does cli.py import?" → {{"action": "execute", "command": "head -50 cite_agent/cli.py | grep '^import\\|^from'", "reason": "Show imports", "updates_context": false}}
 "create test directory" → {{"action": "execute", "command": "mkdir test && echo 'Created test/'", "reason": "Create new directory", "updates_context": true}}
 "create empty config.json" → {{"action": "execute", "command": "touch config.json && echo 'Created config.json'", "reason": "Create empty file", "updates_context": true}}
 "write hello.txt with content Hello World" → {{"action": "execute", "command": "echo 'Hello World' > hello.txt", "reason": "Create file with content", "updates_context": true}}
@@ -3752,6 +3760,10 @@ JSON:"""
             
             allow_shell_commands = "shell" in request_analysis.get("apis", []) or request_analysis.get("type") in {"system", "comprehensive+system"}
             if api_results.get("files_context") or api_results.get("files_missing") or api_results.get("files_forbidden"):
+                allow_shell_commands = False
+            # CRITICAL: If shell planner already executed commands, do NOT extract more from LLM response
+            # (shell_info means shell planner already ran in the production path)
+            if api_results.get("shell_info"):
                 allow_shell_commands = False
 
             commands = re.findall(r'`([^`]+)`', response_text) if allow_shell_commands else []
