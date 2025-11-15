@@ -398,6 +398,7 @@ class EnhancedNocturnalAgent:
             archive_env = (
                 os.getenv("ARCHIVE_API_URL")
                 or os.getenv("NOCTURNAL_ARCHIVE_API_URL")
+                or os.getenv("NOCTURNAL_API_URL")  # Also check NOCTURNAL_API_URL from .env.local
             )
             finsight_env = (
                 os.getenv("FINSIGHT_API_URL")
