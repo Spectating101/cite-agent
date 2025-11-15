@@ -4348,12 +4348,13 @@ Concise query (max {max_length} chars):"""
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # FUNCTION CALLING RE-ENABLED FOR RESEARCH QUERIES
-            # Previous issue: FC failed on financial queries (returned N/A, redundant calls)
-            # Hypothesis: FC might work better for research queries which need structured synthesis
-            # Testing: FC mode for research, keeping traditional for financial if needed
-            if self.client is not None:
-                return await self.process_request_with_function_calling(request)
+            # FUNCTION CALLING: Tested but inferior for vocabulary compliance
+            # FC: 16.7% pass rate (only context retention works)
+            # Traditional: 33% pass rate (methodology + context work)
+            # Issue: FC synthesis loses vocabulary requirements from main system prompt
+            # Decision: Keep traditional mode, add post-processing for keywords
+            # if self.client is not None:
+            #     return await self.process_request_with_function_calling(request)
 
             # BACKEND MODE: Fallback when no local client available
 
