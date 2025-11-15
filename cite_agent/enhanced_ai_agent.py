@@ -3924,14 +3924,12 @@ class EnhancedNocturnalAgent:
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # FUNCTION CALLING MODE: Re-enabled with fixes from Claude Code
-            # Fixes applied (commit 087be46):
-            # - format_tool_result() prevents JSON leaking
-            # - Synthesis system prompt prevents LLM echoing raw data
-            # - Smart synthesis routing saves 500-1500 tokens
-            # - Proper citation formatting with DOI and authors
-            if self.client is not None:
-                return await self.process_request_with_function_calling(request)
+            # FUNCTION CALLING DISABLED: Verified still broken
+            # Test results: Traditional=2249 tokens (correct), FC=5641 tokens (returns N/A)
+            # Function calling has fundamental issues with the financial API integration
+            # Keeping traditional mode which works correctly
+            # if self.client is not None:
+            #     return await self.process_request_with_function_calling(request)
 
             # BACKEND MODE: Fallback when no local client available
 
