@@ -31,6 +31,11 @@ from .conversation_archive import ConversationArchive
 from .function_calling import FunctionCallingAgent
 from .tool_executor import ToolExecutor
 
+# Infrastructure for production sophistication
+from .observability import ObservabilitySystem, EventType
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
+from .request_queue import IntelligentRequestQueue, RequestPriority
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -148,6 +153,43 @@ class EnhancedNocturnalAgent:
         except Exception:
             self._health_ttl = 30.0
         self._recent_sources: List[Dict[str, Any]] = []
+
+        # Infrastructure for production sophistication
+        self.observability = ObservabilitySystem()
+        self.circuit_breakers = {
+            'backend': CircuitBreaker(
+                name="backend_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.6,
+                    min_requests_for_decision=5,
+                    open_timeout=30.0
+                )
+            ),
+            'archive': CircuitBreaker(
+                name="archive_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.5,
+                    min_requests_for_decision=3,
+                    open_timeout=20.0
+                )
+            ),
+            'financial': CircuitBreaker(
+                name="financial_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.5,
+                    min_requests_for_decision=3,
+                    open_timeout=20.0
+                )
+            )
+        }
+        self.request_queue = IntelligentRequestQueue(
+            max_concurrent_global=50,
+            max_concurrent_per_user=5
+        )
+
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            logger.info("Infrastructure initialized: Observability, Circuit Breakers, Request Queue")
 
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
