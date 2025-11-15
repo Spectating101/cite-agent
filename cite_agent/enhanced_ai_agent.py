@@ -3955,7 +3955,22 @@ Concise query (max {max_length} chars):"""
             'standard deviation', 'trend', 'forecast', 'model', 'predict',
             'rate of', 'ratio', 'growth rate', 'change in', 'compared to'
         ]
-        
+
+        # Data analysis indicators (CSV, datasets, statistical analysis)
+        data_analysis_keywords = [
+            'dataset', 'data.csv', '.csv', '.xlsx', '.xls', 'excel', 'spreadsheet',
+            'load data', 'analyze data', 'data analysis', 'statistical analysis',
+            'regression', 'correlation', 'linear regression', 'logistic regression',
+            'descriptive statistics', 'summary statistics', 'stats',
+            'plot', 'scatter plot', 'histogram', 'bar chart', 'visualize',
+            'test score', 'study hours', 'anova', 't-test', 'chi-square',
+            'normality', 'assumptions', 'check assumptions',
+            'r squared', 'r²', 'p-value', 'confidence interval',
+            'sample size', 'observations', 'variables', 'predictor',
+            'run regression', 'run analysis', 'analyze csv',
+            'r code', 'r script', 'execute r', 'run r'
+        ]
+
         # System/technical indicators
         system_keywords = [
             'file', 'files', 'directory', 'directories', 'folder', 'folders',
@@ -4039,6 +4054,10 @@ Concise query (max {max_length} chars):"""
         if any(keyword in question_lower for keyword in research_keywords):
             matched_types.append("research")
             apis_to_use.append("archive")
+
+        if any(keyword in question_lower for keyword in data_analysis_keywords):
+            matched_types.append("data_analysis")
+            apis_to_use.append("data_analysis")
 
         # REMOVED: Auto-adding Archive for qualitative mode caused false positives
         # Qualitative queries should have explicit research keywords to trigger Archive
@@ -5158,6 +5177,25 @@ JSON:"""
                         }
                         api_results["financial"] = financial_payload
                         tools_used.append("finsight_api")
+
+                # Data Analysis tools (CSV, statistics, R)
+                if "data_analysis" in request_analysis.get("apis", []):
+                    # Data analysis queries need context from the query to determine which tool
+                    # For now, provide info that data analysis tools are available
+                    api_results["data_analysis_available"] = {
+                        "tools": ["load_dataset", "analyze_data", "run_regression", "plot_data", "run_r_code"],
+                        "message": "Data analysis tools are available. Specify the CSV file path and analysis needed.",
+                        "capabilities": [
+                            "Load CSV/Excel datasets",
+                            "Descriptive statistics (mean, median, std, quartiles)",
+                            "Correlation analysis (Pearson, Spearman)",
+                            "Linear/multiple regression",
+                            "ASCII plotting (scatter, bar, histogram)",
+                            "R code execution",
+                            "Statistical assumption checking"
+                        ]
+                    }
+                    tools_used.append("data_analysis_ready")
 
             # ========================================================================
             # PRIORITY 3: WEB SEARCH (Fallback - only if shell didn't handle AND no data yet)
