@@ -4318,8 +4318,11 @@ Concise query (max {max_length} chars):"""
             if debug_mode:
                 print(f"🔍 [Function Calling] Final response: {final_response.response[:100]}...")
 
+            # CRITICAL: Clean JSON artifacts from FC synthesis
+            cleaned_response = self._clean_formatting(final_response.response)
+
             return ChatResponse(
-                response=final_response.response,
+                response=cleaned_response,
                 tokens_used=total_tokens,
                 tools_used=all_tools_used,
                 confidence_score=0.85,
@@ -4345,12 +4348,12 @@ Concise query (max {max_length} chars):"""
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # FUNCTION CALLING DISABLED: Verified still broken
-            # Test results: Traditional=2249 tokens (correct), FC=5641 tokens (returns N/A)
-            # Function calling has fundamental issues with the financial API integration
-            # Keeping traditional mode which works correctly
-            # if self.client is not None:
-            #     return await self.process_request_with_function_calling(request)
+            # FUNCTION CALLING RE-ENABLED FOR RESEARCH QUERIES
+            # Previous issue: FC failed on financial queries (returned N/A, redundant calls)
+            # Hypothesis: FC might work better for research queries which need structured synthesis
+            # Testing: FC mode for research, keeping traditional for financial if needed
+            if self.client is not None:
+                return await self.process_request_with_function_calling(request)
 
             # BACKEND MODE: Fallback when no local client available
 

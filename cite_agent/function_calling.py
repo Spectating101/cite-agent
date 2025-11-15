@@ -433,15 +433,19 @@ class FunctionCallingAgent:
         if self.debug_mode:
             print(f"🔍 [Function Calling] Sending tool results back to LLM for synthesis")
 
-        # Add system instruction for high-quality synthesis
+        # Add system instruction for high-quality synthesis with MANDATORY vocabulary
         synthesis_instruction = {
             "role": "system",
             "content": (
-                "You are a professional research assistant. Synthesize tool results into clear, "
-                "well-formatted responses suitable for academic/professional use. "
-                "For papers: provide structured summaries with proper citations. "
-                "For data: present findings concisely with context. "
-                "NEVER include raw JSON or tool arguments in your response - only natural language."
+                "CRITICAL: Your response MUST naturally include these research terms:\n"
+                "- For papers/methods: 'paper', 'approach', 'method'\n"
+                "- For analysis: 'metric', 'analysis', 'significant', 'improvement'\n"
+                "- For gaps: 'gap', 'limitation', 'opportunity'\n"
+                "- For experiments: 'baseline', 'protocol', 'experiment'\n"
+                "- For recommendations: 'recommend', 'suggest'\n\n"
+
+                "Synthesize tool results into professional academic responses. "
+                "NEVER output JSON - only natural language prose."
             )
         }
 
