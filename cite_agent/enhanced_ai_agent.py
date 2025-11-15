@@ -2915,6 +2915,8 @@ JSON:"""
                                     "safety_level": safety_level
                                 }
                                 tools_used.append("shell_execution")
+                                if debug_mode:
+                                    print(f"✅ Stored shell_info: command={command[:50]}..., output_len={len(output)}")
                                 
                                 # Update file context if needed
                                 if updates_context:
@@ -3414,10 +3416,11 @@ JSON:"""
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
-            
-            # Call appropriate APIs based on request type
-            api_results = {}
-            tools_used = []
+
+            # IMPORTANT: Don't reset api_results here - it was already populated by shell planner
+            # in the shared production path (lines 2517-3268)
+            # api_results = {}  # REMOVED - was clearing shell_info
+            # tools_used = []  # REMOVED - was clearing tools
 
             # Auto file-reading: detect filenames in the prompt and attach previews
             def _extract_filenames(text: str) -> List[str]:
@@ -3474,6 +3477,8 @@ JSON:"""
 
             workspace_listing: Optional[Dict[str, Any]] = None
             # Only use workspace listing if shell command wasn't already executed
+            if debug_mode:
+                print(f"🔍 Workspace listing check: file_previews={bool(file_previews)}, shell_info={bool(api_results.get('shell_info'))}")
             if not file_previews and not api_results.get("shell_info"):
                 file_browse_keywords = (
                     "list files",
