@@ -1282,6 +1282,136 @@ class EnhancedNocturnalAgent:
             api_results={}
         )
 
+    def _enhance_paper_citations(self, response_text: str, research_data: Dict) -> str:
+        """
+        Enhance response with professionally formatted citations.
+        Formats papers with: Number. Title (FirstAuthor, Year) - citations [DOI]
+        """
+        papers = research_data.get("results", [])
+        if not papers or len(papers) == 0:
+            return response_text
+
+        # Build formatted citation list
+        citation_lines = []
+        for i, paper in enumerate(papers[:10], 1):  # Format up to 10 papers
+            title = paper.get("title", "Unknown")
+            year = paper.get("year", "N/A")
+            citations = paper.get("citationCount", 0) or paper.get("citations_count", 0)
+            authors = paper.get("authors", [])
+            first_author = authors[0].get("name", "Unknown") if authors else "Unknown"
+            doi = paper.get("doi", "") or paper.get("externalIds", {}).get("DOI", "")
+
+            # Format: 1. Title (FirstAuthor, Year) - 104,758 citations [DOI: ...]
+            line = f"{i}. {title}"
+            if first_author != "Unknown":
+                line += f" ({first_author}, {year})"
+            else:
+                line += f" ({year})"
+
+            if citations > 0:
+                line += f" - {citations:,} citations"
+            if doi:
+                line += f" [DOI: {doi}]"
+
+            citation_lines.append(line)
+
+        # Append formatted citations to response
+        if citation_lines:
+            enhanced = response_text + "\n\n**Formatted Citations:**\n" + "\n".join(citation_lines)
+            return enhanced
+
+        return response_text
+
+    def _should_skip_synthesis(self, query: str, api_results: Dict, tools_used: List[str]) -> Tuple[bool, Optional[str]]:
+        """
+        Determine if we can skip backend synthesis and return direct response.
+        Saves 200-800 tokens for simple queries that don't need LLM processing.
+
+        Returns:
+            (should_skip, direct_response) - If should_skip=True, use direct_response
+        """
+        query_lower = query.lower().strip()
+
+        # Case 1: Directory listing with no analysis needed
+        if "shell_info" in api_results and any(word in query_lower for word in ["list", "show", "what's", "whats"]):
+            shell_info = api_results["shell_info"]
+            if "directory_contents" in shell_info or ("output" in shell_info and "ls" in shell_info.get("command", "")):
+                # Check if user wants analysis
+                if not any(word in query_lower for word in ["analyze", "explain", "why", "how", "bug", "error", "problem"]):
+                    listing = shell_info.get("directory_contents") or shell_info.get("output", "")
+                    path = shell_info.get("directory", os.getcwd())
+                    return (True, f"Contents of {path}:\n\n{listing}")
+
+        # Case 2: File read with no analysis
+        if "shell_info" in api_results:
+            shell_info = api_results["shell_info"]
+            command = shell_info.get("command", "")
+            if any(cmd in command for cmd in ["cat ", "head ", "tail "]):
+                if not any(word in query_lower for word in ["analyze", "explain", "fix", "bug", "error", "problem", "why", "how"]):
+                    content = shell_info.get("output", "")
+                    # Extract filename from command
+                    import shlex
+                    try:
+                        parts = shlex.split(command)
+                        filename = parts[-1] if len(parts) > 1 else "file"
+                    except:
+                        filename = "file"
+                    return (True, f"Contents of {filename}:\n\n{content}")
+
+        # Case 3: Pre-calculated financial data with simple "what is" query
+        if "financial" in api_results and len(query_lower.split()) <= 8:
+            # Simple queries like "what is Apple's profit margin"
+            if any(phrase in query_lower for phrase in ["what is", "what's", "show", "get", "tell me"]):
+                # Check if we have calculated margin
+                for key, value in api_results.get("financial", {}).items():
+                    if isinstance(value, dict) and "data" in value:
+                        calc_margin = value["data"].get("profit_margin_calculated")
+                        if calc_margin:
+                            ticker = calc_margin.get("ticker", "Company")
+                            margin_val = calc_margin.get("value", 0)
+                            formula = calc_margin.get("formula", "")
+                            period = calc_margin.get("period", "latest")
+
+                            direct_response = f"{ticker}'s profit margin is {margin_val}% ({period}).\n\n"
+                            direct_response += f"Calculation: {formula}"
+                            return (True, direct_response)
+
+        # Default: Need synthesis
+        return (False, None)
+
+    def _clean_formatting(self, response_text: str) -> str:
+        """
+        Clean up LaTeX artifacts, JSON fragments, and formatting issues.
+        Makes responses more readable and professional.
+        """
+        import re
+
+        cleaned = response_text
+
+        # Remove inline LaTeX like $$formula$$ or $formula$
+        cleaned = re.sub(r'\$\$[^\$]+\$\$', '[formula]', cleaned)
+        cleaned = re.sub(r'\$[^\$]+\$', '[math]', cleaned)
+
+        # Remove accidental JSON fragments (shouldn't happen but safety check)
+        # Only remove if it's clearly leaked JSON (starts with { and has quotes)
+        lines = cleaned.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip lines that look like pure JSON
+            if stripped.startswith('{') and '"' in stripped and ':' in stripped and stripped.endswith('}'):
+                continue
+            filtered_lines.append(line)
+        cleaned = '\n'.join(filtered_lines)
+
+        # Clean up excessive newlines (more than 3 consecutive)
+        cleaned = re.sub(r'\n{4,}', '\n\n\n', cleaned)
+
+        # Remove trailing whitespace on each line
+        cleaned = '\n'.join(line.rstrip() for line in cleaned.split('\n'))
+
+        return cleaned.strip()
+
     def _select_model(
         self,
         request: ChatRequest,
@@ -4832,6 +4962,30 @@ JSON:"""
                     if api_results.get("shell_info"):
                         print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
 
+                # OPTIMIZATION: Check if we can skip synthesis for simple queries
+                skip_synthesis, direct_response = self._should_skip_synthesis(
+                    request.question, api_results, tools_used
+                )
+
+                if skip_synthesis:
+                    if debug_mode:
+                        print(f"🔍 Skipping backend synthesis (returning direct response)")
+
+                    # Clean formatting and enhance if needed
+                    cleaned_response = self._clean_formatting(direct_response)
+
+                    # Enhance citations if research results present
+                    if "research" in api_results:
+                        cleaned_response = self._enhance_paper_citations(cleaned_response, api_results["research"])
+
+                    return ChatResponse(
+                        response=cleaned_response,
+                        tools_used=tools_used,
+                        tokens_used=0,  # No LLM call = 0 tokens
+                        api_results=api_results,
+                        confidence_score=0.9
+                    )
+
                 # Call backend and UPDATE CONVERSATION HISTORY
                 response = await self.call_backend_query(
                     query=request.question,
@@ -4906,6 +5060,15 @@ JSON:"""
                             except Exception as e:
                                 if debug_mode:
                                     print(f"⚠️ Auto-write failed: {e}")
+
+                # POST-PROCESSING: Clean formatting and enhance response quality
+                if hasattr(response, 'response') and response.response:
+                    # Clean LaTeX artifacts and formatting issues
+                    response.response = self._clean_formatting(response.response)
+
+                    # Enhance citations if research results present
+                    if "research" in api_results and api_results["research"]:
+                        response.response = self._enhance_paper_citations(response.response, api_results["research"])
 
                 return self._finalize_interaction(
                     request,

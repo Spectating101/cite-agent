@@ -512,9 +512,16 @@ class NocturnalCLI:
             
             if response.tokens_used > 0:
                 stats = self.agent.get_usage_stats()
+
+                # Enhanced token metrics
+                efficiency = "Excellent" if response.tokens_used < 1000 else "Good" if response.tokens_used < 2500 else "Acceptable"
+                daily_used = stats.get('daily_tokens_used', 0)
+                daily_limit = stats.get('daily_limit', 100000)
+
                 self.console.print(
-                    f"\n📊 Tokens used: {response.tokens_used} "
-                    f"(Daily usage: {stats['usage_percentage']:.1f}%)"
+                    f"\n📊 Tokens: {response.tokens_used:,} | "
+                    f"Efficiency: {efficiency} | "
+                    f"Daily: {daily_used:,}/{daily_limit:,} ({stats['usage_percentage']:.1f}%)"
                 )
         
         finally:
@@ -705,9 +712,16 @@ class NocturnalCLI:
             
             if response.tokens_used > 0:
                 stats = self.agent.get_usage_stats()
+
+                # Enhanced token metrics
+                efficiency = "Excellent" if response.tokens_used < 1000 else "Good" if response.tokens_used < 2500 else "Acceptable"
+                daily_used = stats.get('daily_tokens_used', 0)
+                daily_limit = stats.get('daily_limit', 100000)
+
                 self.console.print(
-                    f"\n📊 Tokens used: {response.tokens_used} "
-                    f"(Daily usage: {stats['usage_percentage']:.1f}%)"
+                    f"\n📊 Tokens: {response.tokens_used:,} | "
+                    f"Efficiency: {efficiency} | "
+                    f"Daily: {daily_used:,}/{daily_limit:,} ({stats['usage_percentage']:.1f}%)"
                 )
             
             # Workflow integrations
