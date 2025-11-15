@@ -1,0 +1,14 @@
+=== FUNCTION CALLING VALIDATION TEST ===
+
+Testing with fixes from Claude Code (commit 087be46)
+Expected: Clean output, NO raw JSON, proper citations
+
+----------------------------------------
+TEST 1: Paper Search (Critical Test)
+Query: 'find papers on transformers'
+----------------------------------------
+
+✅ PASS: No JSON leaking detected
+❌ FAIL: Citation format incorrect
+
+Response sample:

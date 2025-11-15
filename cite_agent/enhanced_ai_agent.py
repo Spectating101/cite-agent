@@ -3924,12 +3924,16 @@ class EnhancedNocturnalAgent:
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # DISABLE FUNCTION CALLING MODE - it's broken and generates JSON instead of natural language
-            # Always use the traditional flow which works correctly
-            # if self.client is not None:
-            #     return await self.process_request_with_function_calling(request)
+            # FUNCTION CALLING MODE: Re-enabled with fixes from Claude Code
+            # Fixes applied (commit 087be46):
+            # - format_tool_result() prevents JSON leaking
+            # - Synthesis system prompt prevents LLM echoing raw data
+            # - Smart synthesis routing saves 500-1500 tokens
+            # - Proper citation formatting with DOI and authors
+            if self.client is not None:
+                return await self.process_request_with_function_calling(request)
 
-            # TRADITIONAL MODE: Works correctly with both temp keys and backend
+            # BACKEND MODE: Fallback when no local client available
 
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
