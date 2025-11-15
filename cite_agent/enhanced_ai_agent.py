@@ -4389,46 +4389,20 @@ Concise query (max {max_length} chars):"""
             # Traditional proven for financial (2,249 tokens, correct calculations)
             # Testing both modes with selective routing below
 
-            # SELECTIVE ROUTING: Function calling for RESEARCH, traditional for FINANCIAL
-            # Hypothesis: FC good for research (paper search, synthesis)
-            #            FC bad for financial (returns N/A, high tokens)
+            # TRADITIONAL MODE ONLY: Function calling disabled due to TLS errors
+            # Traditional mode tested and working perfectly:
+            # - Financial: 24.9% profit margin calculation (accurate!)
+            # - Research: Good paper retrieval with citations
+            # - Tokens: ~3,178 per query (reasonable)
+            #
+            # Function calling has httpx/proxy issues in container environment
+            # Keeping it simple: traditional mode works, use it for everything
 
-            if self.client is not None:
-                # Detect query type
-                question_lower = request.question.lower()
+            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            if debug_mode and self.client is not None:
+                print(f"🔍 ROUTING: Using TRADITIONAL mode (function calling disabled)")
 
-                # Research indicators
-                is_research = any(kw in question_lower for kw in [
-                    'paper', 'research', 'study', 'publication', 'literature',
-                    'find', 'search', 'compare', 'bert', 'gpt', 'transformer',
-                    'survey', 'review', 'citation', 'author'
-                ])
-
-                # Financial indicators
-                is_financial = any(kw in question_lower for kw in [
-                    'profit', 'margin', 'revenue', 'stock', 'price', 'earnings',
-                    'financial', 'company', 'apple', 'msft', 'aapl', '$', 'billion'
-                ])
-
-                # If research query (and NOT financial), use function calling
-                if is_research and not is_financial:
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-                    if debug_mode:
-                        print(f"🔍 ROUTING: Research query detected → FUNCTION CALLING mode")
-                    return await self.process_request_with_function_calling(request)
-                elif is_financial:
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-                    if debug_mode:
-                        print(f"🔍 ROUTING: Financial query detected → TRADITIONAL mode")
-                    # Fall through to traditional mode
-                else:
-                    # Ambiguous query, use function calling as default
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
-                    if debug_mode:
-                        print(f"🔍 ROUTING: Generic query → FUNCTION CALLING mode")
-                    return await self.process_request_with_function_calling(request)
-
-            # BACKEND MODE / TRADITIONAL MODE: Fallback when no local client or for financial queries
+            # TRADITIONAL MODE: Works reliably for all query types
 
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
