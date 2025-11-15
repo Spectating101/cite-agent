@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./test_realistic_quick.sh:*)",
+      "Bash(git pull:*)",
+      "Bash(export NOCTURNAL_DEBUG=1)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTbklwczVXTEk5c3p6Y2dvUTdMcUhBIiwiZW1haWwiOiJzMTEzMzk1OEBtYWlsLnl6dS5lZHUudHciLCJleHAiOjE3NjUzNjUwMjIsImlhdCI6MTc2Mjc3MzAyMn0.o3qN9SL_RjTHz9UMBbkI1CGGZtCh9Df403PsgIHjfr8\")",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/query/ -H 'Content-Type: application/json' -H \"Authorization: Bearer $TOKEN\" -d '{\"\"\"\"query\"\"\"\":\"\"\"\"What is 2+2?\"\"\"\"}')",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/query/ -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTbklwczVXTEk5c3p6Y2dvUTdMcUhBIiwiZW1haWwiOiJzMTEzMzk1OEBtYWlsLnl6dS5lZHUudHciLCJleHAiOjE3NjUzNjUwMjIsImlhdCI6MTc2Mjc3MzAyMn0.o3qN9SL_RjTHz9UMBbkI1CGGZtCh9Df403PsgIHjfr8' -d '{\"\"query\"\":\"\"What is 2+2?\"\"}')",
+      "Bash(export NOCTURNAL_API_URL=\"https://cite-agent-api-720dfadd602c.herokuapp.com/api\")",
+      "Bash(export NOCTURNAL_DEBUG=0)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -219,71 +219,61 @@ class EnhancedNocturnalAgent:
                     print(f"🔍 _load_authentication: ERROR loading temp key: {e}")
                 self.temp_api_key = None
 
-        # OVERRIDE: If temp API key is available, force local mode
-        if temp_api_key_available:
-            use_local_keys = True
-            if debug_mode:
-                print(f"🔍 _load_authentication: Temp API key found, forcing use_local_keys=True")
+        # HYBRID MODE: Load auth_token even when temp_api_key exists
+        # This enables: temp keys for fast Archive/FinSight calls, backend for synthesis
+        if debug_mode:
+            print(f"🔍 _load_authentication: session_file exists={session_file.exists()}")
 
-        if not use_local_keys:
-            # Backend mode - load auth token from session
-            if debug_mode:
-                print(f"🔍 _load_authentication: session_file exists={session_file.exists()}")
-            if session_file.exists():
+        if session_file.exists():
+            try:
+                import json
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+                    self.auth_token = session_data.get('auth_token')
+                    self.user_id = session_data.get('account_id')
+
+                    if debug_mode:
+                        print(f"🔍 _load_authentication: loaded auth_token={bool(self.auth_token)}, user_id={self.user_id}")
+                        if temp_api_key_available:
+                            print(f"🔍 HYBRID MODE: Have both temp_api_key + auth_token")
+            except Exception as e:
+                if debug_mode:
+                    print(f"🔍 _load_authentication: ERROR loading session: {e}")
+                self.auth_token = None
+                self.user_id = None
+        else:
+            # FALLBACK: Check if config.env has credentials but session.json is missing
+            import json
+            email = os.getenv("NOCTURNAL_ACCOUNT_EMAIL")
+            account_id = os.getenv("NOCTURNAL_ACCOUNT_ID")
+            auth_token = os.getenv("NOCTURNAL_AUTH_TOKEN")
+
+            if email and account_id and auth_token:
+                # Auto-create session.json from config.env
                 try:
-                    import json
-                    with open(session_file, 'r') as f:
-                        session_data = json.load(f)
-                        self.auth_token = session_data.get('auth_token')
-                        self.user_id = session_data.get('account_id')
+                    session_data = {
+                        "email": email,
+                        "account_id": account_id,
+                        "auth_token": auth_token,
+                        "refresh_token": "auto_generated",
+                        "issued_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    session_file.parent.mkdir(parents=True, exist_ok=True)
+                    session_file.write_text(json.dumps(session_data, indent=2))
 
-                        if debug_mode:
-                            print(f"🔍 _load_authentication: loaded auth_token={self.auth_token}, user_id={self.user_id}")
+                    self.auth_token = auth_token
+                    self.user_id = account_id
+
+                    if debug_mode:
+                        print(f"🔍 _load_authentication: Auto-created session.json from config.env")
                 except Exception as e:
                     if debug_mode:
-                        print(f"🔍 _load_authentication: ERROR loading session: {e}")
+                        print(f"🔍 _load_authentication: Failed to auto-create session: {e}")
                     self.auth_token = None
                     self.user_id = None
             else:
-                # FALLBACK: Check if config.env has credentials but session.json is missing
-                # This handles cases where old setup didn't create session.json
-                import json
-                email = os.getenv("NOCTURNAL_ACCOUNT_EMAIL")
-                account_id = os.getenv("NOCTURNAL_ACCOUNT_ID")
-                auth_token = os.getenv("NOCTURNAL_AUTH_TOKEN")
-                
-                if email and account_id and auth_token:
-                    # Auto-create session.json from config.env
-                    try:
-                        session_data = {
-                            "email": email,
-                            "account_id": account_id,
-                            "auth_token": auth_token,
-                            "refresh_token": "auto_generated",
-                            "issued_at": datetime.now(timezone.utc).isoformat()
-                        }
-                        session_file.parent.mkdir(parents=True, exist_ok=True)
-                        session_file.write_text(json.dumps(session_data, indent=2))
-                        
-                        self.auth_token = auth_token
-                        self.user_id = account_id
-                        
-                        if debug_mode:
-                            print(f"🔍 _load_authentication: Auto-created session.json from config.env")
-                    except Exception as e:
-                        if debug_mode:
-                            print(f"🔍 _load_authentication: Failed to auto-create session: {e}")
-                        self.auth_token = None
-                        self.user_id = None
-                else:
-                    self.auth_token = None
-                    self.user_id = None
-        else:
-            # Local keys mode
-            if debug_mode:
-                print(f"🔍 _load_authentication: Local keys mode, not loading session")
-            self.auth_token = None
-            self.user_id = None
+                self.auth_token = None
+                self.user_id = None
         self._session_topics: Dict[str, Dict[str, Any]] = {}
 
         # Initialize API clients
@@ -1792,27 +1782,50 @@ class EnhancedNocturnalAgent:
                 else:
                     if debug_mode:
                         print(f"✅ Loaded {len(self.api_keys)} {self.llm_provider.upper()} API key(s)")
-                    # Initialize first client - Cerebras uses OpenAI-compatible API
-                    try:
-                        if self.llm_provider == "cerebras":
-                            # Cerebras uses OpenAI client with custom base URL
-                            from openai import OpenAI
-                            self.client = OpenAI(
-                                api_key=self.api_keys[0],
-                                base_url="https://api.cerebras.ai/v1"
-                            )
-                        else:
-                            # Groq fallback
-                            from groq import Groq
-                            self.client = Groq(api_key=self.api_keys[0])
-                        self.current_api_key = self.api_keys[0]
+
+                    # HYBRID MODE FIX: If we have BOTH temp_api_key AND auth_token,
+                    # DON'T initialize self.client to force backend synthesis
+                    # This gives us: temp keys for fast API calls, backend for reliable synthesis
+                    has_both_tokens = (hasattr(self, 'temp_api_key') and self.temp_api_key and
+                                      hasattr(self, 'auth_token') and self.auth_token)
+
+                    if has_both_tokens:
+                        # HYBRID MODE: Keep self.client = None to force backend synthesis
+                        # Archive/FinSight API calls can still use temp_api_key directly
+                        self.client = None
+                        self.current_api_key = self.api_keys[0]  # Store for direct API calls
                         self.current_key_index = 0
+
+                        # Set backend URL for synthesis calls
+                        self.backend_api_url = os.getenv(
+                            "NOCTURNAL_API_URL",
+                            "https://cite-agent-api-720dfadd602c.herokuapp.com/api"
+                        )
+
                         if debug_mode:
-                            print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
-                    except Exception as e:
-                        print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
-                        if debug_mode:
-                            print(f"   This means you'll fall back to BACKEND MODE")
+                            print(f"🔍 HYBRID MODE: Using backend for synthesis (has both temp_api_key + auth_token)")
+                    else:
+                        # Normal local mode - initialize client for Cerebras synthesis
+                        try:
+                            if self.llm_provider == "cerebras":
+                                # Cerebras uses OpenAI client with custom base URL
+                                from openai import OpenAI
+                                self.client = OpenAI(
+                                    api_key=self.api_keys[0],
+                                    base_url="https://api.cerebras.ai/v1"
+                                )
+                            else:
+                                # Groq fallback
+                                from groq import Groq
+                                self.client = Groq(api_key=self.api_keys[0])
+                            self.current_api_key = self.api_keys[0]
+                            self.current_key_index = 0
+                            if debug_mode:
+                                print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
+                        except Exception as e:
+                            print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
+                            if debug_mode:
+                                print(f"   This means you'll fall back to BACKEND MODE")
 
             # Initialize shell session for BOTH production and dev mode
             # Production users need code execution too (like Cursor/Aider)
@@ -4167,13 +4180,13 @@ JSON:"""
                             plan_text = response.choices[0].message.content.strip()
                             plan_response = ChatResponse(response=plan_text)
                         else:
-                            # Backend mode - make a simplified backend call
-                            plan_response = await self.call_backend_query(
-                                query=planner_prompt,
-                                conversation_history=[],
-                                api_results={},
-                                tools_used=[]
-                            )
+                            # HYBRID MODE FIX: Skip shell planning when using backend-only mode
+                            # Calling backend here causes recursion/hangs
+                            # Just use fallback heuristics instead
+                            if debug_mode:
+                                print(f"🔍 Skipping shell planner in backend mode (would cause recursion)")
+                            plan_text = '{"action": "none", "reason": "Backend mode - using heuristics"}'
+                            plan_response = ChatResponse(response=plan_text)
                         
                         plan_text = plan_response.response.strip()
                         if '```' in plan_text:
