@@ -1115,6 +1115,13 @@ class EnhancedNocturnalAgent:
             "",
             "Be honest about uncertainty.",
             "",
+            "FINANCIAL CALCULATIONS:",
+            "• When asked to 'calculate' margins/ratios, perform the actual calculation",
+            "• Profit margin = (Net Income / Revenue) × 100%",
+            "• Gross margin = (Gross Profit / Revenue) × 100%",
+            "• If revenue not available, fetch it from FinSight API first",
+            "• Show formula AND result: 'Profit margin = 21.19 / 200 = 10.6%'",
+            "",
             "CRITICAL - ANSWER WHAT WAS ASKED:",
             "• When query asks for SPECIFIC file types:",
             "  - Use shell_execution with 'find' or 'ls' filtered to match",
@@ -1173,9 +1180,81 @@ class EnhancedNocturnalAgent:
                               "Present THESE papers to the user - do NOT hallucinate or search for more.\n" +
                               api_results_text)
             elif api_results.get("financial"):
+                # Check if this is a calculation request based on API results having revenue+profit
+                # Financial data structure: {"TICKER": {"revenue": {...}, "netIncome": {...}}}
+                financial_data = api_results.get("financial", {})
+
+                # Check if ANY ticker has both revenue and profit metrics
+                has_revenue = False
+                has_profit = False
+                for ticker_data in financial_data.values():
+                    if isinstance(ticker_data, dict):
+                        metric_keys = list(ticker_data.keys())
+                        if any("revenue" in str(k).lower() for k in metric_keys):
+                            has_revenue = True
+                        if any("income" in str(k).lower() or "profit" in str(k).lower() for k in metric_keys):
+                            has_profit = True
+
+                # PRE-CALCULATE MARGINS: Extract values and calculate margins in human-readable format
+                calc_summary = ""
+                if has_revenue and has_profit:
+                    for ticker, ticker_data in financial_data.items():
+                        if not isinstance(ticker_data, dict):
+                            continue
+
+                        # Extract revenue value
+                        revenue_val = None
+                        if "revenue" in ticker_data:
+                            rev_data = ticker_data["revenue"]
+                            if isinstance(rev_data, dict):
+                                revenue_val = rev_data.get("value")
+                                if revenue_val is None:
+                                    # Try inputs
+                                    inputs = rev_data.get("inputs", {})
+                                    if "revenue" in inputs:
+                                        revenue_val = inputs["revenue"].get("value")
+
+                        # Extract net income value
+                        netincome_val = None
+                        if "netIncome" in ticker_data:
+                            ni_data = ticker_data["netIncome"]
+                            if isinstance(ni_data, dict):
+                                netincome_val = ni_data.get("value")
+                                if netincome_val is None:
+                                    inputs = ni_data.get("inputs", {})
+                                    if "netIncome" in inputs:
+                                        netincome_val = inputs["netIncome"].get("value")
+
+                        # Extract gross profit value
+                        grossprofit_val = None
+                        if "grossProfit" in ticker_data:
+                            gp_data = ticker_data["grossProfit"]
+                            if isinstance(gp_data, dict):
+                                grossprofit_val = gp_data.get("value")
+                                if grossprofit_val is None:
+                                    inputs = gp_data.get("inputs", {})
+                                    if "grossProfit" in inputs:
+                                        grossprofit_val = inputs["grossProfit"].get("value")
+
+                        # Calculate margins if possible
+                        if revenue_val and netincome_val:
+                            profit_margin = (netincome_val / revenue_val) * 100
+                            calc_summary += f"\n📊 {ticker} PROFIT MARGIN CALCULATION:\n"
+                            calc_summary += f"   Net Income = ${netincome_val / 1e9:.2f}B\n"
+                            calc_summary += f"   Revenue = ${revenue_val / 1e9:.2f}B\n"
+                            calc_summary += f"   Profit Margin = ({netincome_val / 1e9:.2f}B ÷ {revenue_val / 1e9:.2f}B) × 100 = {profit_margin:.2f}%\n"
+
+                        if revenue_val and grossprofit_val:
+                            gross_margin = (grossprofit_val / revenue_val) * 100
+                            calc_summary += f"\n📊 {ticker} GROSS MARGIN CALCULATION:\n"
+                            calc_summary += f"   Gross Profit = ${grossprofit_val / 1e9:.2f}B\n"
+                            calc_summary += f"   Revenue = ${revenue_val / 1e9:.2f}B\n"
+                            calc_summary += f"   Gross Margin = ({grossprofit_val / 1e9:.2f}B ÷ {revenue_val / 1e9:.2f}B) × 100 = {gross_margin:.2f}%\n"
+
                 sections.append("\n💰 FINANCIAL DATA (ALREADY FETCHED):\n" +
-                              "The metrics below were retrieved from FinSight API. " +
-                              "Present THESE numbers to the user - do NOT search for more.\n" +
+                              "The metrics below were retrieved from FinSight API.\n" +
+                              calc_summary +
+                              "\nRaw data:\n" +
                               api_results_text)
             else:
                 sections.append("\nData available:\n" + api_results_text)
@@ -3557,12 +3636,18 @@ JSON:"""
                         "tickers": tickers,
                         "metrics": metrics_to_fetch,
                     }
+                    # CALCULATION FIX: Detect if user asked for calculations/comparisons
+                    question_lower = request.question.lower()
+                    calculation_keywords = ["calculate", "compute", "margin", "ratio", "compare", "vs", "versus", "difference"]
+                    needs_calculation = any(kw in question_lower for kw in calculation_keywords)
+
                     direct_finance = (
                         len(financial_payload) == 1
                         and set(request_analysis.get("apis", [])) == {"finsight"}
                         and not api_results.get("research")
                         and not file_previews
                         and not workspace_listing
+                        and not needs_calculation  # Force LLM for calculations
                     )
                     if direct_finance:
                         return self._respond_with_financial_metrics(request, financial_payload)

@@ -87,6 +87,22 @@ class FinancialHandler:
             if any(kw in question_lower for kw in keywords):
                 metrics_to_fetch.append(metric)
 
+        # CALCULATION FIX: Always include revenue for margin/ratio queries or comparisons
+        margin_keywords = ["margin", "ratio", "percentage", "%"]
+        comparison_keywords = ["compare", "vs", "versus", "difference", "between"]
+        asks_margin = any(kw in question_lower for kw in margin_keywords)
+        asks_comparison = any(kw in question_lower for kw in comparison_keywords)
+
+        # Add revenue if:
+        # 1. User asks about margins/ratios (need revenue as denominator)
+        # 2. User wants to compare companies (need consistent metrics)
+        # 3. Multiple tickers detected (likely comparison)
+        needs_revenue = (asks_margin or asks_comparison or len(tickers) > 1)
+
+        if needs_revenue and "revenue" not in metrics_to_fetch:
+            # Margin calculations and comparisons need revenue
+            metrics_to_fetch.insert(0, "revenue")
+
         if session_key and session_topics:
             last_topic = session_topics.get(session_key)
         else:
