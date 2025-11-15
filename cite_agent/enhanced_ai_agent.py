@@ -1786,8 +1786,13 @@ class EnhancedNocturnalAgent:
                     # HYBRID MODE FIX: If we have BOTH temp_api_key AND auth_token,
                     # DON'T initialize self.client to force backend synthesis
                     # This gives us: temp keys for fast API calls, backend for reliable synthesis
-                    has_both_tokens = (hasattr(self, 'temp_api_key') and self.temp_api_key and
-                                      hasattr(self, 'auth_token') and self.auth_token)
+                    # BUT: Skip hybrid mode if USE_LOCAL_KEYS is explicitly true
+                    use_local_keys_explicit = use_local_keys_env == "true"
+                    has_both_tokens = (
+                        hasattr(self, 'temp_api_key') and self.temp_api_key and
+                        hasattr(self, 'auth_token') and self.auth_token and
+                        not use_local_keys_explicit  # Don't force hybrid if user wants pure local
+                    )
 
                     if has_both_tokens:
                         # HYBRID MODE: Keep self.client = None to force backend synthesis
