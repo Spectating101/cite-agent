@@ -51,6 +51,11 @@ class DataAnalyzer:
         self.current_dataset: Optional[pd.DataFrame] = None
         self.dataset_info: Optional[DatasetInfo] = None
 
+    @property
+    def df(self) -> Optional[pd.DataFrame]:
+        """Alias for current_dataset for compatibility with tool_executor"""
+        return self.current_dataset
+
     def load_dataset(self, filepath: str) -> Dict[str, Any]:
         """Load CSV or Excel file and return dataset info"""
         try:
@@ -137,10 +142,27 @@ class DataAnalyzer:
                     }
             else:
                 # Stats for all numeric columns
-                desc = self.current_dataset.describe().to_dict()
+                numeric_cols = self.dataset_info.numeric_columns if self.dataset_info else self.current_dataset.select_dtypes(include=[np.number]).columns.tolist()
+
+                # Compute stats for each column
+                stats_dict = {}
+                for col in numeric_cols:
+                    series = self.current_dataset[col]
+                    stats_dict[col] = {
+                        "count": int(series.count()),
+                        "mean": float(series.mean()),
+                        "std": float(series.std()),
+                        "min": float(series.min()),
+                        "q25": float(series.quantile(0.25)),
+                        "median": float(series.median()),
+                        "q75": float(series.quantile(0.75)),
+                        "max": float(series.max()),
+                        "missing": int(series.isna().sum())
+                    }
+
                 return {
-                    "descriptive_stats": desc,
-                    "correlation_matrix": self.current_dataset[self.dataset_info.numeric_columns].corr().to_dict()
+                    "stats": stats_dict,
+                    "correlation_matrix": self.current_dataset[numeric_cols].corr().to_dict() if numeric_cols else {}
                 }
 
         except Exception as e:
