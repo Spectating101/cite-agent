@@ -2039,6 +2039,9 @@ class EnhancedNocturnalAgent:
                 use_local_keys = False
 
             if not use_local_keys:
+                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                if debug_mode:
+                    print(f"🔍 DEBUG: Taking BACKEND MODE path (use_local_keys=False)")
                 self.api_keys = []  # Empty - keys stay on server
                 self.current_key_index = 0
                 self.current_api_key = None
@@ -2076,6 +2079,9 @@ class EnhancedNocturnalAgent:
                         print("⚠️ Not authenticated. Please log in to use the agent.")
             else:
                 # Local keys mode - use temporary key if available, otherwise load from env
+                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                if debug_mode:
+                    print(f"🔍 DEBUG: Taking LOCAL MODE path (use_local_keys=True)")
 
                 # Check if we have a temporary key (for speed + security)
                 if hasattr(self, 'temp_api_key') and self.temp_api_key:
@@ -2126,6 +2132,9 @@ class EnhancedNocturnalAgent:
                         not use_local_keys_explicit  # Don't force hybrid if user wants pure local
                     )
 
+                    if debug_mode:
+                        print(f"🔍 DEBUG: has_both_tokens check - temp_api_key={hasattr(self, 'temp_api_key') and bool(getattr(self, 'temp_api_key', None))}, auth_token={hasattr(self, 'auth_token') and bool(getattr(self, 'auth_token', None))}, use_local_keys_explicit={use_local_keys_env == 'true'}")
+
                     if has_both_tokens:
                         # HYBRID MODE: Keep self.client = None to force backend synthesis
                         # Archive/FinSight API calls can still use temp_api_key directly
@@ -2143,13 +2152,19 @@ class EnhancedNocturnalAgent:
                             print(f"🔍 HYBRID MODE: Using backend for synthesis (has both temp_api_key + auth_token)")
                     else:
                         # Normal local mode - initialize client for Cerebras synthesis
+                        if debug_mode:
+                            print(f"🔍 DEBUG: Initializing {self.llm_provider.upper()} client with API key")
                         try:
                             if self.llm_provider == "cerebras":
                                 # Cerebras uses OpenAI client with custom base URL
                                 from openai import OpenAI
+                                # Disable proxy for OpenAI client (incompatible with httpx version)
+                                import httpx
+                                http_client = httpx.Client(verify=True, timeout=60.0)
                                 self.client = OpenAI(
                                     api_key=self.api_keys[0],
-                                    base_url="https://api.cerebras.ai/v1"
+                                    base_url="https://api.cerebras.ai/v1",
+                                    http_client=http_client
                                 )
                             else:
                                 # Groq fallback
@@ -2159,10 +2174,13 @@ class EnhancedNocturnalAgent:
                             self.current_key_index = 0
                             if debug_mode:
                                 print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
+                                print(f"🔍 DEBUG: self.client is now: {type(self.client)}")
                         except Exception as e:
                             print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
                             if debug_mode:
                                 print(f"   This means you'll fall back to BACKEND MODE")
+                            import traceback
+                            traceback.print_exc()
 
             # Initialize shell session for BOTH production and dev mode
             # Production users need code execution too (like Cursor/Aider)
@@ -4348,15 +4366,60 @@ Concise query (max {max_length} chars):"""
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # FUNCTION CALLING: Tested but inferior for vocabulary compliance
+            # Ensure client is initialized
+            if not self._initialized:
+                await self.initialize()
+
+            # FUNCTION CALLING: CCT testing results
             # FC: 16.7% pass rate (only context retention works)
             # Traditional: 33% pass rate (methodology + context work)
             # Issue: FC synthesis loses vocabulary requirements from main system prompt
-            # Decision: Keep traditional mode, add post-processing for keywords
-            # if self.client is not None:
-            #     return await self.process_request_with_function_calling(request)
+            #
+            # SELECTIVE ROUTING HYPOTHESIS:
+            # FC might be good for research (paper search, synthesis)
+            # Traditional proven for financial (2,249 tokens, correct calculations)
+            # Testing both modes with selective routing below
 
-            # BACKEND MODE: Fallback when no local client available
+            # SELECTIVE ROUTING: Function calling for RESEARCH, traditional for FINANCIAL
+            # Hypothesis: FC good for research (paper search, synthesis)
+            #            FC bad for financial (returns N/A, high tokens)
+
+            if self.client is not None:
+                # Detect query type
+                question_lower = request.question.lower()
+
+                # Research indicators
+                is_research = any(kw in question_lower for kw in [
+                    'paper', 'research', 'study', 'publication', 'literature',
+                    'find', 'search', 'compare', 'bert', 'gpt', 'transformer',
+                    'survey', 'review', 'citation', 'author'
+                ])
+
+                # Financial indicators
+                is_financial = any(kw in question_lower for kw in [
+                    'profit', 'margin', 'revenue', 'stock', 'price', 'earnings',
+                    'financial', 'company', 'apple', 'msft', 'aapl', '$', 'billion'
+                ])
+
+                # If research query (and NOT financial), use function calling
+                if is_research and not is_financial:
+                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    if debug_mode:
+                        print(f"🔍 ROUTING: Research query detected → FUNCTION CALLING mode")
+                    return await self.process_request_with_function_calling(request)
+                elif is_financial:
+                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    if debug_mode:
+                        print(f"🔍 ROUTING: Financial query detected → TRADITIONAL mode")
+                    # Fall through to traditional mode
+                else:
+                    # Ambiguous query, use function calling as default
+                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    if debug_mode:
+                        print(f"🔍 ROUTING: Generic query → FUNCTION CALLING mode")
+                    return await self.process_request_with_function_calling(request)
+
+            # BACKEND MODE / TRADITIONAL MODE: Fallback when no local client or for financial queries
 
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
