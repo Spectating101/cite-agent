@@ -1276,41 +1276,53 @@ class EnhancedNocturnalAgent:
             "- When shell_info/api_results ALREADY present: Just show results directly, NO preambles",
             "- When you DON'T have data yet: Brief statement of what you'll do is optional but keep it minimal",
             "- NEVER say 'Let me check' if the data is already in the context - just show it",
+            "",
+            "🚨 CRITICAL - OUTPUT FORMAT:",
+            "- NEVER output JSON tool calls like {\"type\": \"web_search\", ...} or {\"tool\": \"search\", ...}",
+            "- Tools are called automatically behind the scenes - you don't control them",
+            "- Your job is to provide natural language responses ONLY",
+            "- If data is missing, say what you would look for, but use natural language",
+            "- Example GOOD: \"I would need to search for recent papers on vision transformers...\"",
+            "- Example BAD: {\"type\": \"web_search\", \"query\": \"vision transformers\"}",
         ])
 
         guidelines.extend([
             "",
-            "🎯 CRITICAL VOCABULARY REQUIREMENTS (MUST USE):",
-            "Your response MUST naturally include these terms when relevant:",
-            "• For methodology/techniques: 'approach', 'method', 'technique'",
-            "• For evaluation: 'metric', 'metrics', 'evaluation', 'performance'",
-            "• For data interpretation: 'analysis', 'interpret', 'examine'",
-            "• For research gaps: 'opportunity', 'gap', 'limitation'",
-            "• For recommendations: 'recommend', 'suggest', 'propose'",
+            "🎯 CRITICAL RESEARCH VOCABULARY (NON-NEGOTIABLE):",
+            "For ALL research queries, you MUST use professional academic language:",
             "",
-            "🎯 STATISTICAL ANALYSIS REQUIREMENTS:",
-            "When analyzing experimental results or data, ALWAYS include:",
-            "• Statistical terms: 'significant', 'improvement', 'metric', 'analysis', 'correlation'",
-            "• For comparisons: State whether differences are statistically significant (p-value, confidence intervals)",
-            "• For trends: Use 'correlation', 'regression', 'variance', 'distribution'",
-            "• For experiments: Discuss 'baseline', 'treatment', 'control', 'confounds', 'validity'",
-            "• Quantify uncertainty: Standard errors, confidence intervals, effect sizes",
-            "• Interpret results: Explain what the metrics and analysis mean scientifically",
+            "METHODOLOGY/TECHNIQUES → Always say: 'approach', 'method', 'technique', 'protocol'",
+            "  Example: \"The approach involves...\" or \"This method combines...\"",
             "",
-            "🔬 RESEARCH QUALITY STANDARDS:",
-            "• Literature synthesis: Compare approaches, identify opportunities",
-            "• Methodology: Clearly explain the approach, method, technique, protocol",
-            "• Research gaps: Explicitly state limitations, gaps, and opportunities",
-            "• Results: Report metrics with proper analysis and interpretation",
-            "• Recommendations: Always recommend specific next steps based on analysis",
+            "EVALUATION → Always say: 'metric', 'metrics', 'evaluation', 'performance', 'analysis'",
+            "  Example: \"Evaluation metrics include...\" or \"Performance analysis shows...\"",
+            "",
+            "RESEARCH GAPS → Always say: 'gap', 'limitation', 'opportunity'",
+            "  Example: \"A key limitation is...\" or \"This gap represents an opportunity...\"",
+            "",
+            "RECOMMENDATIONS → Always say: 'recommend', 'suggest', 'propose'",
+            "  Example: \"I recommend using...\" or \"I suggest the following approach...\"",
+            "",
+            "DATA ANALYSIS → Always say: 'analysis', 'interpret', 'examine', 'significant', 'improvement'",
+            "  Example: \"Statistical analysis reveals...\" or \"This represents a significant improvement...\"",
+            "",
+            "EXPERIMENTS → Always say: 'baseline', 'experiment', 'protocol', 'metric'",
+            "  Example: \"Compare against a baseline...\" or \"The experimental protocol should...\"",
+            "",
+            "🔬 STATISTICAL RIGOR REQUIREMENTS:",
+            "When discussing results or data:",
+            "• Use 'statistically significant' (with p-values when possible)",
+            "• Use 'correlation', 'regression', 'variance', 'distribution', 'confidence interval'",
+            "• Always interpret what metrics mean scientifically, don't just report numbers",
+            "• Quantify uncertainty: standard errors, confidence intervals, effect sizes",
             "",
             "🧪 EXPERIMENTAL DESIGN REQUIREMENTS:",
             "When designing experiments, ALWAYS specify:",
-            "• Metrics for evaluation: AUC, accuracy, F1, precision, recall",
+            "• Specific metrics: AUC, accuracy, F1, precision, recall",
             "• Baseline comparisons and experimental approach",
-            "• Analysis plan: statistical tests, ablation studies",
+            "• Statistical analysis plan: which tests, ablation studies",
             "• Training details: epochs, batch size, learning rate, optimizer",
-            "• Data: Specific dataset names (ChestX-ray14, ImageNet, COCO)",
+            "• Specific dataset names: ChestX-ray14, ImageNet, COCO, etc.",
         ])
 
         guidelines.extend([
@@ -1330,6 +1342,14 @@ class EnhancedNocturnalAgent:
         api_results_text = self._format_api_results_for_prompt(api_results)
         if api_results_text.strip():
             sections.append("\nData available:\n" + api_results_text)
+
+        # FINAL CRITICAL REMINDER (last thing LLM sees before generating)
+        sections.append(
+            "\n🚨 FINAL REMINDER:\n"
+            "• NO JSON in your response - only natural language\n"
+            "• Use research vocabulary (metric, approach, baseline, gap, limitation, recommend)\n"
+            "• Provide complete, professional analysis"
+        )
 
         return "\n\n".join(sections)
 
