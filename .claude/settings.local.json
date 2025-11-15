@@ -27,7 +27,8 @@
       "Bash(timeout 480 python3 /tmp/comprehensive_professor_test.py)",
       "Bash(timeout:*)",
       "Read(//tmp/**)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []
