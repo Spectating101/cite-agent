@@ -1094,44 +1094,42 @@ class EnhancedNocturnalAgent:
             return "\n".join(formatted_parts)
 
         # PRE-CALCULATION: Auto-calculate profit margins when data available
-        if "finsight" in api_results:
-            finsight_data = api_results["finsight"]
-            for ticker_data in finsight_data if isinstance(finsight_data, list) else [finsight_data]:
-                if not isinstance(ticker_data, dict):
-                    continue
+        # Handle new calc API response format: {ticker_id: {ticker, data: {metric_name: {...}}}}
+        for key, value in api_results.items():
+            if not isinstance(value, dict):
+                continue
 
-                # Extract metrics
-                metrics = ticker_data.get("metrics", {})
-                revenue_data = metrics.get("revenue", {})
-                profit_data = metrics.get("netIncome", {})  # FinSight uses "netIncome" not "net_profit"
+            # Check if this is financial data (has 'data' key with metrics)
+            data_dict = value.get("data", {})
+            if not data_dict:
+                continue
 
-                # Calculate margin if both present
-                if revenue_data and profit_data:
-                    revenue_values = revenue_data.get("values", [])
-                    profit_values = profit_data.get("values", [])
+            # Extract revenue and netIncome
+            revenue_data = data_dict.get("revenue", {})
+            profit_data = data_dict.get("netIncome", {})
 
-                    if revenue_values and profit_values:
-                        # Use most recent matching data
-                        margins = []
-                        for rev_item, prof_item in zip(revenue_values, profit_values):
-                            rev_val = rev_item.get("value")
-                            prof_val = prof_item.get("value")
-                            if rev_val and prof_val and rev_val != 0:
-                                margin_pct = (prof_val / rev_val) * 100
-                                margins.append({
-                                    "period": rev_item.get("period"),
-                                    "value": round(margin_pct, 2),
-                                    "unit": "%"
-                                })
+            # Skip if either has error or missing
+            if "error" in revenue_data or "error" in profit_data:
+                continue
 
-                        if margins:
-                            # Add calculated margins to metrics
-                            if "metrics" not in ticker_data:
-                                ticker_data["metrics"] = {}
-                            ticker_data["metrics"]["profit_margin_calculated"] = {
-                                "values": margins,
-                                "metadata": "Auto-calculated from net_profit/revenue"
-                            }
+            # Extract values from new calc API format
+            rev_val = revenue_data.get("value")
+            prof_val = profit_data.get("value")
+
+            if rev_val and prof_val and rev_val != 0:
+                margin_pct = (prof_val / rev_val) * 100
+                period = revenue_data.get("period", "latest")
+
+                # Add calculated margin to the data dict
+                data_dict["profit_margin_calculated"] = {
+                    "ticker": value.get("ticker"),
+                    "metric": "profit_margin",
+                    "period": period,
+                    "value": round(margin_pct, 2),
+                    "unit": "%",
+                    "formula": "netIncome / revenue * 100",
+                    "metadata": "Auto-calculated from netIncome and revenue"
+                }
 
         # Normal formatting for non-shell results
         try:
@@ -1576,14 +1574,19 @@ class EnhancedNocturnalAgent:
         metrics_to_fetch: List[str] = []
         keyword_map = [
             ("revenue", ["revenue", "sales", "top line"]),
-            ("grossProfit", ["gross profit", "gross margin", "margin"]),
+            ("grossProfit", ["gross profit", "gross margin"]),  # Removed standalone "margin"
             ("operatingIncome", ["operating income", "operating profit", "ebit"]),
-            ("netIncome", ["net income", "profit", "earnings", "bottom line"]),
+            ("netIncome", ["net income", "earnings", "bottom line"]),  # Removed "profit" to avoid conflicts
         ]
 
         for metric, keywords in keyword_map:
             if any(kw in question_lower for kw in keywords):
                 metrics_to_fetch.append(metric)
+
+        # Special handling for "profit" - map to netIncome unless explicitly "gross profit"
+        if "profit" in question_lower and "gross" not in question_lower:
+            if "netIncome" not in metrics_to_fetch:
+                metrics_to_fetch.append("netIncome")
 
         # CALCULATION FIX: Always include revenue+netIncome for margin/ratio queries or comparisons
         margin_keywords = ["margin", "ratio", "percentage", "%"]
@@ -3921,12 +3924,12 @@ class EnhancedNocturnalAgent:
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
         try:
-            # FUNCTION CALLING MODE: Use when client is available (temp key or local mode)
-            if self.client is not None:
-                return await self.process_request_with_function_calling(request)
+            # DISABLE FUNCTION CALLING MODE - it's broken and generates JSON instead of natural language
+            # Always use the traditional flow which works correctly
+            # if self.client is not None:
+            #     return await self.process_request_with_function_calling(request)
 
-            # BACKEND MODE: Fall through to old logic when client is None
-            # (This is kept for backward compatibility and backend-only mode)
+            # TRADITIONAL MODE: Works correctly with both temp keys and backend
 
             # Check workflow commands first (both modes)
             workflow_response = await self._handle_workflow_commands(request)
@@ -4725,7 +4728,16 @@ JSON:"""
                 return False
             
             skip_web_search = is_conversational_query(request.question)
-            
+
+            # HARD RULE: Skip web search if we have pre-calculated margins
+            has_calculated_margin = False
+            for value in api_results.values():
+                if isinstance(value, dict) and "data" in value:
+                    if "profit_margin_calculated" in value.get("data", {}):
+                        has_calculated_margin = True
+                        skip_web_search = True
+                        break
+
             if self.web_search and shell_action == "none" and not skip_web_search:
                 # Ask LLM: Should we web search for this?
                 web_decision_prompt = f"""You are a tool selection expert. Decide if web search is needed.
