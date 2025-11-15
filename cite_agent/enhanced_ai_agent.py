@@ -1150,7 +1150,19 @@ class EnhancedNocturnalAgent:
         # Add API results if available
         api_results_text = self._format_api_results_for_prompt(api_results)
         if api_results_text.strip():
-            sections.append("\nData available:\n" + api_results_text)
+            # Check if we have research data
+            if api_results.get("research"):
+                sections.append("\n🔬 RESEARCH DATA (ALREADY FETCHED):\n" +
+                              "The papers below were retrieved from Archive API. " +
+                              "Present THESE papers to the user - do NOT hallucinate or search for more.\n" +
+                              api_results_text)
+            elif api_results.get("financial"):
+                sections.append("\n💰 FINANCIAL DATA (ALREADY FETCHED):\n" +
+                              "The metrics below were retrieved from FinSight API. " +
+                              "Present THESE numbers to the user - do NOT search for more.\n" +
+                              api_results_text)
+            else:
+                sections.append("\nData available:\n" + api_results_text)
 
         return "\n\n".join(sections)
 
@@ -3532,20 +3544,27 @@ JSON:"""
             if "archive" in request_analysis["apis"]:
                 # Extract research query
                 result = await self.search_academic_papers(request.question, 5)
+                if debug_mode:
+                    print(f"🔍 Archive API result keys: {list(result.keys())}")
                 if "error" not in result:
                     api_results["research"] = result
                     # DEBUG: Log what we got from the API
                     papers_count = len(result.get("results", []))
-                    logger.info(f"🔍 DEBUG: Got {papers_count} papers from Archive API")
-                    if papers_count > 0:
-                        logger.info(f"🔍 DEBUG: First paper: {result['results'][0].get('title', 'NO TITLE')[:80]}")
+                    if debug_mode:
+                        print(f"🔍 Got {papers_count} papers from Archive API")
+                    if papers_count > 0 and debug_mode:
+                        print(f"🔍 First paper: {result['results'][0].get('title', 'NO TITLE')[:80]}")
                 else:
                     api_results["research"] = {"error": result["error"]}
-                    logger.warning(f"🔍 DEBUG: Archive API returned error: {result['error']}")
+                    if debug_mode:
+                        print(f"⚠️ Archive API returned error: {result['error']}")
                 tools_used.append("archive_api")
             
             # Build enhanced system prompt with trimmed sections based on detected needs
             system_prompt = self._build_system_prompt(request_analysis, memory_context, api_results)
+            if debug_mode and api_results.get("research"):
+                papers_in_prompt = len(api_results.get("research", {}).get("results", []))
+                print(f"🔍 System prompt includes {papers_in_prompt} papers from Archive API")
             
             # Build messages
             messages = [
