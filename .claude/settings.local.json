@@ -28,7 +28,10 @@
       "Bash(timeout:*)",
       "Read(//tmp/**)",
       "Bash(awk:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(env)",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"self-supervised learning medical imaging\"\"\"\", \"\"\"\"limit\"\"\"\": 3, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"self-supervised learning medical imaging\"\"\"\", \"\"\"\"limit\"\"\"\": 2, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')"
     ],
     "deny": [],
     "ask": []
