@@ -270,7 +270,7 @@ class DataCleaningWizard:
                     col = issue.column
                     if pd.api.types.is_numeric_dtype(self.df[col]):
                         median_val = self.df[col].median()
-                        self.df[col].fillna(median_val, inplace=True)
+                        self.df[col] = self.df[col].fillna(median_val)
                         fixes_applied.append({
                             "type": "missing_values",
                             "column": col,
@@ -278,7 +278,7 @@ class DataCleaningWizard:
                         })
                     else:
                         mode_val = self.df[col].mode()[0] if len(self.df[col].mode()) > 0 else "Unknown"
-                        self.df[col].fillna(mode_val, inplace=True)
+                        self.df[col] = self.df[col].fillna(mode_val)
                         fixes_applied.append({
                             "type": "missing_values",
                             "column": col,
@@ -371,7 +371,7 @@ class DataCleaningWizard:
             else:  # mode
                 fill_value = self.df[column].mode()[0]
 
-            self.df[column].fillna(fill_value, inplace=True)
+            self.df[column] = self.df[column].fillna(fill_value)
 
             return {
                 "success": True,
@@ -382,7 +382,7 @@ class DataCleaningWizard:
             }
 
         elif method == "forward_fill":
-            self.df[column].fillna(method='ffill', inplace=True)
+            self.df[column] = self.df[column].fillna(method='ffill')
 
             return {
                 "success": True,
