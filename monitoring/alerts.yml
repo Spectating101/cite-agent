@@ -1,0 +1,175 @@
+groups:
+  - name: cite_agent_alerts
+    interval: 30s
+    rules:
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      # Very High Error Rate
+      - alert: CriticalErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.10
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "CRITICAL: Very high error rate"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 10%)"
+
+      # High Latency
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 latency is {{ $value }}s (threshold: 2s)"
+
+      # API Down
+      - alert: APIDown
+        expr: up{job="cite-agent-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Cite-Agent API is down"
+          description: "The API has been unreachable for {{ $value }} minutes"
+
+      # Database Connection Issues
+      - alert: DatabaseConnectionIssues
+        expr: |
+          sum(rate(http_requests_total{status="503"}[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection issues detected"
+          description: "High rate of 503 errors suggesting database problems"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes{job="cite-agent-api"}
+            / 1024 / 1024 / 1024
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High memory usage"
+          description: "API memory usage is {{ $value | humanize }}GB (threshold: 2GB)"
+
+      # Memory Leak Suspected
+      - alert: MemoryLeakSuspected
+        expr: |
+          deriv(process_resident_memory_bytes{job="cite-agent-api"}[1h]) > 52428800
+        for: 30m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "Possible memory leak detected"
+          description: "Memory growing at {{ $value | humanize }}B/s (threshold: 50MB/hour)"
+
+      # High Request Rate (potential attack)
+      - alert: HighRequestRate
+        expr: |
+          sum(rate(http_requests_total{job="cite-agent-api"}[1m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "Unusually high request rate"
+          description: "Request rate is {{ $value }} req/s (threshold: 100/s)"
+
+      # Too Many Rate Limits
+      - alert: TooManyRateLimits
+        expr: |
+          sum(rate(http_requests_total{status="429"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: info
+          component: api
+        annotations:
+          summary: "High rate of rate limit hits"
+          description: "{{ $value }} requests/s are being rate limited"
+
+      # Prometheus Scrape Failures
+      - alert: PrometheusScrapeFailure
+        expr: up{job="cite-agent-api"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "Failed to scrape metrics from API"
+          description: "Prometheus cannot reach the API metrics endpoint"
+
+  - name: infrastructure_alerts
+    interval: 30s
+    rules:
+      # Redis Down
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache is unreachable"
+
+      # PostgreSQL Down
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: postgres
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is unreachable"
+
+      # Disk Space Low
+      - alert: DiskSpaceLow
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/"}
+            /
+            node_filesystem_size_bytes{mountpoint="/"}
+          ) < 0.10
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Disk space low"
+          description: "Only {{ $value | humanizePercentage }} disk space remaining"

@@ -11,7 +11,16 @@
       "Bash(export NOCTURNAL_DEBUG=0)",
       "Bash(export USE_LOCAL_KEYS=false)",
       "Bash(unset NOCTURNAL_DEBUG)",
-      "Bash(export CEREBRAS_API_KEY=csk-34cp53294pcmrexym8h2r4x5cyy2npnrd344928yhf2hpctj)"
+      "Bash(export CEREBRAS_API_KEY=csk-34cp53294pcmrexym8h2r4x5cyy2npnrd344928yhf2hpctj)",
+      "Bash(export USE_LOCAL_KEYS=true)",
+      "Bash(cat:*)",
+      "Bash(python3:*)",
+      "Read(//home/phyrexian/.nocturnal_archive/**)",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\n    \"\"\"\"query\"\"\"\": \"\"\"\"attention mechanisms transformers\"\"\"\",\n    \"\"\"\"limit\"\"\"\": 2,\n    \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]\n  }')",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"attention mechanisms transformers\"\"\"\", \"\"\"\"limit\"\"\"\": 2, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')",
+      "Bash(git checkout:*)",
+      "Bash(chmod:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

@@ -30,6 +30,8 @@ from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 from .function_calling import FunctionCallingAgent
 from .tool_executor import ToolExecutor
+from .session_memory_manager import SessionMemoryManager
+from .timeout_retry_handler import TimeoutRetryHandler, RetryConfig
 
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
@@ -96,7 +98,23 @@ class EnhancedNocturnalAgent:
         self.workflow = WorkflowManager()
         self.last_paper_result = None  # Track last paper mentioned for "save that"
         self.archive = ConversationArchive()
-        
+
+        # Session memory manager - prevents memory leaks in long conversations
+        self.memory_manager = SessionMemoryManager(
+            max_messages_in_memory=50,
+            archive_threshold_messages=100,
+            recent_context_window=10
+        )
+
+        # Timeout retry handler - improves reliability for API calls
+        self.retry_handler = TimeoutRetryHandler(
+            config=RetryConfig(
+                max_attempts=3,
+                initial_delay_seconds=1.0,
+                timeout_seconds=60.0
+            )
+        )
+
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
             'last_file': None,           # Last file mentioned/read
