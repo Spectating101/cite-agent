@@ -327,6 +327,247 @@ TOOLS: List[Dict[str, Any]] = [
     },
 
     # =========================================================================
+    # DATA ANALYSIS & STATISTICS TOOLS
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "load_dataset",
+            "description": (
+                "Load a dataset from CSV or Excel file for analysis. "
+                "Use when user wants to: analyze data, load CSV/Excel, work with datasets, "
+                "read data files, explore data, run statistical analysis. "
+                "Examples: 'load data.csv', 'analyze this Excel file', "
+                "'I have a dataset at /path/to/data.csv'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to CSV or Excel file (.csv, .xlsx, .xls, .tsv)"
+                    }
+                },
+                "required": ["filepath"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_data",
+            "description": (
+                "Compute descriptive statistics or correlation analysis on loaded dataset. "
+                "Use for: descriptive stats (mean, median, std, quartiles), correlation tests, "
+                "data summary, exploring relationships between variables. "
+                "Examples: 'show me descriptive stats', 'correlate hours and scores', "
+                "'is there a relationship between X and Y'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "analysis_type": {
+                        "type": "string",
+                        "description": "Type of analysis to perform",
+                        "enum": ["descriptive", "correlation"],
+                        "default": "descriptive"
+                    },
+                    "column": {
+                        "type": "string",
+                        "description": "Column name for descriptive stats (optional, all columns if not specified)"
+                    },
+                    "var1": {
+                        "type": "string",
+                        "description": "First variable for correlation (required for correlation)"
+                    },
+                    "var2": {
+                        "type": "string",
+                        "description": "Second variable for correlation (required for correlation)"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "Correlation method",
+                        "enum": ["pearson", "spearman"],
+                        "default": "pearson"
+                    }
+                },
+                "required": ["analysis_type"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "run_regression",
+            "description": (
+                "Run linear or multiple regression analysis on loaded dataset. "
+                "Use when user wants: regression analysis, predict Y from X, model relationships, "
+                "test predictors, find R-squared, regression coefficients. "
+                "Examples: 'regress score on hours', 'predict Y from X1 and X2', "
+                "'run regression: sales ~ advertising + price'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "y_variable": {
+                        "type": "string",
+                        "description": "Dependent variable (outcome) to predict"
+                    },
+                    "x_variables": {
+                        "type": "array",
+                        "description": "Independent variables (predictors)",
+                        "items": {"type": "string"},
+                        "minItems": 1
+                    },
+                    "model_type": {
+                        "type": "string",
+                        "description": "Type of regression model",
+                        "enum": ["linear"],
+                        "default": "linear"
+                    }
+                },
+                "required": ["y_variable", "x_variables"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "check_assumptions",
+            "description": (
+                "Check statistical assumptions for tests (normality, homoscedasticity, etc.). "
+                "Use when user asks: check assumptions, validate test requirements, "
+                "normality test, homoscedasticity, assumption violations. "
+                "Examples: 'check regression assumptions', 'is my data normal', "
+                "'can I use ANOVA with this data'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "test_type": {
+                        "type": "string",
+                        "description": "Type of statistical test to check assumptions for",
+                        "enum": ["regression", "anova", "ttest"]
+                    }
+                },
+                "required": ["test_type"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "plot_data",
+            "description": (
+                "Create ASCII plots (scatter, bar, histogram) for data visualization in terminal. "
+                "Use when user wants: plot data, visualize relationship, show distribution, "
+                "create chart, graph variables. "
+                "Examples: 'plot hours vs scores', 'show histogram of ages', "
+                "'create bar chart of categories'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plot_type": {
+                        "type": "string",
+                        "description": "Type of plot to create",
+                        "enum": ["scatter", "bar", "histogram"],
+                        "default": "scatter"
+                    },
+                    "x_data": {
+                        "description": "X-axis data (column name from dataset or list of values)"
+                    },
+                    "y_data": {
+                        "description": "Y-axis data for scatter plots (column name or list of values)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Plot title",
+                        "default": "Data Plot"
+                    },
+                    "categories": {
+                        "type": "array",
+                        "description": "Category names for bar chart",
+                        "items": {"type": "string"}
+                    },
+                    "values": {
+                        "description": "Values for bar chart or histogram (column name or list)"
+                    },
+                    "bins": {
+                        "type": "integer",
+                        "description": "Number of bins for histogram",
+                        "default": 10,
+                        "minimum": 5,
+                        "maximum": 50
+                    }
+                },
+                "required": ["plot_type"]
+            }
+        }
+    },
+
+    # =========================================================================
+    # R INTEGRATION TOOLS
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "run_r_code",
+            "description": (
+                "Execute R code safely with validation and timeout. "
+                "Use when user wants: run R script, execute R code, R analysis, "
+                "use R packages, statistical analysis in R. "
+                "Examples: 'run this R code: lm(y~x)', 'execute R script', "
+                "'install.packages in R'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "r_code": {
+                        "type": "string",
+                        "description": "R code to execute"
+                    },
+                    "allow_writes": {
+                        "type": "boolean",
+                        "description": "Allow file write operations (default: false for safety)",
+                        "default": False
+                    }
+                },
+                "required": ["r_code"]
+            }
+        }
+    },
+
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_project",
+            "description": (
+                "Detect project type (R project, Jupyter notebook, Python project) in directory. "
+                "Use when user asks: what type of project, detect environment, "
+                "check if R project, find project files, what packages installed. "
+                "Examples: 'what type of project is this', 'am I in an R project', "
+                "'what R packages do I have'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to check for project (default: current directory)",
+                        "default": "."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+
+    # =========================================================================
     # CONVERSATIONAL TOOL
     # =========================================================================
     {
