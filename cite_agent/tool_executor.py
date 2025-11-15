@@ -8,6 +8,7 @@ import os
 import json
 from typing import Dict, Any, Optional
 from pathlib import Path
+from .research_assistant import DataAnalyzer, ASCIIPlotter, RExecutor, ProjectDetector
 
 
 class ToolExecutor:
@@ -63,6 +64,21 @@ class ToolExecutor:
                 return await self._execute_find_related_papers(arguments)
             elif tool_name == "chat":
                 return self._execute_chat(arguments)
+            # Research Assistant Tools
+            elif tool_name == "load_dataset":
+                return self._execute_load_dataset(arguments)
+            elif tool_name == "analyze_data":
+                return self._execute_analyze_data(arguments)
+            elif tool_name == "run_regression":
+                return self._execute_run_regression(arguments)
+            elif tool_name == "plot_data":
+                return self._execute_plot_data(arguments)
+            elif tool_name == "run_r_code":
+                return self._execute_run_r_code(arguments)
+            elif tool_name == "detect_project":
+                return self._execute_detect_project(arguments)
+            elif tool_name == "check_assumptions":
+                return self._execute_check_assumptions(arguments)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
 
@@ -586,3 +602,242 @@ class ToolExecutor:
             "message": message,
             "type": "conversational"
         }
+
+    # =========================================================================
+    # RESEARCH ASSISTANT TOOLS
+    # =========================================================================
+
+    def _execute_load_dataset(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute load_dataset tool - Load CSV/Excel dataset"""
+        filepath = args.get("filepath", "")
+
+        if not filepath:
+            return {"error": "Missing required parameter: filepath"}
+
+        if self.debug_mode:
+            print(f"📊 [Data Analyzer] Loading dataset: {filepath}")
+
+        try:
+            # Initialize data analyzer if needed
+            if not hasattr(self, '_data_analyzer'):
+                self._data_analyzer = DataAnalyzer()
+
+            result = self._data_analyzer.load_dataset(filepath)
+
+            if self.debug_mode:
+                print(f"📊 [Data Analyzer] Loaded {result.get('rows', 0)} rows, {result.get('columns', 0)} columns")
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to load dataset: {str(e)}"}
+
+    def _execute_analyze_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute analyze_data tool - Descriptive statistics and correlation"""
+        analysis_type = args.get("analysis_type", "descriptive")  # descriptive or correlation
+        column = args.get("column")  # For descriptive stats
+        var1 = args.get("var1")  # For correlation
+        var2 = args.get("var2")  # For correlation
+        method = args.get("method", "pearson")  # pearson or spearman
+
+        if self.debug_mode:
+            print(f"📊 [Data Analyzer] Running {analysis_type} analysis")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            if analysis_type == "descriptive":
+                result = self._data_analyzer.descriptive_stats(column)
+            elif analysis_type == "correlation":
+                if not var1 or not var2:
+                    return {"error": "Missing var1 or var2 for correlation analysis"}
+                result = self._data_analyzer.run_correlation(var1, var2, method)
+            else:
+                return {"error": f"Unknown analysis type: {analysis_type}"}
+
+            if self.debug_mode:
+                print(f"📊 [Data Analyzer] Analysis complete")
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Analysis failed: {str(e)}"}
+
+    def _execute_run_regression(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute run_regression tool - Linear/multiple regression"""
+        y_variable = args.get("y_variable", "")
+        x_variables = args.get("x_variables", [])
+        model_type = args.get("model_type", "linear")
+
+        if not y_variable:
+            return {"error": "Missing required parameter: y_variable"}
+
+        if not x_variables:
+            return {"error": "Missing required parameter: x_variables"}
+
+        # Ensure x_variables is a list
+        if isinstance(x_variables, str):
+            x_variables = [x_variables]
+
+        if self.debug_mode:
+            print(f"📊 [Data Analyzer] Running {model_type} regression: {y_variable} ~ {' + '.join(x_variables)}")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            result = self._data_analyzer.run_regression(y_variable, x_variables, model_type)
+
+            if self.debug_mode:
+                print(f"📊 [Data Analyzer] Regression complete - R²: {result.get('r_squared', 'N/A')}")
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Regression failed: {str(e)}"}
+
+    def _execute_plot_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute plot_data tool - ASCII plotting"""
+        plot_type = args.get("plot_type", "scatter")  # scatter, bar, histogram
+        x_data = args.get("x_data")  # Column name or list of values
+        y_data = args.get("y_data")  # Column name or list of values (for scatter)
+        title = args.get("title", "Data Plot")
+        categories = args.get("categories")  # For bar charts
+        values = args.get("values")  # For bar charts
+        bins = args.get("bins", 10)  # For histograms
+
+        if self.debug_mode:
+            print(f"📈 [ASCII Plotter] Creating {plot_type} plot: {title}")
+
+        try:
+            # Initialize plotter
+            if not hasattr(self, '_ascii_plotter'):
+                self._ascii_plotter = ASCIIPlotter()
+
+            # Get actual data from dataset if column names provided
+            if hasattr(self, '_data_analyzer') and self._data_analyzer.df is not None:
+                df = self._data_analyzer.df
+
+                if isinstance(x_data, str) and x_data in df.columns:
+                    x_data = df[x_data].tolist()
+                if isinstance(y_data, str) and y_data in df.columns:
+                    y_data = df[y_data].tolist()
+                if isinstance(values, str) and values in df.columns:
+                    values = df[values].tolist()
+
+            # Create plot based on type
+            if plot_type == "scatter":
+                if x_data is None or y_data is None:
+                    return {"error": "Missing x_data or y_data for scatter plot"}
+                plot = self._ascii_plotter.plot_scatter(x_data, y_data, title)
+
+            elif plot_type == "bar":
+                if categories is None or values is None:
+                    return {"error": "Missing categories or values for bar chart"}
+                plot = self._ascii_plotter.plot_bar(categories, values, title)
+
+            elif plot_type == "histogram":
+                if x_data is None:
+                    return {"error": "Missing x_data for histogram"}
+                plot = self._ascii_plotter.plot_histogram(x_data, bins, title)
+
+            else:
+                return {"error": f"Unknown plot type: {plot_type}"}
+
+            if self.debug_mode:
+                print(f"📈 [ASCII Plotter] Plot created ({len(plot)} characters)")
+
+            return {
+                "plot": plot,
+                "plot_type": plot_type,
+                "title": title
+            }
+
+        except Exception as e:
+            return {"error": f"Plotting failed: {str(e)}"}
+
+    def _execute_run_r_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute run_r_code tool - Safe R code execution"""
+        r_code = args.get("r_code", "")
+        allow_writes = args.get("allow_writes", False)
+
+        if not r_code:
+            return {"error": "Missing required parameter: r_code"}
+
+        if self.debug_mode:
+            print(f"🔬 [R Executor] Executing R code ({len(r_code)} chars)")
+
+        try:
+            # Initialize R executor if needed
+            if not hasattr(self, '_r_executor'):
+                self._r_executor = RExecutor()
+
+            result = self._r_executor.execute_r_code(r_code, allow_writes)
+
+            if self.debug_mode:
+                if result.get("success"):
+                    print(f"🔬 [R Executor] Execution successful")
+                else:
+                    print(f"🔬 [R Executor] Execution failed: {result.get('error', 'Unknown error')}")
+
+            return result
+
+        except Exception as e:
+            return {"error": f"R execution failed: {str(e)}"}
+
+    def _execute_detect_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute detect_project tool - Detect project type (R, Jupyter, Python)"""
+        path = args.get("path", ".")
+
+        if self.debug_mode:
+            print(f"🔍 [Project Detector] Detecting project type in: {path}")
+
+        try:
+            # Initialize detector if needed
+            if not hasattr(self, '_project_detector'):
+                self._project_detector = ProjectDetector(path)
+
+            project_info = self._project_detector.detect_project()
+
+            if project_info:
+                if self.debug_mode:
+                    print(f"🔍 [Project Detector] Found {project_info.get('type')} project")
+
+                # Add R packages if R project
+                if project_info.get('type') == 'r_project':
+                    project_info['r_packages'] = self._project_detector.get_r_packages()
+
+                return project_info
+            else:
+                return {
+                    "type": "unknown",
+                    "message": "No specific project type detected"
+                }
+
+        except Exception as e:
+            return {"error": f"Project detection failed: {str(e)}"}
+
+    def _execute_check_assumptions(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute check_assumptions tool - Check statistical test assumptions"""
+        test_type = args.get("test_type", "")
+
+        if not test_type:
+            return {"error": "Missing required parameter: test_type"}
+
+        if self.debug_mode:
+            print(f"📊 [Data Analyzer] Checking assumptions for: {test_type}")
+
+        try:
+            if not hasattr(self, '_data_analyzer'):
+                return {"error": "No dataset loaded. Use load_dataset first."}
+
+            result = self._data_analyzer.check_assumptions(test_type)
+
+            if self.debug_mode:
+                print(f"📊 [Data Analyzer] Assumption checks complete")
+
+            return result
+
+        except Exception as e:
+            return {"error": f"Assumption check failed: {str(e)}"}
