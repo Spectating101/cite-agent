@@ -24,7 +24,10 @@
       "Bash(git commit:*)",
       "Bash(git fetch:*)",
       "Bash(git push:*)",
-      "Bash(timeout 480 python3 /tmp/comprehensive_professor_test.py)"
+      "Bash(timeout 480 python3 /tmp/comprehensive_professor_test.py)",
+      "Bash(timeout:*)",
+      "Read(//tmp/**)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []
