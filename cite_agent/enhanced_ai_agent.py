@@ -33,6 +33,11 @@ from .tool_executor import ToolExecutor
 from .session_memory_manager import SessionMemoryManager
 from .timeout_retry_handler import TimeoutRetryHandler, RetryConfig
 
+# Infrastructure for production sophistication
+from .observability import ObservabilitySystem, EventType
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
+from .request_queue import IntelligentRequestQueue, RequestPriority
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -166,6 +171,43 @@ class EnhancedNocturnalAgent:
         except Exception:
             self._health_ttl = 30.0
         self._recent_sources: List[Dict[str, Any]] = []
+
+        # Infrastructure for production sophistication
+        self.observability = ObservabilitySystem()
+        self.circuit_breakers = {
+            'backend': CircuitBreaker(
+                name="backend_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.6,
+                    min_requests_for_decision=5,
+                    open_timeout=30.0
+                )
+            ),
+            'archive': CircuitBreaker(
+                name="archive_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.5,
+                    min_requests_for_decision=3,
+                    open_timeout=20.0
+                )
+            ),
+            'financial': CircuitBreaker(
+                name="financial_api",
+                config=CircuitBreakerConfig(
+                    failure_threshold=0.5,
+                    min_requests_for_decision=3,
+                    open_timeout=20.0
+                )
+            )
+        }
+        self.request_queue = IntelligentRequestQueue(
+            max_concurrent_global=50,
+            max_concurrent_per_user=5
+        )
+
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            logger.info("Infrastructure initialized: Observability, Circuit Breakers, Request Queue")
 
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
@@ -1289,6 +1331,156 @@ class EnhancedNocturnalAgent:
             execution_results={},
             api_results={}
         )
+
+    def _enhance_paper_citations(self, response_text: str, research_data: Dict) -> str:
+        """
+        Enhance response with professionally formatted citations.
+        Formats papers with: Number. Title (FirstAuthor, Year) - citations [DOI]
+
+        FIXED: Only enhance if backend didn't already format citations (prevents duplication)
+        """
+        papers = research_data.get("results", [])
+        if not papers or len(papers) == 0:
+            return response_text
+
+        # FIX: Check if backend already formatted citations (prevent duplication)
+        has_doi = "DOI:" in response_text or "doi.org" in response_text
+        has_numbered_citations = re.search(r'^\d+\.\s+.+\(\d{4}\)', response_text, re.MULTILINE)
+        has_formatted_header = "**Formatted Citations:**" in response_text or "**References:**" in response_text
+
+        # If backend already formatted well, don't duplicate
+        if has_doi or has_numbered_citations or has_formatted_header:
+            return response_text
+
+        # Build formatted citation list
+        citation_lines = []
+        for i, paper in enumerate(papers[:10], 1):  # Format up to 10 papers
+            title = paper.get("title", "Unknown")
+            year = paper.get("year", "N/A")
+            citations = paper.get("citationCount", 0) or paper.get("citations_count", 0)
+            authors = paper.get("authors", [])
+            first_author = authors[0].get("name", "Unknown") if authors else "Unknown"
+            doi = paper.get("doi", "") or paper.get("externalIds", {}).get("DOI", "")
+
+            # Format: 1. Title (FirstAuthor, Year) - 104,758 citations [DOI: ...]
+            line = f"{i}. {title}"
+            if first_author != "Unknown":
+                line += f" ({first_author}, {year})"
+            else:
+                line += f" ({year})"
+
+            if citations > 0:
+                line += f" - {citations:,} citations"
+            if doi:
+                line += f" [DOI: {doi}]"
+
+            citation_lines.append(line)
+
+        # Append formatted citations to response
+        if citation_lines:
+            enhanced = response_text + "\n\n**Formatted Citations:**\n" + "\n".join(citation_lines)
+            return enhanced
+
+        return response_text
+
+    def _should_skip_synthesis(self, query: str, api_results: Dict, tools_used: List[str]) -> Tuple[bool, Optional[str]]:
+        """
+        Determine if we can skip backend synthesis and return direct response.
+        Saves 200-800 tokens for simple queries that don't need LLM processing.
+
+        Returns:
+            (should_skip, direct_response) - If should_skip=True, use direct_response
+
+        FIXED: Never skip for research/financial queries (prevents mixed context issues)
+        FIXED: Conservative keyword matching (prevents collisions)
+        """
+        query_lower = query.lower().strip()
+
+        # FIX: NEVER skip synthesis for research or financial queries
+        if "research" in api_results or "financial" in api_results:
+            return (False, None)
+
+        # FIX: More conservative keyword matching to avoid collisions
+        # Only skip for pure shell operations with no analysis intent
+
+        # Case 1: Directory listing with explicit listing intent
+        if "shell_info" in api_results:
+            shell_info = api_results["shell_info"]
+
+            # Must have explicit listing command AND no research/financial context
+            if "directory_contents" in shell_info or ("output" in shell_info and "ls" in shell_info.get("command", "")):
+                # Check for VERY explicit listing-only queries
+                is_pure_listing = any(phrase in query_lower for phrase in [
+                    "list files", "list directory", "show directory contents", "ls "
+                ])
+                # Exclude if analysis needed
+                has_analysis_intent = any(word in query_lower for word in [
+                    "analyze", "explain", "why", "how", "bug", "error", "problem", "find", "search", "papers"
+                ])
+
+                if is_pure_listing and not has_analysis_intent:
+                    listing = shell_info.get("directory_contents") or shell_info.get("output", "")
+                    path = shell_info.get("directory", os.getcwd())
+                    return (True, f"Contents of {path}:\n\n{listing}")
+
+        # Case 2: File read with explicit read-only intent
+        if "shell_info" in api_results:
+            shell_info = api_results["shell_info"]
+            command = shell_info.get("command", "")
+
+            # Must be cat/head/tail AND pure read query
+            if any(cmd in command for cmd in ["cat ", "head ", "tail "]):
+                is_pure_read = any(phrase in query_lower for phrase in [
+                    "show file", "read file", "cat ", "contents of file"
+                ])
+                has_analysis_intent = any(word in query_lower for word in [
+                    "analyze", "explain", "fix", "bug", "error", "problem", "why", "how", "find"
+                ])
+
+                if is_pure_read and not has_analysis_intent:
+                    content = shell_info.get("output", "")
+                    import shlex
+                    try:
+                        parts = shlex.split(command)
+                        filename = parts[-1] if len(parts) > 1 else "file"
+                    except:
+                        filename = "file"
+                    return (True, f"Contents of {filename}:\n\n{content}")
+
+        # Default: Need synthesis
+        return (False, None)
+
+    def _clean_formatting(self, response_text: str) -> str:
+        """
+        Clean up JSON fragments and excessive whitespace.
+        FIXED: Preserve LaTeX for math formulas - do NOT strip LaTeX!
+        """
+        cleaned = response_text
+
+        # FIX: PRESERVE LaTeX - do NOT strip math formulas
+        # Removed regex that was stripping $$formula$$ and $formula$
+
+        # Only remove pure JSON lines (not LaTeX-containing lines)
+        lines = cleaned.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip only if it's pure JSON (not LaTeX)
+            if stripped.startswith('{') and '"' in stripped and ':' in stripped and stripped.endswith('}'):
+                # Check if line contains LaTeX indicators
+                has_latex = any(indicator in stripped for indicator in ['$', '\\text', '\\frac', '\\times', '\\cdot'])
+                if not has_latex:
+                    continue  # Skip pure JSON line
+            filtered_lines.append(line)
+        cleaned = '\n'.join(filtered_lines)
+
+        # Clean up excessive newlines (more than 3 consecutive)
+        cleaned = re.sub(r'\n{4,}', '\n\n\n', cleaned)
+
+        # Remove trailing whitespace on each line
+        cleaned = '\n'.join(line.rstrip() for line in cleaned.split('\n'))
+
+        return cleaned.strip()
 
     def _select_model(
         self,
@@ -4868,6 +5060,26 @@ JSON:"""
                     if api_results.get("shell_info"):
                         print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
 
+                # OPTIMIZATION: Check if we can skip synthesis for simple shell operations
+                skip_synthesis, direct_response = self._should_skip_synthesis(
+                    request.question, api_results, tools_used
+                )
+
+                if skip_synthesis:
+                    if debug_mode:
+                        print(f"🔍 Skipping backend synthesis (pure shell operation, saving tokens)")
+
+                    # Clean formatting (preserves LaTeX)
+                    cleaned_response = self._clean_formatting(direct_response)
+
+                    return ChatResponse(
+                        response=cleaned_response,
+                        tools_used=tools_used,
+                        tokens_used=0,  # No LLM call = 0 tokens saved
+                        api_results=api_results,
+                        confidence_score=0.9
+                    )
+
                 # Call backend and UPDATE CONVERSATION HISTORY
                 response = await self.call_backend_query(
                     query=request.question,
@@ -4942,6 +5154,28 @@ JSON:"""
                             except Exception as e:
                                 if debug_mode:
                                     print(f"⚠️ Auto-write failed: {e}")
+
+                # POST-PROCESSING: Clean formatting and enhance response quality
+                if hasattr(response, 'response') and response.response:
+                    # Clean JSON artifacts (preserves LaTeX)
+                    response.response = self._clean_formatting(response.response)
+
+                    # Enhance citations ONLY for research-focused queries (no mixed context)
+                    if "research" in api_results and api_results["research"]:
+                        query_lower = request.question.lower()
+                        is_research_focused = any(kw in query_lower for kw in [
+                            "paper", "research", "study", "publication", "article", "literature",
+                            "cite", "citation", "find papers", "search papers"
+                        ])
+                        has_financial_focus = any(kw in query_lower for kw in [
+                            "revenue", "profit", "earnings", "stock", "financial", "price", "margin"
+                        ])
+
+                        # Only enhance if research-focused and NOT financial-focused
+                        if is_research_focused and not has_financial_focus:
+                            response.response = self._enhance_paper_citations(response.response, api_results["research"])
+                            if debug_mode:
+                                print(f"🔍 Enhanced research citations with DOI and author info")
 
                 return self._finalize_interaction(
                     request,
