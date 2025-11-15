@@ -1280,6 +1280,24 @@ class EnhancedNocturnalAgent:
 
         guidelines.extend([
             "",
+            "🎯 STATISTICAL ANALYSIS REQUIREMENTS:",
+            "When analyzing experimental results or data:",
+            "• ALWAYS use proper statistical terminology: 'significant', 'improvement', 'metric', 'analysis', 'correlation'",
+            "• For comparisons: State whether differences are statistically significant (p-value, confidence intervals)",
+            "• For trends: Use terms like 'correlation', 'regression', 'variance', 'distribution'",
+            "• For experiments: Discuss 'baseline', 'treatment', 'control', 'confounds', 'validity'",
+            "• Quantify uncertainty: Standard errors, confidence intervals, effect sizes",
+            "• Interpret results: Don't just report numbers - explain what they mean scientifically",
+            "",
+            "🔬 RESEARCH QUALITY STANDARDS:",
+            "• Literature gaps: Use 'opportunity', 'unexplored', 'novel direction', 'open question'",
+            "• Methodology: Explain 'approach', 'method', 'technique', 'protocol', 'pipeline'",
+            "• Results: Report 'findings', 'outcomes', 'observations', 'measurements'",
+            "• Recommendations: Be specific and actionable, cite supporting evidence",
+        ])
+
+        guidelines.extend([
+            "",
             "- PROACTIVE FILE SEARCH:",
             "- If a user asks to find a file or directory and you are not sure where it is, use the `find` command with wildcards to search for it.",
             "- If a `cd` command fails, automatically run `ls -F` on the current or parent directory to understand the directory structure and find the correct path.",
@@ -2529,9 +2547,72 @@ class EnhancedNocturnalAgent:
         except Exception as e:
             self._record_data_source("FinSight", f"POST {endpoint}", False, str(e))
             return {"error": f"FinSight API call failed: {e}"}
-    
+
+    async def _extract_search_query(self, user_question: str, max_length: int = 100) -> str:
+        """
+        Extract concise search keywords from user questions for Archive API.
+        CRITICAL: Archive API has 500 char limit, we target 100 chars for safety.
+
+        Strategies:
+        1. If already short (<= max_length), use as-is
+        2. Use LLM to extract core keywords if available
+        3. Fallback to heuristic extraction
+        """
+        # Already short enough
+        if len(user_question) <= max_length:
+            return user_question
+
+        # Try LLM extraction if available
+        if self.client:
+            try:
+                prompt = f"""Extract a concise academic search query (max {max_length} chars) from this question.
+Focus on: technical terms, methods, domains, specific concepts.
+Exclude: filler words, questions, instructions.
+
+Question: {user_question[:400]}
+
+Concise query (max {max_length} chars):"""
+
+                model_name = self._get_model_name()
+                response = self.client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=30,
+                    temperature=0.0
+                )
+                extracted = response.choices[0].message.content.strip()
+
+                # Validate
+                if len(extracted) <= max_length and len(extracted) > 5:
+                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    if debug_mode:
+                        print(f"🔍 Extracted query: '{user_question[:80]}...' → '{extracted}'")
+                    return extracted
+
+            except Exception as e:
+                logger.warning(f"Query extraction failed: {e}")
+
+        # Fallback: Heuristic extraction
+        # Remove common question words and keep technical terms
+        stop_words = {'find', 'search', 'show', 'tell', 'get', 'give', 'me', 'papers', 'about', 'on', 'for',
+                     'recent', 'latest', 'what', 'are', 'the', 'is', 'in', 'of', 'to', 'and', 'or', 'a', 'an',
+                     'need', 'want', 'help', 'can', 'you', 'i', 'understand', 'explain', 'how', 'why'}
+
+        words = user_question.replace('?', '').replace('\n', ' ').split()
+        keywords = []
+        for w in words:
+            if w.lower() not in stop_words and len(w) > 2:
+                keywords.append(w)
+                if len(' '.join(keywords)) > max_length:
+                    break
+
+        result = ' '.join(keywords[:15])  # Max 15 words
+        return result[:max_length]  # Hard limit
+
     async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search academic papers using Archive API with resilient fallbacks."""
+        # CRITICAL: Extract concise query to avoid API 422 errors (500 char limit)
+        search_query = await self._extract_search_query(query, max_length=100)
         source_sets: List[List[str]] = [
             ["semantic_scholar", "openalex"],
             ["semantic_scholar"],
@@ -2545,7 +2626,7 @@ class EnhancedNocturnalAgent:
         aggregated_payload: Dict[str, Any] = {"results": []}
 
         for sources in source_sets:
-            data = {"query": query, "limit": limit, "sources": sources}
+            data = {"query": search_query, "limit": limit, "sources": sources}
             tried.append(list(sources))
             result = await self._call_archive_api("search", data)
 
@@ -3869,8 +3950,16 @@ class EnhancedNocturnalAgent:
         """
         Detect if query is too vague to warrant API calls
         Returns True if we should skip APIs and just ask clarifying questions
+
+        NOTE: Research queries (papers, studies, literature) should NEVER be marked vague
         """
         question_lower = question.lower()
+
+        # NEVER mark research queries as vague - they need Archive API
+        research_indicators = ['paper', 'papers', 'study', 'studies', 'literature', 'research',
+                             'publication', 'article', 'self-supervised', 'transformer', 'neural']
+        if any(indicator in question_lower for indicator in research_indicators):
+            return False  # Research queries always need Archive API
         
         # Pattern 1: Multiple years without SPECIFIC topic (e.g., "2008, 2015, 2019")
         # import re removed - using module-level import
