@@ -334,12 +334,12 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "load_dataset",
             "description": (
-                "Load a dataset from CSV or Excel file and AUTOMATICALLY compute statistics (mean, std, min, max, median). "
-                "ALWAYS use this tool (not read_file) when user asks for: mean, average, standard deviation, min, max, median, statistics, "
-                "calculate, compute, analyze data, load CSV/Excel, work with datasets. "
-                "This tool returns pre-computed statistics so you can answer statistical questions immediately. "
-                "Examples: 'load data.csv and calculate mean', 'analyze this Excel file', "
-                "'what is the average in my dataset', 'compute standard deviation'"
+                "Load CSV/Excel file and compute statistics. "
+                "CALL DIRECTLY when user mentions ANY filename.csv/.xlsx - DO NOT search first! "
+                "If file not found, tool returns error (that's fine, tell user). "
+                "Use when: 'load X.csv', 'open data.xlsx', 'analyze file.csv'. "
+                "DO NOT use list_directory to find it first - just call this tool immediately. "
+                "Returns: mean, std, min, max, median for all numeric columns."
             ),
             "parameters": {
                 "type": "object",
@@ -359,11 +359,11 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "analyze_data",
             "description": (
-                "Compute descriptive statistics or correlation analysis on loaded dataset. "
-                "Use for: descriptive stats (mean, median, std, quartiles), correlation tests, "
-                "data summary, exploring relationships between variables. "
-                "Examples: 'show me descriptive stats', 'correlate hours and scores', "
-                "'is there a relationship between X and Y'"
+                "Get statistics from ALREADY LOADED dataset. "
+                "Use when user asks: 'what's the mean/average/median', 'show statistics', 'calculate std'. "
+                "IMPORTANT: If previous conversation mentioned loading a file, use this to get stats. "
+                "DO NOT search for files - assume data is already loaded from previous load_dataset call. "
+                "Returns: mean, median, std, min, max, quartiles for specified column or all columns."
             ),
             "parameters": {
                 "type": "object",
