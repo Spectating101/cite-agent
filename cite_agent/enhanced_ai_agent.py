@@ -1823,20 +1823,20 @@ class EnhancedNocturnalAgent:
 
             if details:
                 body = (
-                    "I pulled the structured data you asked for, but I'm temporarily out of Groq quota to synthesize a full answer. "
-                    "Here are the raw results so you can keep moving:"
+                    "I gathered the data you requested, but the LLM synthesis failed. "
+                    "Here are the raw results:"
                 ) + "\n\n" + "\n\n".join(details)
             else:
                 body = (
-                    "I'm temporarily out of Groq quota, so I can't compose a full answer. "
-                    "Please try again in a bit, or ask me to queue this work for later."
+                    "I encountered an LLM error while processing your request. "
+                    "Please try again, or rephrase your question."
                 )
 
         footer = (
-            "\n\nNext steps:\n"
-            "• Wait for the Groq daily quota to reset (usually within 24 hours).\n"
-            "• Add another API key in your environment for automatic rotation.\n"
-            "• Keep the conversation open—I’ll resume normal replies once capacity returns."
+            "\n\nTroubleshooting:\n"
+            "• Check if the LLM service is available\n"
+            "• Try simplifying your question\n"
+            "• The agent will automatically retry on the next query"
         )
 
         message = header + body + footer
@@ -3873,15 +3873,30 @@ Concise query (max {max_length} chars):"""
 
         # PRIORITY 1: Detect meta/conversational queries about the agent itself
         # These should NOT trigger Archive API searches
+        # IMPORTANT: Don't block action requests like "can you find papers" or "can you analyze"
+        # Only block queries ABOUT the agent itself
         meta_query_indicators = [
-            'did you', 'do you', 'are you', 'can you', 'will you', 'have you',
-            'hardcode', 'programmed', 'your code', 'your response', 'your answer',
-            'what are you', 'how do you work', 'who made you', 'who built you',
+            'what are you', 'who are you', 'are you a', 'are you an',
+            'how do you work', 'who made you', 'who built you',
             'what can you do', 'what do you do', 'tell me about yourself',
-            'your capabilities', 'your features', 'how were you made'
+            'your capabilities', 'your features', 'how were you made',
+            'hardcode', 'programmed', 'your code', 'your response', 'your answer'
         ]
 
-        is_meta_query = any(indicator in question_lower for indicator in meta_query_indicators)
+        # More specific checks for agent-introspection questions
+        # Must contain both an agent-question word AND a self-reference
+        agent_question_words = ['did you', 'do you', 'are you', 'can you', 'will you', 'have you']
+        agent_self_refs = ['hardcode', 'program', 'your code', 'your response', 'your answer',
+                          'your capabilities', 'yourself', 'your features', 'you made', 'you built']
+
+        has_agent_question = any(word in question_lower for word in agent_question_words)
+        has_self_ref = any(ref in question_lower for ref in agent_self_refs)
+
+        # Explicit meta indicators (always block)
+        explicit_meta = any(indicator in question_lower for indicator in meta_query_indicators)
+
+        # Combined meta detection: explicit meta OR (agent_question + self_ref)
+        is_meta_query = explicit_meta or (has_agent_question and has_self_ref)
 
         # If it's a meta query, return early as general (no APIs)
         if is_meta_query:
@@ -3934,7 +3949,18 @@ Concise query (max {max_length} chars):"""
         research_keywords = [
             'research', 'paper', 'study', 'academic', 'literature', 'journal',
             'synthesis', 'findings', 'methodology', 'abstract', 'citation',
-            'author', 'publication', 'peer review', 'scientific'
+            'author', 'publication', 'peer review', 'scientific',
+            # Technical/architecture terms that indicate research queries
+            'transformer', 'transformers', 'neural', 'network', 'architecture',
+            'model', 'models', 'algorithm', 'deep learning', 'machine learning',
+            'vision transformer', 'vit', 'bert', 'gpt', 'attention mechanism',
+            'self-supervised', 'supervised', 'unsupervised', 'pre-training',
+            # Domain-specific research terms
+            'medical imaging', 'chest x-ray', 'ct scan', 'mri', 'diagnosis',
+            'clinical', 'pathology', 'radiology', 'biomedical',
+            # Research action words
+            'find papers', 'search papers', 'recent papers', 'survey',
+            'state of the art', 'sota', 'baseline', 'benchmark'
         ]
         
         # Qualitative indicators (research-specific only)
@@ -4048,7 +4074,25 @@ Concise query (max {max_length} chars):"""
             # Some of both - default to mixed
             analysis_mode = "mixed"
 
-        if any(keyword in question_lower for keyword in financial_keywords):
+        # Financial keyword detection with word boundaries to avoid false positives
+        # (e.g., "approaches" should NOT match "roa", "tickers" should NOT match "ticker")
+        import re
+        financial_matched = False
+        for keyword in financial_keywords:
+            # For single-word financial metrics (roa, roe, eps, etc.), require word boundaries
+            if len(keyword.split()) == 1 and len(keyword) <= 4:
+                # Short acronyms/metrics: require word boundaries
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                if re.search(pattern, question_lower):
+                    financial_matched = True
+                    break
+            else:
+                # Multi-word phrases or longer words: use simple substring match
+                if keyword in question_lower:
+                    financial_matched = True
+                    break
+
+        if financial_matched:
             matched_types.append("financial")
             apis_to_use.append("finsight")
 
