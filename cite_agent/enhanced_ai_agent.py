@@ -4514,6 +4514,81 @@ Concise query (max {max_length} chars):"""
             if debug_mode:
                 print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
 
+            # OPTIMIZATION: Skip synthesis for simple shell operations
+            # If single tool call and it's a shell command, return output directly
+            if len(all_tool_calls) == 1:
+                tool_call = all_tool_calls[0]
+                result = all_tool_results.get(tool_call.id, {})
+
+                if tool_call.name == "execute_shell_command" and "output" in result:
+                    command = result.get("command", "")
+                    output = result.get("output", "")
+                    cwd = result.get("working_directory", ".")
+
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] Direct shell output - skipping synthesis")
+
+                    # Format based on command type
+                    if command.strip().startswith("cd "):
+                        final_text = f"Changed to {cwd}"
+                    elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
+                        final_text = output if output else "(no output)"
+                    else:
+                        final_text = f"$ {command}\n{output}" if output else f"$ {command}\n(completed)"
+
+                    # Update conversation history
+                    if hasattr(self, 'conversation_history'):
+                        self.conversation_history.append({"role": "user", "content": request.question})
+                        self.conversation_history.append({"role": "assistant", "content": final_text})
+
+                    return ChatResponse(
+                        response=final_text,
+                        tokens_used=total_tokens,
+                        tools_used=all_tools_used,
+                        confidence_score=0.9,
+                        api_results=all_tool_results
+                    )
+
+                elif tool_call.name == "list_directory" and "listing" in result:
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] Direct directory listing - skipping synthesis")
+
+                    path = result.get("path", ".")
+                    listing = result.get("listing", "")
+                    final_text = f"Contents of {path}:\n\n{listing}"
+
+                    if hasattr(self, 'conversation_history'):
+                        self.conversation_history.append({"role": "user", "content": request.question})
+                        self.conversation_history.append({"role": "assistant", "content": final_text})
+
+                    return ChatResponse(
+                        response=final_text,
+                        tokens_used=total_tokens,
+                        tools_used=all_tools_used,
+                        confidence_score=0.9,
+                        api_results=all_tool_results
+                    )
+
+                elif tool_call.name == "read_file" and "content" in result:
+                    if debug_mode:
+                        print(f"🔍 [Function Calling] Direct file read - skipping synthesis")
+
+                    file_path = result.get("file_path", "unknown")
+                    content = result.get("content", "")
+                    final_text = f"Contents of {file_path}:\n\n{content}"
+
+                    if hasattr(self, 'conversation_history'):
+                        self.conversation_history.append({"role": "user", "content": request.question})
+                        self.conversation_history.append({"role": "assistant", "content": final_text})
+
+                    return ChatResponse(
+                        response=final_text,
+                        tokens_used=total_tokens,
+                        tools_used=all_tools_used,
+                        confidence_score=0.9,
+                        api_results=all_tool_results
+                    )
+
             # For multi-step: Use the full conversation that was built during iterations
             # For single-step: Build a fresh conversation with formatted results
             # FIXED: Check actual iteration count, not MAX_ITERATIONS constant
@@ -4629,7 +4704,7 @@ Concise query (max {max_length} chars):"""
 
             # FUNCTION CALLING MODE: Cursor-like iterative tool execution
             if use_function_calling and self.client is not None:
-                return await self._process_request_function_calling(request)
+                return await self.process_request_with_function_calling(request)
 
             # TRADITIONAL MODE: Works reliably for all query types
 

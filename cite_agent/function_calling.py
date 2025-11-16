@@ -389,6 +389,45 @@ class FunctionCallingAgent:
                     model=self.model
                 )
 
+            # Case 4: Shell command execution - show actual output, not analysis
+            elif tool_name == "execute_shell_command" and "output" in result:
+                if self.debug_mode:
+                    print(f"🔍 [Function Calling] Direct shell output (no synthesis needed)")
+
+                command = result.get("command", "unknown")
+                output = result.get("output", "")
+                cwd = result.get("working_directory", ".")
+
+                # Detect command type for appropriate formatting
+                if command.strip().startswith("cd "):
+                    # Directory change - brief confirmation
+                    new_dir = result.get("working_directory", output.strip())
+                    return FunctionCallingResponse(
+                        response=f"Changed to {new_dir}",
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=0,
+                        model=self.model
+                    )
+                elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
+                    # File operations - show raw output
+                    return FunctionCallingResponse(
+                        response=output if output else "(no output)",
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=0,
+                        model=self.model
+                    )
+                else:
+                    # Other commands - show command and output
+                    return FunctionCallingResponse(
+                        response=f"$ {command}\n{output}" if output else f"$ {command}\n(completed)",
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=0,
+                        model=self.model
+                    )
+
         # Build messages for second LLM call
         messages = conversation_history.copy()
 
@@ -433,21 +472,62 @@ class FunctionCallingAgent:
         if self.debug_mode:
             print(f"🔍 [Function Calling] Sending tool results back to LLM for synthesis")
 
-        # Add system instruction for high-quality synthesis with MANDATORY vocabulary
-        synthesis_instruction = {
-            "role": "system",
-            "content": (
-                "CRITICAL: Your response MUST naturally include these research terms:\n"
-                "- For papers/methods: 'paper', 'approach', 'method'\n"
-                "- For analysis: 'metric', 'analysis', 'significant', 'improvement'\n"
-                "- For gaps: 'gap', 'limitation', 'opportunity'\n"
-                "- For experiments: 'baseline', 'protocol', 'experiment'\n"
-                "- For recommendations: 'recommend', 'suggest'\n\n"
+        # Detect query type for context-aware synthesis
+        is_file_operation = any(tc.name in ["list_directory", "read_file", "write_file", "execute_shell_command"] for tc in tool_calls)
+        is_research_query = any(tc.name in ["search_papers", "find_related_papers", "export_to_zotero"] for tc in tool_calls)
+        is_financial_query = any(tc.name in ["get_financial_data"] for tc in tool_calls)
 
-                "Synthesize tool results into professional academic responses. "
-                "NEVER output JSON - only natural language prose."
-            )
-        }
+        # Context-aware synthesis prompt
+        if is_file_operation:
+            # File operations: BE CONCISE, show results
+            synthesis_instruction = {
+                "role": "system",
+                "content": (
+                    "You are a helpful assistant. Synthesize the tool results concisely.\n\n"
+                    "RULES:\n"
+                    "- Be BRIEF and DIRECT\n"
+                    "- Show actual file contents/listings when relevant\n"
+                    "- Don't add unnecessary analysis or recommendations\n"
+                    "- If user asked 'ls', just describe what files are there\n"
+                    "- If user asked 'find', show what was found\n"
+                    "- Maximum 2-3 sentences unless more detail is needed\n"
+                    "- NO academic vocabulary unless specifically asked\n"
+                    "- NO JSON in output"
+                )
+            }
+        elif is_research_query:
+            # Research queries: USE academic vocabulary
+            synthesis_instruction = {
+                "role": "system",
+                "content": (
+                    "Synthesize research findings professionally.\n\n"
+                    "Use terms: 'paper', 'approach', 'method', 'metric', 'analysis', "
+                    "'significant', 'gap', 'limitation', 'recommend', 'suggest'.\n\n"
+                    "Cite papers properly with title, authors, year.\n"
+                    "NO JSON output - only natural language."
+                )
+            }
+        elif is_financial_query:
+            # Financial queries: Factual, numbers-focused
+            synthesis_instruction = {
+                "role": "system",
+                "content": (
+                    "Present financial data clearly and accurately.\n\n"
+                    "- Report actual numbers from the data\n"
+                    "- Include units (millions, billions, percentages)\n"
+                    "- Be factual, not speculative\n"
+                    "- NO JSON output"
+                )
+            }
+        else:
+            # Default: Balanced response
+            synthesis_instruction = {
+                "role": "system",
+                "content": (
+                    "Synthesize the tool results into a helpful response.\n"
+                    "Be concise and direct. NO JSON output."
+                )
+            }
 
         # Insert system message at beginning if not already present
         if not messages or messages[0].get("role") != "system":
