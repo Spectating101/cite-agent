@@ -119,6 +119,59 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
     elif tool_name == "chat":
         return result.get("message", "")
 
+    elif tool_name == "load_dataset":
+        # CRITICAL: Format dataset loading to show statistics prominently
+        rows = result.get("rows", 0)
+        columns = result.get("columns", 0)
+        col_names = result.get("column_names", [])
+
+        output = f"Dataset loaded: {rows} rows × {columns} columns\n"
+        output += f"Columns: {', '.join(col_names)}\n"
+
+        # CRITICAL: Show computed statistics if available
+        if "column_statistics" in result:
+            output += "\n=== COMPUTED STATISTICS (USE THESE VALUES) ===\n"
+            for col, stats in result["column_statistics"].items():
+                output += f"{col}:\n"
+                output += f"  mean = {stats['mean']:.6f}\n"
+                output += f"  std = {stats['std']:.6f}\n"
+                output += f"  min = {stats['min']:.6f}\n"
+                output += f"  max = {stats['max']:.6f}\n"
+                output += f"  median = {stats['median']:.6f}\n"
+            output += "=== END STATISTICS ===\n"
+            output += "\nIMPORTANT: These statistics are already computed. Report them directly to user.\n"
+
+        return output
+
+    elif tool_name == "analyze_data":
+        # Format analysis results concisely
+        if "column" in result:
+            # Single column stats
+            col = result["column"]
+            output = f"Statistics for {col}:\n"
+            output += f"  mean = {result.get('mean', 'N/A')}\n"
+            output += f"  std = {result.get('std', 'N/A')}\n"
+            output += f"  min = {result.get('min', 'N/A')}\n"
+            output += f"  max = {result.get('max', 'N/A')}\n"
+            output += f"  median = {result.get('median', 'N/A')}\n"
+            return output
+        elif "stats" in result:
+            # All columns stats
+            output = "Statistics for all numeric columns:\n"
+            for col, stats in result["stats"].items():
+                output += f"{col}: mean={stats['mean']:.4f}, std={stats['std']:.4f}\n"
+            return output
+        return json.dumps(result)[:400]
+
+    elif tool_name == "run_python_code":
+        # Format Python execution results
+        if result.get("success"):
+            code = result.get("code", "")
+            res = result.get("result", "")
+            result_type = result.get("result_type", "")
+            return f"Code executed: {code[:100]}...\nResult ({result_type}):\n{res[:1000]}"
+        return result.get("error", json.dumps(result)[:400])
+
     # Default: truncated JSON
     return json.dumps(result)[:400]
 
@@ -476,9 +529,27 @@ class FunctionCallingAgent:
         is_file_operation = any(tc.name in ["list_directory", "read_file", "write_file", "execute_shell_command"] for tc in tool_calls)
         is_research_query = any(tc.name in ["search_papers", "find_related_papers", "export_to_zotero"] for tc in tool_calls)
         is_financial_query = any(tc.name in ["get_financial_data"] for tc in tool_calls)
+        is_data_analysis = any(tc.name in ["load_dataset", "analyze_data", "run_regression", "plot_data"] for tc in tool_calls)
 
         # Context-aware synthesis prompt
-        if is_file_operation:
+        if is_data_analysis:
+            # Data analysis: CONCISE, show actual numbers
+            synthesis_instruction = {
+                "role": "system",
+                "content": (
+                    "You are a data analysis assistant. Report results concisely.\n\n"
+                    "CRITICAL RULES:\n"
+                    "- Extract and report the ACTUAL NUMBERS from the tool results\n"
+                    "- If user asks for 'mean spread', find the mean value for Spread column and report it\n"
+                    "- Format: 'Mean Spread = -0.678' or 'Spread: mean=-0.678, std=0.123'\n"
+                    "- Be EXTREMELY BRIEF - just the numbers requested\n"
+                    "- NO essays, NO lengthy explanations, NO academic vocabulary\n"
+                    "- If data has column_statistics, use those values directly\n"
+                    "- Maximum 1-2 sentences for simple stats queries\n"
+                    "- NO JSON output"
+                )
+            }
+        elif is_file_operation:
             # File operations: BE CONCISE, show results
             synthesis_instruction = {
                 "role": "system",

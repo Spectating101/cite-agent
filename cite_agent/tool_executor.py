@@ -79,6 +79,8 @@ class ToolExecutor:
                 return self._execute_run_regression(arguments)
             elif tool_name == "plot_data":
                 return self._execute_plot_data(arguments)
+            elif tool_name == "run_python_code":
+                return self._execute_run_python_code(arguments)
             elif tool_name == "run_r_code":
                 return self._execute_run_r_code(arguments)
             elif tool_name == "detect_project":
@@ -411,6 +413,59 @@ class ToolExecutor:
                     # Relative path - resolve from current_cwd
                     target_dir = os.path.join(current_cwd, target_dir)
 
+                # SEMANTIC/FUZZY DIRECTORY MATCHING
+                # If exact path doesn't exist, try to find a close match
+                if not os.path.exists(target_dir):
+                    parent_dir = os.path.dirname(target_dir)
+                    target_name = os.path.basename(target_dir)
+
+                    if os.path.exists(parent_dir):
+                        # Look for similar directories in parent
+                        try:
+                            subdirs = [d for d in os.listdir(parent_dir) if os.path.isdir(os.path.join(parent_dir, d))]
+
+                            # Normalize target for matching (remove spaces, lowercase)
+                            target_normalized = target_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+
+                            best_match = None
+                            best_score = 0
+
+                            for subdir in subdirs:
+                                # Normalize subdir name
+                                subdir_normalized = subdir.lower().replace(" ", "").replace("-", "").replace("_", "")
+
+                                # Check various matching strategies
+                                score = 0
+
+                                # Exact normalized match
+                                if target_normalized == subdir_normalized:
+                                    score = 100
+                                # Target is substring of subdir (e.g., "cm522" in "cm522-main")
+                                elif target_normalized in subdir_normalized:
+                                    score = 80
+                                # Subdir is substring of target
+                                elif subdir_normalized in target_normalized:
+                                    score = 70
+                                # Check if all parts of target appear in subdir
+                                # e.g., "cm 522" -> ["cm", "522"] both in "cm522-main"
+                                else:
+                                    target_parts = target_name.lower().split()
+                                    if all(part.replace("-", "").replace("_", "") in subdir_normalized for part in target_parts):
+                                        score = 60
+
+                                if score > best_score:
+                                    best_score = score
+                                    best_match = subdir
+
+                            if best_match and best_score >= 60:
+                                old_target = target_dir
+                                target_dir = os.path.join(parent_dir, best_match)
+                                if self.debug_mode:
+                                    print(f"⚙️  [Shell Command] Fuzzy match: '{os.path.basename(old_target)}' → '{best_match}' (score: {best_score})")
+                        except Exception as e:
+                            if self.debug_mode:
+                                print(f"⚙️  [Shell Command] Fuzzy matching failed: {e}")
+
                 # Execute cd and get new pwd
                 cd_cmd = f"cd {target_dir} && pwd"
                 output = self.agent.execute_command(cd_cmd)
@@ -711,14 +766,24 @@ class ToolExecutor:
     # =========================================================================
 
     def _execute_load_dataset(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute load_dataset tool - Load CSV/Excel dataset"""
+        """Execute load_dataset tool - Load CSV/Excel dataset with PERSISTENT cwd support"""
         filepath = args.get("filepath", "")
 
         if not filepath:
             return {"error": "Missing required parameter: filepath"}
 
+        # Get current working directory from agent context
+        current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+
+        # Resolve relative paths from current working directory
+        if not filepath.startswith('/') and not filepath.startswith('~'):
+            filepath = os.path.join(current_cwd, filepath)
+        elif filepath.startswith('~'):
+            filepath = os.path.expanduser(filepath)
+
         if self.debug_mode:
             print(f"📊 [Data Analyzer] Loading dataset: {filepath}")
+            print(f"📊 [Data Analyzer] Current CWD: {current_cwd}")
 
         try:
             # Initialize data analyzer if needed
@@ -729,6 +794,29 @@ class ToolExecutor:
 
             if self.debug_mode:
                 print(f"📊 [Data Analyzer] Loaded {result.get('rows', 0)} rows, {result.get('columns', 0)} columns")
+
+            # ENHANCEMENT: Auto-compute descriptive stats for all numeric columns
+            # This allows single-call data analysis (no need to chain load + analyze)
+            if "error" not in result and hasattr(self._data_analyzer, 'current_dataset'):
+                df = self._data_analyzer.current_dataset
+                if df is not None:
+                    # Add basic stats for each numeric column
+                    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                    if numeric_cols:
+                        column_stats = {}
+                        for col in numeric_cols:
+                            series = df[col]
+                            column_stats[col] = {
+                                "mean": float(series.mean()),
+                                "std": float(series.std()),
+                                "min": float(series.min()),
+                                "max": float(series.max()),
+                                "median": float(series.median())
+                            }
+                        result["column_statistics"] = column_stats
+
+                        if self.debug_mode:
+                            print(f"📊 [Data Analyzer] Auto-computed stats for {len(numeric_cols)} numeric columns")
 
             return result
 
@@ -859,6 +947,102 @@ class ToolExecutor:
 
         except Exception as e:
             return {"error": f"Plotting failed: {str(e)}"}
+
+    def _execute_run_python_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute Python code for data analysis with pandas/numpy/scipy"""
+        python_code = args.get("python_code", "")
+        filepath = args.get("filepath", "")
+
+        if not python_code:
+            return {"error": "Missing required parameter: python_code"}
+
+        if self.debug_mode:
+            print(f"🐍 [Python Code] Executing: {python_code[:100]}...")
+
+        try:
+            import pandas as pd
+            import numpy as np
+            from pathlib import Path
+
+            # Load dataset if filepath provided
+            df = None
+            if filepath:
+                # Resolve relative paths from current working directory
+                current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+                if not filepath.startswith('/') and not filepath.startswith('~'):
+                    filepath = os.path.join(current_cwd, filepath)
+                elif filepath.startswith('~'):
+                    filepath = os.path.expanduser(filepath)
+
+                # Load the file
+                path_obj = Path(filepath)
+                if path_obj.suffix.lower() == '.csv':
+                    df = pd.read_csv(filepath)
+                elif path_obj.suffix.lower() in ['.xlsx', '.xls']:
+                    df = pd.read_excel(filepath)
+                elif path_obj.suffix.lower() == '.tsv':
+                    df = pd.read_csv(filepath, sep='\t')
+                else:
+                    return {"error": f"Unsupported file type: {path_obj.suffix}"}
+
+                if self.debug_mode:
+                    print(f"🐍 [Python Code] Loaded dataset: {filepath} ({len(df)} rows)")
+
+            # If no filepath provided, use the already loaded dataset
+            elif hasattr(self, '_data_analyzer') and self._data_analyzer.current_dataset is not None:
+                df = self._data_analyzer.current_dataset
+                if self.debug_mode:
+                    print(f"🐍 [Python Code] Using pre-loaded dataset ({len(df)} rows)")
+            else:
+                return {"error": "No dataset loaded. Provide 'filepath' parameter or load dataset first."}
+
+            # Create execution environment
+            exec_globals = {
+                'pd': pd,
+                'np': np,
+                'df': df,
+                '__builtins__': __builtins__,
+            }
+
+            # Try to import scipy if available
+            try:
+                import scipy.stats
+                exec_globals['scipy'] = __import__('scipy')
+                exec_globals['stats'] = scipy.stats
+            except ImportError:
+                pass
+
+            # Execute the code
+            # If it's an expression, evaluate and return
+            try:
+                result = eval(python_code, exec_globals)
+            except SyntaxError:
+                # If eval fails, it might be a statement - execute it
+                exec(python_code, exec_globals)
+                result = exec_globals.get('result', 'Code executed successfully (no return value)')
+
+            # Convert result to string representation
+            if isinstance(result, pd.DataFrame):
+                result_str = result.to_string()
+            elif isinstance(result, pd.Series):
+                result_str = result.to_string()
+            elif isinstance(result, np.ndarray):
+                result_str = str(result)
+            else:
+                result_str = str(result)
+
+            if self.debug_mode:
+                print(f"🐍 [Python Code] Result: {result_str[:200]}...")
+
+            return {
+                "code": python_code,
+                "result": result_str,
+                "result_type": type(result).__name__,
+                "success": True
+            }
+
+        except Exception as e:
+            return {"error": f"Python execution failed: {str(e)}"}
 
     def _execute_run_r_code(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Execute run_r_code tool - Safe R code execution"""

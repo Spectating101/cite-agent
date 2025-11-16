@@ -4686,6 +4686,74 @@ Concise query (max {max_length} chars):"""
                         print(f"🔍 [Function Calling] Simple chat detected, skipping additional iterations")
                     break  # Skip to final synthesis
 
+                # OPTIMIZATION: If load_dataset returned stats and query asks for specific stat, return directly
+                if (iteration == 0 and
+                    len(fc_response.tool_calls) == 1 and
+                    fc_response.tool_calls[0].name == "load_dataset"):
+
+                    tool_result = iteration_results.get(fc_response.tool_calls[0].id, {})
+                    query_lower = request.question.lower()
+
+                    # Check if query asks for a specific statistic
+                    stat_keywords = ["mean", "average", "std", "standard deviation", "min", "max", "median"]
+                    asks_for_stat = any(kw in query_lower for kw in stat_keywords)
+
+                    if asks_for_stat and "column_statistics" in tool_result:
+                        # Find which column user wants
+                        col_stats = tool_result["column_statistics"]
+                        target_column = None
+
+                        for col_name in col_stats.keys():
+                            # Case-insensitive matching, also handle underscores/spaces
+                            col_lower = col_name.lower()
+                            col_no_underscore = col_lower.replace("_", " ")
+                            col_no_spaces = col_lower.replace("_", "")
+
+                            # Check multiple variations
+                            # e.g., "Low_Ivol_Return" matches "low ivol return", "low_ivol_return", "lowivolreturn"
+                            if (col_lower in query_lower or  # exact match
+                                col_no_underscore in query_lower or  # "low ivol return" in query
+                                col_no_spaces in query_lower.replace(" ", "") or  # no spaces match
+                                query_lower.replace(" ", "").find(col_no_spaces) != -1):  # substring match
+                                target_column = col_name
+                                break
+
+                        if target_column:
+                            stats = col_stats[target_column]
+                            # Determine which stat they want
+                            if "mean" in query_lower or "average" in query_lower:
+                                direct_answer = f"Mean {target_column} = {stats['mean']:.6f}"
+                            elif "std" in query_lower or "standard deviation" in query_lower:
+                                direct_answer = f"Standard deviation of {target_column} = {stats['std']:.6f}"
+                            elif "median" in query_lower:
+                                direct_answer = f"Median {target_column} = {stats['median']:.6f}"
+                            elif "min" in query_lower:
+                                direct_answer = f"Min {target_column} = {stats['min']:.6f}"
+                            elif "max" in query_lower:
+                                direct_answer = f"Max {target_column} = {stats['max']:.6f}"
+                            else:
+                                # Return all stats for the column
+                                direct_answer = (
+                                    f"{target_column} statistics:\n"
+                                    f"  mean = {stats['mean']:.6f}\n"
+                                    f"  std = {stats['std']:.6f}\n"
+                                    f"  min = {stats['min']:.6f}\n"
+                                    f"  max = {stats['max']:.6f}\n"
+                                    f"  median = {stats['median']:.6f}"
+                                )
+
+                            if debug_mode:
+                                print(f"🔍 [Function Calling] Direct answer from stats: {direct_answer}")
+
+                            # Return immediately without LLM synthesis
+                            return ChatResponse(
+                                response=direct_answer,
+                                tokens_used=total_tokens,  # Only count initial tool call
+                                tools_used=all_tools_used,
+                                confidence_score=0.95,
+                                api_results=all_tool_results
+                            )
+
                 # Add assistant message with tool calls to conversation
                 if fc_response.assistant_message and hasattr(fc_response.assistant_message, 'tool_calls'):
                     conversation.append({

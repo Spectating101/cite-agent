@@ -334,11 +334,12 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "load_dataset",
             "description": (
-                "Load a dataset from CSV or Excel file for analysis. "
-                "Use when user wants to: analyze data, load CSV/Excel, work with datasets, "
-                "read data files, explore data, run statistical analysis. "
-                "Examples: 'load data.csv', 'analyze this Excel file', "
-                "'I have a dataset at /path/to/data.csv'"
+                "Load a dataset from CSV or Excel file and AUTOMATICALLY compute statistics (mean, std, min, max, median). "
+                "ALWAYS use this tool (not read_file) when user asks for: mean, average, standard deviation, min, max, median, statistics, "
+                "calculate, compute, analyze data, load CSV/Excel, work with datasets. "
+                "This tool returns pre-computed statistics so you can answer statistical questions immediately. "
+                "Examples: 'load data.csv and calculate mean', 'analyze this Excel file', "
+                "'what is the average in my dataset', 'compute standard deviation'"
             ),
             "parameters": {
                 "type": "object",
@@ -506,6 +507,38 @@ TOOLS: List[Dict[str, Any]] = [
                     }
                 },
                 "required": ["plot_type"]
+            }
+        }
+    },
+
+    # =========================================================================
+    # PYTHON CODE EXECUTION TOOL
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "run_python_code",
+            "description": (
+                "Execute Python code for data analysis with pandas, numpy, scipy. "
+                "Use for COMPLEX calculations: correlations, regressions, custom aggregations, "
+                "filtering, groupby operations, statistical tests, data transformations. "
+                "The code has access to 'df' (loaded dataset) and returns the result. "
+                "Examples: 'df.groupby(\"Method\").mean()', 'df[\"Spread\"].corr(df[\"Low_Ivol_Return\"])', "
+                "'scipy.stats.ttest_ind(group1, group2)', 'df.describe()'"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "python_code": {
+                        "type": "string",
+                        "description": "Python code to execute. Has access to: df (pandas DataFrame), pd (pandas), np (numpy), scipy.stats"
+                    },
+                    "filepath": {
+                        "type": "string",
+                        "description": "Optional: Path to CSV/Excel file to load as 'df' (if not already loaded)"
+                    }
+                },
+                "required": ["python_code"]
             }
         }
     },
