@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3:*)",
       "Bash(env)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\n✨ FEAT: Cursor-like agent with persistent directory and direct shell output\n\nMajor improvements for natural file system navigation:\n\n- Enable function calling mode via NOCTURNAL_FUNCTION_CALLING=1\n- Persistent working directory across all tool calls (cd persists)\n- Direct shell output for commands (no academic essay synthesis)\n- Context-aware response synthesis (concise for files, academic for research)\n- Relative paths resolve from current working directory\n- All file tools (read, write, list, shell) respect current cwd\n\nNatural commands now work:\n  cd ~/Downloads → ls → find *.csv → python3 analysis\n\nNo more \"Run:\" prefix or absolute path requirements.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

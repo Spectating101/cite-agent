@@ -4325,6 +4325,159 @@ Concise query (max {max_length} chars):"""
         else:
             return "gpt-4o-mini"  # Fallback
 
+    async def _try_heuristic_shell_execution(self, request: ChatRequest, debug_mode: bool = False) -> Optional[ChatResponse]:
+        """
+        Try to execute obvious shell commands without calling the LLM.
+        Saves 8000-20000 tokens per command by bypassing LLM routing.
+
+        Returns ChatResponse if command was executed, None if LLM routing needed.
+        """
+        query = request.question.strip()
+
+        # Detect obvious shell commands
+        shell_commands = [
+            "ls", "pwd", "cd", "cat", "head", "tail", "find", "grep",
+            "wc", "mkdir", "rm", "cp", "mv", "touch", "echo", "python3",
+            "python", "pip", "git", "which", "whoami", "date", "df", "du"
+        ]
+
+        # Check if query starts with a known shell command
+        first_word = query.split()[0] if query.split() else ""
+
+        # Also check for common patterns
+        is_shell_command = (
+            first_word in shell_commands or
+            query.startswith("cd ") or
+            query.startswith("ls ") or
+            query.startswith("cat ") or
+            query.startswith("head ") or
+            query.startswith("tail ") or
+            query.startswith("find ") or
+            query.startswith("grep ") or
+            query.startswith("python3 ") or
+            query.startswith("python ") or
+            query == "pwd" or
+            query == "ls" or
+            (query.startswith("./") and " " not in query)  # Execute script
+        )
+
+        # Map natural language to shell commands
+        query_lower = query.lower()
+        natural_language_mappings = {
+            # File listing patterns
+            "what files": "ls -la",
+            "show files": "ls -la",
+            "list files": "ls -la",
+            "what's here": "ls -la",
+            "what is here": "ls -la",
+            "what's in this directory": "ls -la",
+            "what is in this directory": "ls -la",
+            "show me the files": "ls -la",
+            "list the files": "ls -la",
+            "what do we have here": "ls -la",
+            "show directory": "ls -la",
+            "directory contents": "ls -la",
+            "folder contents": "ls -la",
+            "what's in the folder": "ls -la",
+            "what is in the folder": "ls -la",
+
+            # Current directory patterns
+            "where am i": "pwd",
+            "current directory": "pwd",
+            "what directory": "pwd",
+            "which directory": "pwd",
+            "current location": "pwd",
+            "what folder": "pwd",
+            "which folder": "pwd",
+            "current path": "pwd",
+
+            # Go home
+            "go home": "cd ~",
+            "go to home": "cd ~",
+            "return home": "cd ~",
+            "back to home": "cd ~",
+
+            # Go back
+            "go back": "cd ..",
+            "go up": "cd ..",
+            "parent directory": "cd ..",
+            "up one level": "cd ..",
+
+            # Git operations
+            "git status": "git status",
+            "check git": "git status",
+            "git log": "git log --oneline -10",
+            "show git log": "git log --oneline -10",
+            "recent commits": "git log --oneline -10",
+        }
+
+        mapped_command = None
+        for pattern, command in natural_language_mappings.items():
+            if pattern in query_lower:
+                mapped_command = command
+                if debug_mode:
+                    print(f"🚀 [Heuristic] Mapped '{query}' to '{command}'")
+                break
+
+        if not is_shell_command and not mapped_command:
+            return None  # Not a shell command, use LLM routing
+
+        # Use mapped command if available
+        if mapped_command:
+            query = mapped_command
+
+        if debug_mode:
+            print(f"🚀 [Heuristic] Detected shell command: {query[:50]}... (skipping LLM)")
+
+        # Execute directly via tool executor
+        try:
+            result = await self._tool_executor.execute_tool(
+                tool_name="execute_shell_command",
+                arguments={"command": query}
+            )
+
+            if "error" in result:
+                return ChatResponse(
+                    response=f"Error: {result['error']}",
+                    tokens_used=0,  # No LLM call!
+                    tools_used=["execute_shell_command"],
+                    confidence_score=0.9,
+                    api_results={"shell": result}
+                )
+
+            # Format output based on command type
+            command = result.get("command", query)
+            output = result.get("output", "")
+            cwd = result.get("working_directory", ".")
+
+            if command.strip().startswith("cd "):
+                final_text = f"Changed to {cwd}"
+            elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
+                final_text = output if output else "(no output)"
+            else:
+                final_text = f"$ {command}\n{output}" if output else f"$ {command}\n(completed)"
+
+            # Update conversation history
+            if hasattr(self, 'conversation_history'):
+                self.conversation_history.append({"role": "user", "content": request.question})
+                self.conversation_history.append({"role": "assistant", "content": final_text})
+
+            if debug_mode:
+                print(f"🚀 [Heuristic] Command executed (0 tokens used)")
+
+            return ChatResponse(
+                response=final_text,
+                tokens_used=0,  # No LLM call!
+                tools_used=["execute_shell_command"],
+                confidence_score=0.95,
+                api_results={"shell": result}
+            )
+
+        except Exception as e:
+            if debug_mode:
+                print(f"⚠️ [Heuristic] Execution failed: {e}, falling back to LLM")
+            return None  # Fall back to LLM routing
+
     async def process_request_with_function_calling(self, request: ChatRequest) -> ChatResponse:
         """
         Process request using function calling (local mode only).
@@ -4346,6 +4499,16 @@ Concise query (max {max_length} chars):"""
             if workflow_response:
                 return workflow_response
 
+            # Initialize tool executor (needed for heuristic path)
+            if not hasattr(self, '_tool_executor'):
+                self._tool_executor = ToolExecutor(agent=self)
+
+            # OPTIMIZATION: Heuristic shell command detection (skip LLM entirely)
+            # Saves 8000-20000 tokens per command for obvious cases
+            heuristic_response = await self._try_heuristic_shell_execution(request, debug_mode)
+            if heuristic_response:
+                return heuristic_response
+
             # Initialize function calling agent
             if not hasattr(self, '_function_calling_agent'):
                 self._function_calling_agent = FunctionCallingAgent(
@@ -4353,10 +4516,6 @@ Concise query (max {max_length} chars):"""
                     model=self._get_model_name(),
                     provider=self.llm_provider
                 )
-
-            # Initialize tool executor
-            if not hasattr(self, '_tool_executor'):
-                self._tool_executor = ToolExecutor(agent=self)
 
             if debug_mode:
                 print(f"🔍 [Function Calling] Processing query: {request.question[:100]}...")
