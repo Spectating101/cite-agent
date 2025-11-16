@@ -2750,16 +2750,17 @@ class EnhancedNocturnalAgent:
     async def _extract_search_query(self, user_question: str, max_length: int = 100) -> str:
         """
         Extract concise search keywords from user questions for Archive API.
-        CRITICAL: Archive API has 500 char limit, we target 100 chars for safety.
+        CRITICAL: Archive API works better with keywords than full sentences.
+
+        ALWAYS extract keywords, even from short queries, to remove filler words like:
+        "Find recent papers on X" → "X"
 
         Strategies:
-        1. If already short (<= max_length), use as-is
-        2. Use LLM to extract core keywords if available
-        3. Fallback to heuristic extraction
+        1. Use LLM to extract core keywords if available
+        2. Fallback to heuristic extraction
         """
-        # Already short enough
-        if len(user_question) <= max_length:
-            return user_question
+        # ALWAYS extract keywords - don't return raw query even if short
+        # Research APIs (Semantic Scholar, etc.) work better with keywords than sentences
 
         # Try LLM extraction if available
         if self.client:
@@ -2795,7 +2796,8 @@ Concise query (max {max_length} chars):"""
         # Remove common question words and keep technical terms
         stop_words = {'find', 'search', 'show', 'tell', 'get', 'give', 'me', 'papers', 'about', 'on', 'for',
                      'recent', 'latest', 'what', 'are', 'the', 'is', 'in', 'of', 'to', 'and', 'or', 'a', 'an',
-                     'need', 'want', 'help', 'can', 'you', 'i', 'understand', 'explain', 'how', 'why'}
+                     'need', 'want', 'help', 'can', 'you', 'i', 'understand', 'explain', 'how', 'why', 'study',
+                     'research', 'relationship', 'between'}
 
         words = user_question.replace('?', '').replace('\n', ' ').split()
         keywords = []
@@ -2806,7 +2808,13 @@ Concise query (max {max_length} chars):"""
                     break
 
         result = ' '.join(keywords[:15])  # Max 15 words
-        return result[:max_length]  # Hard limit
+        result = result[:max_length]  # Hard limit
+
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        if debug_mode:
+            print(f"🔍 Heuristic extracted: '{user_question[:80]}...' → '{result}'")
+
+        return result
 
     async def search_academic_papers(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """Search academic papers using Archive API with resilient fallbacks."""

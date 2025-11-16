@@ -31,7 +31,18 @@
       "Bash(tee:*)",
       "Bash(env)",
       "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"self-supervised learning medical imaging\"\"\"\", \"\"\"\"limit\"\"\"\": 3, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')",
-      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"self-supervised learning medical imaging\"\"\"\", \"\"\"\"limit\"\"\"\": 2, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')"
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\"\"\"\"query\"\"\"\": \"\"\"\"self-supervised learning medical imaging\"\"\"\", \"\"\"\"limit\"\"\"\": 2, \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]}')",
+      "Bash(curl -s -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/api/search -H 'Content-Type: application/json' -H 'X-API-Key: demo-key-123' -d '{\n  \"\"\"\"query\"\"\"\": \"\"\"\"vision transformers medical imaging\"\"\"\",\n  \"\"\"\"limit\"\"\"\": 5,\n  \"\"\"\"sources\"\"\"\": [\"\"\"\"semantic_scholar\"\"\"\"]\n}')",
+      "Bash(grep:*)",
+      "Bash(if [ $i -eq 1 ])",
+      "Bash(then KEY=\"csk-34cp53294pcmrexym8h2r4x5cyy2npnrd344928yhf2hpctj\")",
+      "Bash(then KEY=\"csk-edrc3v63k43fe4hdt529ynt4h9mfd9k9wjpjj3nn5pcvm2t4\")",
+      "Bash(then KEY=\"csk-ek3cj5jv26hpnd2h65d8955pjmvxctdjknfv6pwehr82pnhr\")",
+      "Bash(else KEY=\"csk-n5h26f263vr5rxp9fpn4w8xkfvpc5v9kjdw95vfc8d3x4ce9\")",
+      "Bash(__NEW_LINE__ python3 -c \"\nimport os\nfrom openai import OpenAI\n\nclient = OpenAI(api_key=''$KEY'', base_url=''https://api.cerebras.ai/v1'')\n\ntry:\n    response = client.chat.completions.create(\n        model=''llama3.1-8b'',\n        messages=[{''role'': ''user'', ''content'': ''Say just: Key works''}],\n        max_tokens=10\n    )\n    print(''✅ Key $i WORKS:'', response.choices[0].message.content)\nexcept Exception as e:\n    error_msg = str(e)\n    if ''token_quota_exceeded'' in error_msg or ''Tokens per day limit'' in error_msg:\n        print(''❌ Key $i: DAILY QUOTA EXCEEDED'')\n    elif ''429'' in error_msg:\n        print(''⚠️ Key $i: RATE LIMITED (per-minute)'')\n    else:\n        print(''❌ Key $i ERROR:'', error_msg[:100])\n\")",
+      "Bash(curl:*)",
+      "Bash(xargs kill:*)",
+      "Bash(/dev/null echo \"Killed processes\")"
     ],
     "deny": [],
     "ask": []
