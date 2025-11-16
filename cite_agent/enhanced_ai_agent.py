@@ -4426,49 +4426,58 @@ Concise query (max {max_length} chars):"""
             "free space": "df -h",
             "memory usage": "free -h",
             "system info": "uname -a",
+
+            # Additional common phrases
+            "what do we have": "ls -la",
+            "show everything": "ls -la",
+            "list all": "ls -la",
+            "list everything": "ls -la",
+            "what's available": "ls -la",
+            "what's inside": "ls -la",
+            "show current directory": "pwd && ls -la",
+            "current location": "pwd",
+            "my location": "pwd",
+            "print working directory": "pwd",
+            "clear screen": "clear",
+            "clear": "clear",
         }
 
         mapped_command = None
-        for pattern, command in natural_language_mappings.items():
-            if pattern in query_lower:
-                mapped_command = command
-                if debug_mode:
-                    print(f"🚀 [Heuristic] Mapped '{query}' to '{command}'")
-                break
+
+        # IMPORTANT: Check dynamic patterns FIRST (more specific) before static patterns
+        # This prevents "show files" from matching "show files in /tmp"
 
         # Dynamic "go to <directory>" patterns
-        if not mapped_command:
-            import re
-            # Match: "go to Downloads", "navigate to /path", "cd to project", "change to ~/Documents"
-            go_to_patterns = [
-                r"(?:go|navigate|change|switch|move)\s+(?:to|into)\s+(.+)",
-                r"cd\s+(?:to\s+)?(.+)",
-                r"enter\s+(?:the\s+)?(.+?)(?:\s+directory|\s+folder)?$",
-            ]
-            for pattern in go_to_patterns:
-                match = re.match(pattern, query_lower)
-                if match:
-                    target = match.group(1).strip()
-                    # Handle common shortcuts
-                    if target in ["downloads", "download"]:
-                        mapped_command = "cd ~/Downloads && pwd"
-                    elif target in ["documents", "docs"]:
-                        mapped_command = "cd ~/Documents && pwd"
-                    elif target in ["desktop"]:
-                        mapped_command = "cd ~/Desktop && pwd"
-                    elif target in ["home", "~"]:
-                        mapped_command = "cd ~ && pwd"
-                    else:
-                        # Try fuzzy matching: user says "cm522" but directory is "cm522-main"
-                        # First try exact match, then fuzzy
-                        mapped_command = f"cd {target} 2>/dev/null || cd *{target}* 2>/dev/null || cd ~/*{target}* 2>/dev/null || echo 'Directory not found: {target}'; pwd"
-                    if debug_mode:
-                        print(f"🚀 [Heuristic] Mapped navigation '{query}' to '{mapped_command}'")
-                    break
+        import re
+        # Match: "go to Downloads", "navigate to /path", "cd to project", "change to ~/Documents"
+        go_to_patterns = [
+            r"(?:go|navigate|change|switch|move)\s+(?:to|into)\s+(.+)",
+            r"cd\s+(?:to\s+)?(.+)",
+            r"enter\s+(?:the\s+)?(.+?)(?:\s+directory|\s+folder)?$",
+        ]
+        for pattern in go_to_patterns:
+            match = re.match(pattern, query_lower)
+            if match:
+                target = match.group(1).strip()
+                # Handle common shortcuts
+                if target in ["downloads", "download"]:
+                    mapped_command = "cd ~/Downloads && pwd"
+                elif target in ["documents", "docs"]:
+                    mapped_command = "cd ~/Documents && pwd"
+                elif target in ["desktop"]:
+                    mapped_command = "cd ~/Desktop && pwd"
+                elif target in ["home", "~"]:
+                    mapped_command = "cd ~ && pwd"
+                else:
+                    # Try fuzzy matching: user says "cm522" but directory is "cm522-main"
+                    # First try exact match, then fuzzy
+                    mapped_command = f"cd {target} 2>/dev/null || cd *{target}* 2>/dev/null || cd ~/*{target}* 2>/dev/null || echo 'Directory not found: {target}'; pwd"
+                if debug_mode:
+                    print(f"🚀 [Heuristic] Mapped navigation '{query}' to '{mapped_command}'")
+                break
 
-        # Dynamic "show files in <path>" patterns
+        # Dynamic "show files in <path>" patterns - CHECK BEFORE STATIC "show files"
         if not mapped_command:
-            import re
             # Match: "show files in Downloads", "list files in /path", "what's in cm522"
             show_in_patterns = [
                 r"(?:show|list|what(?:'s| is))\s+(?:files?\s+)?in\s+(.+)",
@@ -4494,28 +4503,8 @@ Concise query (max {max_length} chars):"""
                         print(f"🚀 [Heuristic] Mapped show-in '{query}' to '{mapped_command}'")
                     break
 
-        # Data analysis patterns - Python execution
-        if not mapped_command:
-            import re
-            analysis_patterns = [
-                # Load and analyze CSV
-                (r"load\s+(?:the\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(df.head(10)); print(\'\\nShape:\', df.shape); print(\'\\nColumns:\', list(df.columns))"'),
-                (r"(?:calculate|compute|get|find|what(?:\'s| is))\s+(?:the\s+)?mean\s+(?:of\s+)?(.+)", lambda col: f'python3 -c "import pandas as pd; df = pd.read_csv(\'*.csv\'); print(\'Mean of {col}:\', df[\'{col}\'].mean())"'),
-                (r"(?:calculate|compute|get|find)\s+(?:the\s+)?(?:summary|statistics|stats)\s+(?:of\s+|for\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(df.describe())"'),
-                (r"(?:analyze|analyse)\s+(?:the\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(\'Shape:\', df.shape); print(\'\\nColumn types:\'); print(df.dtypes); print(\'\\nSummary:\'); print(df.describe())"'),
-            ]
-            for pattern, cmd_func in analysis_patterns:
-                match = re.match(pattern, query_lower)
-                if match:
-                    arg = match.group(1).strip()
-                    mapped_command = cmd_func(arg)
-                    if debug_mode:
-                        print(f"🚀 [Heuristic] Mapped analysis '{query}' to Python command")
-                    break
-
         # Dynamic file reading patterns: "read file.txt", "show me README.md", "open config.json"
         if not mapped_command:
-            import re
             # Match: "read <filename>", "show me <filename>", "open <filename>", "cat <filename>"
             file_patterns = [
                 r"^read\s+(.+)$",
@@ -4545,6 +4534,54 @@ Concise query (max {max_length} chars):"""
                         mapped_command = f"head -50 {filename}"
                     if debug_mode:
                         print(f"🚀 [Heuristic] Mapped file read '{query}' to '{mapped_command}'")
+                    break
+
+        # Data analysis patterns - Python execution
+        if not mapped_command:
+            analysis_patterns = [
+                # Load and analyze CSV
+                (r"load\s+(?:the\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(df.head(10)); print(\'\\nShape:\', df.shape); print(\'\\nColumns:\', list(df.columns))"'),
+                (r"(?:calculate|compute|get|find|what(?:\'s| is))\s+(?:the\s+)?mean\s+(?:of\s+)?(.+)", lambda col: f'python3 -c "import pandas as pd; df = pd.read_csv(\'*.csv\'); print(\'Mean of {col}:\', df[\'{col}\'].mean())"'),
+                (r"(?:calculate|compute|get|find)\s+(?:the\s+)?(?:summary|statistics|stats)\s+(?:of\s+|for\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(df.describe())"'),
+                (r"(?:analyze|analyse)\s+(?:the\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(\'Shape:\', df.shape); print(\'\\nColumn types:\'); print(df.dtypes); print(\'\\nSummary:\'); print(df.describe())"'),
+                # Count rows/lines
+                (r"(?:count|how many)\s+(?:rows?|lines?|records?)\s+(?:in\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(\'Rows:\', len(df))"'),
+                # Get column names
+                (r"(?:what|show|list)\s+(?:are\s+)?(?:the\s+)?columns?\s+(?:in\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(\'Columns:\', list(df.columns))"'),
+                # Describe data
+                (r"describe\s+(?:the\s+)?(.+\.csv)", lambda f: f'python3 -c "import pandas as pd; df = pd.read_csv(\'{f}\'); print(df.describe())"'),
+            ]
+            for pattern, cmd_func in analysis_patterns:
+                match = re.match(pattern, query_lower)
+                if match:
+                    arg = match.group(1).strip()
+                    mapped_command = cmd_func(arg)
+                    if debug_mode:
+                        print(f"🚀 [Heuristic] Mapped analysis '{query}' to Python command")
+                    break
+
+        # Context-aware patterns using file_context (e.g., "what's here", "analyze that file")
+        if not mapped_command:
+            # Handle "here", "this", "that" context
+            context_patterns = [
+                (r"what(?:'s| is)\s+(?:in\s+)?here", "ls -la"),
+                (r"list\s+(?:what(?:'s| is)\s+)?here", "ls -la"),
+                (r"show\s+(?:what(?:'s| is)\s+)?here", "ls -la"),
+            ]
+            for pattern, cmd in context_patterns:
+                if re.match(pattern, query_lower):
+                    mapped_command = cmd
+                    if debug_mode:
+                        print(f"🚀 [Heuristic] Context-aware mapping: '{query}' to '{cmd}'")
+                    break
+
+        # NOW check static patterns (less specific)
+        if not mapped_command:
+            for pattern, command in natural_language_mappings.items():
+                if pattern in query_lower:
+                    mapped_command = command
+                    if debug_mode:
+                        print(f"🚀 [Heuristic] Mapped '{query}' to '{command}'")
                     break
 
         if not is_shell_command and not mapped_command:
