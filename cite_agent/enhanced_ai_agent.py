@@ -4074,23 +4074,58 @@ Concise query (max {max_length} chars):"""
             # Some of both - default to mixed
             analysis_mode = "mixed"
 
-        # Financial keyword detection with word boundaries to avoid false positives
-        # (e.g., "approaches" should NOT match "roa", "tickers" should NOT match "ticker")
+        # Financial keyword detection with context-aware logic
+        # Avoid false positives where research/academic terms overlap with financial terms
+        # Examples:
+        #   - "stock markets" in research context ≠ company stock ticker
+        #   - "returns" in research/statistics ≠ financial returns data
+        #   - "approaches" should NOT match "roa"
+
         import re
+
+        # First check: Is this clearly a research/academic query?
+        # If yes, don't even check financial keywords
+        strong_research_indicators = [
+            'research on', 'papers on', 'literature on', 'studies on',
+            'hypothesis', 'hypotheses', 'methodology', 'research gap',
+            'find papers', 'recent papers', 'academic', 'literature review',
+            'emerging markets', 'developing markets',
+            'momentum effect', 'momentum strategy'
+        ]
+
+        is_clearly_research = (
+            any(ind in question_lower for ind in strong_research_indicators) or
+            ('stock market' in question_lower and 'research' in question_lower)
+        )
+
         financial_matched = False
-        for keyword in financial_keywords:
-            # For single-word financial metrics (roa, roe, eps, etc.), require word boundaries
-            if len(keyword.split()) == 1 and len(keyword) <= 4:
-                # Short acronyms/metrics: require word boundaries
-                pattern = r'\b' + re.escape(keyword) + r'\b'
-                if re.search(pattern, question_lower):
-                    financial_matched = True
-                    break
-            else:
-                # Multi-word phrases or longer words: use simple substring match
-                if keyword in question_lower:
-                    financial_matched = True
-                    break
+
+        if not is_clearly_research:
+            # Only check financial keywords if NOT clearly a research query
+            for keyword in financial_keywords:
+                # Context exclusions: skip if keyword appears in research context
+                if keyword == 'stock' and ('stock market' in question_lower or 'stock markets' in question_lower):
+                    # "stock markets" is research topic, not financial data request
+                    continue
+                if keyword == 'returns' and any(ctx in question_lower for ctx in ['momentum returns', 'research', 'paper', 'study', 'hypothesis', 'premium']):
+                    # "returns" in research context = research variable, not financial data
+                    continue
+                if keyword == 'performance' and any(ctx in question_lower for ctx in ['research', 'model', 'strategy', 'test']):
+                    # "performance" in research = model/strategy performance, not company performance
+                    continue
+
+                # For single-word financial metrics (roa, roe, eps, etc.), require word boundaries
+                if len(keyword.split()) == 1 and len(keyword) <= 4:
+                    # Short acronyms/metrics: require word boundaries
+                    pattern = r'\b' + re.escape(keyword) + r'\b'
+                    if re.search(pattern, question_lower):
+                        financial_matched = True
+                        break
+                else:
+                    # Multi-word phrases or longer words: use simple substring match
+                    if keyword in question_lower:
+                        financial_matched = True
+                        break
 
         if financial_matched:
             matched_types.append("financial")
