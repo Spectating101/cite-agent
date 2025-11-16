@@ -86,8 +86,57 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
 
     elif tool_name == "list_directory":
         listing = result.get("listing", "")
-        lines = listing.split("\n")[:10]  # Max 10 lines
-        return "\n".join(lines) + ("...[more files]" if len(listing.split("\n")) > 10 else "")
+        path = result.get("path", ".")
+
+        # Parse ls output to extract just file names and types
+        lines = [l.strip() for l in listing.split("\n") if l.strip()]
+
+        # Skip header line (total XXX)
+        if lines and lines[0].startswith("total"):
+            lines = lines[1:]
+
+        # Extract file info: name, type (dir/file), size
+        files = []
+        dirs = []
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 9:  # Standard ls -lh output
+                name = " ".join(parts[8:])  # Handle names with spaces
+                size = parts[4]
+
+                if line.startswith('d'):
+                    dirs.append(name)
+                else:
+                    files.append(f"{name} ({size})")
+
+        # Compact summary
+        summary_parts = []
+        if dirs:
+            summary_parts.append(f"Directories ({len(dirs)}): {', '.join(dirs[:15])}")
+            if len(dirs) > 15:
+                summary_parts[-1] += f"... (+{len(dirs)-15} more)"
+
+        if files:
+            # Group by extension
+            by_ext = {}
+            for f in files:
+                name = f.split(' (')[0]
+                ext = name.split('.')[-1] if '.' in name else 'no-ext'
+                if ext not in by_ext:
+                    by_ext[ext] = []
+                by_ext[ext].append(f)
+
+            for ext, flist in sorted(by_ext.items(), key=lambda x: -len(x[1])):
+                if len(flist) <= 5:
+                    summary_parts.append(f".{ext} files: {', '.join(flist)}")
+                else:
+                    summary_parts.append(f".{ext} files ({len(flist)}): {', '.join(flist[:5])}... (+{len(flist)-5} more)")
+
+        if not summary_parts:
+            return f"{path}: (empty directory)"
+
+        return f"{path} contents:\n" + "\n".join(summary_parts)
 
     elif tool_name == "export_to_zotero":
         if result.get("success"):
@@ -171,6 +220,50 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
             result_type = result.get("result_type", "")
             return f"Code executed: {code[:100]}...\nResult ({result_type}):\n{res[:1000]}"
         return result.get("error", json.dumps(result)[:400])
+
+    elif tool_name == "execute_shell_command":
+        # Compress shell output - keep it concise
+        command = result.get("command", "")
+        output = result.get("output", "")
+        cwd = result.get("working_directory", ".")
+
+        # cd commands: just report new directory
+        if command.strip().startswith("cd "):
+            if result.get("success", True):
+                return f"Changed directory to {cwd}"
+            else:
+                return f"Failed to change directory: {result.get('error', output[:200])}"
+
+        # grep/find: count matches and show first few
+        if "grep" in command or "find" in command:
+            lines = [l for l in output.strip().split("\n") if l.strip()]
+            if not lines:
+                return f"No matches found for: {command}"
+            elif len(lines) <= 10:
+                return f"Found {len(lines)} matches:\n" + "\n".join(lines)
+            else:
+                return f"Found {len(lines)} matches (showing first 10):\n" + "\n".join(lines[:10]) + f"\n... (+{len(lines)-10} more)"
+
+        # Other commands: truncate long output
+        if len(output) > 1500:
+            return f"$ {command}\n{output[:1500]}...\n[Output truncated, {len(output)} chars total]"
+
+        return f"$ {command}\n{output}" if output else f"$ {command}\n(no output)"
+
+    elif tool_name == "read_file":
+        # Compress file content
+        content = result.get("content", "")
+        file_path = result.get("file_path", "unknown")
+
+        lines = content.split("\n")
+        if len(lines) > 50:
+            # Show first 30 and last 10 lines
+            preview = "\n".join(lines[:30]) + f"\n\n... [{len(lines)-40} lines omitted] ...\n\n" + "\n".join(lines[-10:])
+            return f"File: {file_path} ({len(lines)} lines)\n{preview}"
+        elif len(content) > 3000:
+            return f"File: {file_path}\n{content[:3000]}...\n[Content truncated, {len(content)} chars total]"
+
+        return f"File: {file_path}\n{content}"
 
     # Default: truncated JSON
     return json.dumps(result)[:400]
