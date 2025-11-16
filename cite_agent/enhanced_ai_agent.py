@@ -4665,8 +4665,29 @@ Concise query (max {max_length} chars):"""
                 return workflow_response
 
             # Initialize tool executor (needed for heuristic path)
-            if not hasattr(self, '_tool_executor'):
+            if not hasattr(self, '_tool_executor') or self._tool_executor is None:
                 self._tool_executor = ToolExecutor(agent=self)
+
+            # Ensure shell session is initialized (critical for heuristic path)
+            if self.shell_session is None:
+                try:
+                    if self._is_windows:
+                        shell_cmd = ['powershell', '-NoLogo', '-NoProfile']
+                    else:
+                        shell_cmd = ['bash']
+                    self.shell_session = subprocess.Popen(
+                        shell_cmd,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        cwd=os.getcwd()
+                    )
+                    if debug_mode:
+                        print(f"🔧 [Init] Shell session initialized")
+                except Exception as exc:
+                    if debug_mode:
+                        print(f"⚠️ [Init] Unable to launch shell session: {exc}")
 
             # OPTIMIZATION: Heuristic shell command detection (skip LLM entirely)
             # Saves 8000-20000 tokens per command for obvious cases
