@@ -4508,7 +4508,8 @@ Concise query (max {max_length} chars):"""
             # Match: "read <filename>", "show me <filename>", "open <filename>", "cat <filename>"
             file_patterns = [
                 r"^read\s+(.+)$",
-                r"^show\s+(?:me\s+)?(.+?\.\w+)$",
+                r"^show\s+(?:me\s+)?(?:the\s+)?(.+?\.\w+)$",  # With extension
+                r"^show\s+(?:me\s+)?(?:the\s+)?(readme|makefile|dockerfile|license|changelog|todo)$",  # Without extension
                 r"^open\s+(.+?\.\w+)$",
                 r"^view\s+(.+?\.\w+)$",
                 r"^display\s+(.+?\.\w+)$",
@@ -4523,12 +4524,26 @@ Concise query (max {max_length} chars):"""
                     else:
                         filename = match.group(1).strip()
 
+                    # Common extensionless files - map to actual filenames
+                    extensionless_map = {
+                        'readme': 'README.md',
+                        'makefile': 'Makefile',
+                        'dockerfile': 'Dockerfile',
+                        'license': 'LICENSE',
+                        'changelog': 'CHANGELOG.md',
+                        'todo': 'TODO.md',
+                    }
+
+                    # If filename is a known extensionless file, use standard name
+                    if filename.lower() in extensionless_map:
+                        filename = extensionless_map[filename.lower()]
+
                     # Quote filenames with spaces
                     if ' ' in filename:
                         filename = f'"{filename}"'
 
                     # Use cat for text files, head for large files
-                    if any(filename.lower().endswith(ext) for ext in ['.csv', '.log', '.txt', '.md', '.py', '.json', '.yaml', '.yml', '.toml', '.sh', '.r', '.qmd', '.do']):
+                    if any(filename.lower().endswith(ext) for ext in ['.csv', '.log', '.txt', '.md', '.py', '.json', '.yaml', '.yml', '.toml', '.sh', '.r', '.qmd', '.do']) or filename in ['README.md', 'Makefile', 'Dockerfile', 'LICENSE', 'CHANGELOG.md', 'TODO.md']:
                         mapped_command = f"cat {filename}"
                     else:
                         mapped_command = f"head -50 {filename}"
