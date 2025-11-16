@@ -471,30 +471,43 @@ class ToolExecutor:
                 cd_cmd = f'cd "{target_dir}" && pwd'
                 output = self.agent.execute_command(cd_cmd)
 
-                if "ERROR" not in output and output.strip():
+                # Check for errors: ERROR keyword, bash errors, common failure patterns
+                has_error = (
+                    "ERROR" in output or
+                    "bash:" in output or
+                    "No such file or directory" in output or
+                    "Permission denied" in output or
+                    "not a directory" in output
+                )
+
+                if not has_error and output.strip():
                     # Update persistent working directory
                     new_cwd = output.strip().split('\n')[-1]
-                    self.agent.file_context['current_cwd'] = new_cwd
-                    self.agent.file_context['last_directory'] = new_cwd
 
-                    if self.debug_mode:
-                        print(f"⚙️  [Shell Command] Directory changed: {current_cwd} → {new_cwd}")
+                    # Validate new_cwd is actually a path (starts with /)
+                    if new_cwd.startswith('/'):
+                        self.agent.file_context['current_cwd'] = new_cwd
+                        self.agent.file_context['last_directory'] = new_cwd
 
-                    return {
-                        "command": command,
-                        "output": f"Changed directory to {new_cwd}",
-                        "working_directory": new_cwd,
-                        "previous_directory": current_cwd,
-                        "success": True
-                    }
-                else:
-                    return {
-                        "command": command,
-                        "output": output,
-                        "error": f"Failed to change directory to {target_dir}",
-                        "working_directory": current_cwd,
-                        "success": False
-                    }
+                        if self.debug_mode:
+                            print(f"⚙️  [Shell Command] Directory changed: {current_cwd} → {new_cwd}")
+
+                        return {
+                            "command": command,
+                            "output": f"Changed directory to {new_cwd}",
+                            "working_directory": new_cwd,
+                            "previous_directory": current_cwd,
+                            "success": True
+                        }
+
+                # cd failed - keep current directory
+                return {
+                    "command": command,
+                    "output": output,
+                    "error": f"Failed to change directory to {target_dir}",
+                    "working_directory": current_cwd,
+                    "success": False
+                }
 
             # Non-cd commands: Execute in current working directory
             # Prepend cd to ensure we're in the right directory

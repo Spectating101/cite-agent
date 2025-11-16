@@ -11,6 +11,7 @@ Validates:
 import sys
 import os
 import asyncio
+import subprocess
 
 sys.path.insert(0, '.')
 os.environ['NOCTURNAL_DEBUG'] = '1'
@@ -18,6 +19,20 @@ os.environ['USE_LOCAL_KEYS'] = 'false'  # Won't use LLM, just heuristics
 
 from cite_agent.enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest
 from cite_agent.tool_executor import ToolExecutor
+
+
+def create_shell_session(cwd=None):
+    """Create a real shell session for testing."""
+    if cwd is None:
+        cwd = os.getcwd()
+    return subprocess.Popen(
+        ['bash'],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=cwd
+    )
 
 
 async def test_heuristic_patterns():
@@ -29,8 +44,8 @@ async def test_heuristic_patterns():
     agent = EnhancedNocturnalAgent()
     agent._tool_executor = ToolExecutor(agent=agent)
 
-    # Initialize shell session
-    agent.shell_session = True  # Mock shell session existence
+    # Initialize shell session with real Popen object
+    agent.shell_session = create_shell_session()
     agent.file_context['current_cwd'] = os.getcwd()
 
     test_cases = [
@@ -66,8 +81,8 @@ async def test_cwd_persistence():
     agent = EnhancedNocturnalAgent()
     executor = ToolExecutor(agent=agent)
 
-    # Initialize
-    agent.shell_session = True
+    # Initialize with real shell session
+    agent.shell_session = create_shell_session()
     initial_cwd = os.getcwd()
     agent.file_context['current_cwd'] = initial_cwd
 
@@ -78,11 +93,19 @@ async def test_cwd_persistence():
     new_cwd = agent.file_context.get('current_cwd', 'NOT SET')
     print(f"After 'cd /tmp': {new_cwd}")
 
+    # Cleanup shell
+    if agent.shell_session:
+        agent.shell_session.terminate()
+
     if new_cwd == '/tmp':
         print("✅ CWD updated to /tmp")
 
-        # Now execute ls - should run in /tmp
+        # Create new session to test ls in new CWD
+        agent.shell_session = create_shell_session()
         result2 = executor._execute_shell_command({"command": "ls"})
+        if agent.shell_session:
+            agent.shell_session.terminate()
+
         if result2.get('working_directory') == '/tmp':
             print(f"✅ 'ls' executed in persistent CWD: {result2.get('working_directory')}")
             return True
@@ -107,12 +130,16 @@ async def test_fuzzy_matching():
 
     agent = EnhancedNocturnalAgent()
     executor = ToolExecutor(agent=agent)
-    agent.shell_session = True
+    agent.shell_session = create_shell_session(test_dir)
     agent.file_context['current_cwd'] = test_dir
 
     # Test: "cm522" should match "cm522-main"
     result = executor._execute_shell_command({"command": "cd cm522"})
     new_cwd = agent.file_context.get('current_cwd', '')
+
+    # Cleanup shell
+    if agent.shell_session:
+        agent.shell_session.terminate()
 
     if "cm522-main" in new_cwd:
         print(f"✅ 'cd cm522' fuzzy matched to: {new_cwd}")
@@ -136,7 +163,7 @@ async def test_data_analysis_patterns():
 
     agent = EnhancedNocturnalAgent()
     agent._tool_executor = ToolExecutor(agent=agent)
-    agent.shell_session = True
+    agent.shell_session = create_shell_session()
     agent.file_context['current_cwd'] = os.getcwd()
 
     test_cases = [

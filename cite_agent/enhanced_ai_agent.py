@@ -126,7 +126,7 @@ class EnhancedNocturnalAgent:
             'last_directory': None,      # Last directory mentioned/navigated
             'recent_files': [],          # Last 5 files (for "those files")
             'recent_dirs': [],           # Last 5 directories
-            'current_cwd': None,         # Track shell's current directory
+            'current_cwd': os.getcwd(),  # Track shell's current directory (initialize to actual cwd)
         }
         self._is_windows = os.name == "nt"
         try:
@@ -4458,18 +4458,26 @@ Concise query (max {max_length} chars):"""
             r"enter\s+(?:the\s+)?(.+?)(?:\s+directory|\s+folder)?$",
         ]
         for pattern in go_to_patterns:
-            match = re.match(pattern, query_lower)
+            # Use IGNORECASE but match on ORIGINAL query to preserve path case
+            match = re.match(pattern, query, re.IGNORECASE)
             if match:
                 target = match.group(1).strip()
-                # Handle common shortcuts
-                if target in ["downloads", "download"]:
+                target_lower = target.lower()
+                # Handle common shortcuts (compare lowercase, use proper case)
+                if target_lower in ["downloads", "download"]:
                     mapped_command = "cd ~/Downloads && pwd"
-                elif target in ["documents", "docs"]:
+                elif target_lower in ["documents", "docs"]:
                     mapped_command = "cd ~/Documents && pwd"
-                elif target in ["desktop"]:
+                elif target_lower in ["desktop"]:
                     mapped_command = "cd ~/Desktop && pwd"
-                elif target in ["home", "~"]:
+                elif target_lower in ["home", "~"]:
                     mapped_command = "cd ~ && pwd"
+                elif target.startswith("~") or target.startswith("/"):
+                    # Absolute or home-relative path - use original case directly
+                    mapped_command = f"cd {target} && pwd"
+                elif target == "..":
+                    # Parent directory
+                    mapped_command = "cd .. && pwd"
                 else:
                     # Try fuzzy matching: user says "cm522" but directory is "cm522-main"
                     # First try exact match, then fuzzy
@@ -4631,9 +4639,15 @@ Concise query (max {max_length} chars):"""
             command = result.get("command", query)
             output = result.get("output", "")
             cwd = result.get("working_directory", ".")
+            success = result.get("success", True)
+            error = result.get("error", "")
 
             if command.strip().startswith("cd "):
-                final_text = f"Changed to {cwd}"
+                if success and not error:
+                    final_text = f"Changed to {cwd}"
+                else:
+                    # cd failed - show error message
+                    final_text = f"Error: {error}\n{output}" if error else output
             elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
                 final_text = output if output else "(no output)"
             else:
@@ -5131,6 +5145,39 @@ Concise query (max {max_length} chars):"""
             if debug_mode and self.client is not None:
                 mode = "FUNCTION CALLING" if use_function_calling else "TRADITIONAL"
                 print(f"🔍 ROUTING: Using {mode} mode")
+
+            # HEURISTIC SHELL EXECUTION: Works even without LLM client
+            # This enables zero-token shell commands regardless of authentication status
+            if use_function_calling:
+                # Initialize tool executor if needed
+                if not hasattr(self, '_tool_executor') or self._tool_executor is None:
+                    self._tool_executor = ToolExecutor(agent=self)
+
+                # Initialize shell session if needed
+                if self.shell_session is None:
+                    try:
+                        if self._is_windows:
+                            shell_cmd = ['powershell', '-NoLogo', '-NoProfile']
+                        else:
+                            shell_cmd = ['bash']
+                        self.shell_session = subprocess.Popen(
+                            shell_cmd,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            cwd=os.getcwd()
+                        )
+                        if debug_mode:
+                            print(f"🔧 [Init] Shell session initialized for heuristics")
+                    except Exception as exc:
+                        if debug_mode:
+                            print(f"⚠️ [Init] Unable to launch shell session: {exc}")
+
+                # Try heuristic execution (no LLM needed!)
+                heuristic_response = await self._try_heuristic_shell_execution(request, debug_mode)
+                if heuristic_response:
+                    return heuristic_response
 
             # FUNCTION CALLING MODE: Cursor-like iterative tool execution
             if use_function_calling and self.client is not None:

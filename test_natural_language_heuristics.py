@@ -24,14 +24,15 @@ async def test_heuristics():
     print("NATURAL LANGUAGE → SHELL HEURISTICS (0-TOKEN TESTS)")
     print("=" * 60)
 
-    # Initialize shell session manually
+    # Initialize shell session manually (use current directory for portability)
+    test_cwd = os.getcwd()  # Use current directory instead of hardcoded path
     agent.shell_session = subprocess.Popen(
         ['bash'],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd=os.path.expanduser("~/Downloads")
+        cwd=test_cwd
     )
 
     # Initialize file context
@@ -40,7 +41,7 @@ async def test_heuristics():
         'last_directory': None,
         'recent_files': [],
         'recent_dirs': [],
-        'current_cwd': os.path.expanduser("~/Downloads"),
+        'current_cwd': test_cwd,
     }
 
     # Initialize tool executor
