@@ -1,11 +1,31 @@
 # HANDOFF TO NEXT LLM - START HERE
 
-## 🎉 CURRENT STATUS: PRODUCTION READY (Core Features)
+## 🔥 CURRENT STATUS: LLM-CONTROLLED INTELLIGENT AGENT
 
 **Branch:** `claude/work-in-progress-01L1wfF8JQBLv4w6iuxJYAht`
-**Latest Commit:** `f5b9a57` - Critical bug fixes
-**Tests:** 12/12 heuristics + 4/4 integration tests PASSING
-**Validated By:** CCT (Terminal) + CCW (Web) on 2025-11-17
+**Latest Commit:** `933e7df` - Remove all keyword-based short-circuits
+**Architecture:** LLM decides tool selection (NO hardcoded keyword patterns)
+**Token Cost:** Higher (8-20K per query), but REAL intelligence
+
+### CRITICAL CHANGE: Removed ALL Keyword-Based Short-Circuits
+
+**WHAT WAS REMOVED (-116 lines):**
+- `_try_heuristic_shell_execution()` - Never called anymore (dead code)
+- Synthesis skip after single tool call
+- Keyword→command mapping (the fragile "what files" → "ls" stuff)
+- All pattern-matching shortcuts
+
+**WHY:** Keyword shortcuts prevented intelligent behavior:
+- User: "I think there's data about taxation records, can you check?"
+- OLD: No keyword match → dumb fallback
+- NEW: LLM browses files, searches contents, reasons about matches
+
+**NOW THE AGENT CAN:**
+1. Understand fuzzy natural language intent
+2. Decide which tools to call (not hardcoded)
+3. Chain multiple tool calls (ls → grep → cat → analyze)
+4. Reason about results and provide intelligent commentary
+5. Ask clarifying questions ("Is this what you meant?")
 
 ## What Was Accomplished (Legacy)
 
@@ -26,27 +46,26 @@
 - Professional tone maintained
 - No fabricated data/numbers
 
-## ✅ NEWLY IMPLEMENTED (by CCW - Claude Code Web)
+## ❌ DEPRECATED: Keyword-Based Heuristics
 
-### Natural Language Commands - DONE!
-
-**NOW WORKS:**
+**THE OLD WAY (NOW REMOVED):**
 ```python
+# This bullshit is GONE
 "go to downloads"                    # → cd ~/Downloads && pwd
 "show files in /tmp"                 # → ls -la /tmp
 "what's here"                        # → ls -la
-"read setup.py"                      # → cat setup.py
-"load data.csv"                      # → Python pandas analysis
-"calculate mean of column1"          # → df['column1'].mean()
-"describe results.csv"               # → df.describe()
 ```
 
-**Implementation:** `_try_heuristic_shell_execution()` at lines 4328-4600
-- Dynamic patterns checked BEFORE static patterns
-- Fuzzy directory matching (score-based: "cm522" → "cm522-main")
-- Context-aware patterns ("what's here", "list here")
-- Data analysis patterns (load, calculate mean, count rows, describe)
-- Zero-token execution (saves 8-20K tokens per command)
+**THE NEW WAY (LLM-CONTROLLED):**
+```python
+User: "what's here?"
+LLM: *calls list_directory()* → *sees files* → *responds intelligently*
+
+User: "I think there's taxation data somewhere"
+LLM: *calls list_directory()* → *calls grep -ri tax* → *reasons* → "Found tax_2024.csv"
+```
+
+**Dead Code:** `_try_heuristic_shell_execution()` still exists but is NEVER called. It's dead code that should be removed in a future cleanup.
 
 ### Persistent Working Directory - DONE!
 
