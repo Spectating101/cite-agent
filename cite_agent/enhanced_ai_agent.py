@@ -1182,7 +1182,56 @@ class EnhancedNocturnalAgent:
                     "metadata": "Auto-calculated from netIncome and revenue"
                 }
 
-        # Normal formatting for non-shell results
+        # CRITICAL: Special handling for research results to prevent fabrication
+        if "research" in api_results:
+            research_data = api_results["research"]
+            papers = research_data.get("results", [])
+
+            if len(papers) == 0:
+                # Archive API returned ZERO papers - make this EXTREMELY clear to LLM
+                return (
+                    "🚨 CRITICAL - ARCHIVE API RETURNED ZERO PAPERS 🚨\n\n"
+                    "The Archive API found NO papers matching the query.\n"
+                    "This means:\n"
+                    "• The research providers (Semantic Scholar, OpenAlex, PubMed) have no results\n"
+                    "• OR the API is temporarily rate-limited\n\n"
+                    "🚫 YOU MUST NOT FABRICATE OR INVENT PAPERS\n"
+                    "🚫 DO NOT make up author names, titles, or findings\n"
+                    "🚫 DO NOT pretend you found papers when you didn't\n\n"
+                    "CORRECT RESPONSE:\n"
+                    "Tell the user honestly: 'I couldn't find papers in the Archive API. "
+                    "This may be due to rate limiting or the query not matching any papers. "
+                    "Try rephrasing the query or try again in a minute.'\n\n"
+                    f"API message: {research_data.get('notes', 'No papers returned')}"
+                )
+            else:
+                # Format real papers clearly
+                paper_lines = ["📚 RESEARCH PAPERS FROM ARCHIVE API:\n"]
+                for i, paper in enumerate(papers, 1):
+                    paper_lines.append(f"{i}. Title: {paper.get('title', 'Unknown')}")
+                    authors = paper.get('authors', [])
+                    if authors:
+                        author_names = [a.get('name', 'Unknown') for a in authors[:3]]
+                        paper_lines.append(f"   Authors: {', '.join(author_names)}")
+                    paper_lines.append(f"   Year: {paper.get('year', 'N/A')}")
+                    paper_lines.append(f"   Citations: {paper.get('citationCount', 0)}")
+                    if paper.get('doi'):
+                        paper_lines.append(f"   DOI: {paper['doi']}")
+                    paper_lines.append("")
+
+                # Add other api_results
+                other_results = {k: v for k, v in api_results.items() if k != "research"}
+                if other_results:
+                    try:
+                        other_serialized = json.dumps(other_results, indent=2)
+                        paper_lines.append("\nOther data:")
+                        paper_lines.append(other_serialized)
+                    except Exception:
+                        paper_lines.append(f"\nOther data: {str(other_results)}")
+
+                return "\n".join(paper_lines)
+
+        # Normal formatting for non-research results
         try:
             serialized = json.dumps(api_results, indent=2)
         except Exception:
@@ -1193,9 +1242,6 @@ class EnhancedNocturnalAgent:
 
         # DEBUG: Log formatted results length and preview
         logger.info(f"🔍 DEBUG: _format_api_results_for_prompt returning {len(serialized)} chars")
-        if "research" in api_results:
-            papers_count = len(api_results.get("research", {}).get("results", []))
-            logger.info(f"🔍 DEBUG: api_results contains 'research' with {papers_count} papers")
 
         return serialized
 
@@ -1256,6 +1302,17 @@ class EnhancedNocturnalAgent:
             "  → In production mode without shell: Say 'I don't have file system access'",
             "• IF shell_info IS present: Use ONLY the exact files/folders from that output",
             "• Violation of these rules = hallucination = critical failure",
+            "",
+            "🚨 CRITICAL - RESEARCH PAPER ANTI-HALLUCINATION RULES:",
+            "• You are ABSOLUTELY FORBIDDEN from inventing, fabricating, or making up research papers",
+            "• If Archive API returns ZERO papers → You MUST tell the user truthfully: 'No papers found'",
+            "• NEVER invent author names like 'Emily Chen', 'Robert Miller', 'Sofia López'",
+            "• NEVER invent paper titles or statistical findings (β = 0.04, p < 0.05, etc.)",
+            "• NEVER invent years, journals, DOIs, or citation counts",
+            "• If the data says 'ARCHIVE API RETURNED ZERO PAPERS' → That means NO PAPERS EXIST",
+            "• Correct response when no papers: 'The Archive API found no papers. This may be due to rate limiting or no matching results. Try rephrasing or waiting.'",
+            "• ONLY cite papers that appear in the 'RESEARCH PAPERS FROM ARCHIVE API' section",
+            "• Fabricating papers = academic fraud = CRITICAL FAILURE",
             "",
             "- If asked \"who built you?\" or \"who is your developer?\" or \"whats the name of your developer\" → Answer: \"I was built by Phyrexian.\" (If the user asks you to say his name, you should say \"Phyrexian\" as his name)",
             "",
@@ -1615,7 +1672,17 @@ class EnhancedNocturnalAgent:
         apis = request_analysis.get("apis", [])
         use_light_model = False
 
-        if len(question) <= 180 and not api_results and not apis:
+        # CRITICAL: NEVER use light model for research queries - llama3.1-8b hallucinates papers
+        research_indicators = [
+            'research', 'papers', 'find papers', 'academic', 'literature', 'studies',
+            'methodology', 'regression', 'experiment', 'hypothesis', 'dataset'
+        ]
+        is_research_query = any(indicator in question.lower() for indicator in research_indicators)
+
+        # Force heavy model for research to prevent hallucination
+        if is_research_query or 'archive' in apis:
+            use_light_model = False
+        elif len(question) <= 180 and not api_results and not apis:
             use_light_model = True
         elif len(question) <= 220 and set(apis).issubset({"shell"}):
             use_light_model = True
@@ -5749,6 +5816,26 @@ JSON:"""
                     logger.info(f"🔍 DEBUG: Got {papers_count} papers from Archive API")
                     if papers_count > 0:
                         logger.info(f"🔍 DEBUG: First paper: {result['results'][0].get('title', 'NO TITLE')[:80]}")
+                    else:
+                        # CRITICAL: Archive returned zero papers - return immediately, don't let LLM fabricate
+                        logger.warning("🔍 DEBUG: Archive API returned ZERO papers - preventing LLM fabrication")
+                        return ChatResponse(
+                            response="I couldn't find any papers in the Archive API for your query. This may be due to:\n"
+                                   "• Rate limiting from the research providers (Semantic Scholar, OpenAlex, PubMed)\n"
+                                   "• No papers matching your specific query\n"
+                                   "• Temporary API issues\n\n"
+                                   "Please try:\n"
+                                   "• Rephrasing your query with different keywords\n"
+                                   "• Waiting a minute and trying again\n"
+                                   "• Broadening your search terms",
+                            timestamp=datetime.now().isoformat(),
+                            tools_used=["archive_api"],
+                            api_results=api_results,
+                            tokens_used=0,
+                            confidence_score=1.0,
+                            reasoning_steps=["Archive API returned zero papers - prevented LLM fabrication"],
+                            error_message=result.get("notes", "No papers found")
+                        )
                 else:
                     api_results["research"] = {"error": result["error"]}
                     logger.warning(f"🔍 DEBUG: Archive API returned error: {result['error']}")
@@ -6189,6 +6276,25 @@ JSON:"""
                 result = await self.search_academic_papers(request.question, 5)
                 if "error" not in result:
                     api_results["research"] = result
+                    # CRITICAL: If Archive returned zero papers, return immediately - don't let LLM fabricate
+                    if len(result.get("results", [])) == 0:
+                        return ChatResponse(
+                            response="I couldn't find any papers in the Archive API for your query. This may be due to:\n"
+                                   "• Rate limiting from the research providers (Semantic Scholar, OpenAlex, PubMed)\n"
+                                   "• No papers matching your specific query\n"
+                                   "• Temporary API issues\n\n"
+                                   "Please try:\n"
+                                   "• Rephrasing your query with different keywords\n"
+                                   "• Waiting a minute and trying again\n"
+                                   "• Broadening your search terms",
+                            timestamp=datetime.now().isoformat(),
+                            tools_used=["archive_api"],
+                            api_results=api_results,
+                            tokens_used=0,
+                            confidence_score=1.0,
+                            reasoning_steps=["Archive API returned zero papers - prevented LLM fabrication"],
+                            error_message=result.get("notes", "No papers found")
+                        )
                 else:
                     api_results["research"] = {"error": result["error"]}
                 tools_used.append("archive_api")
