@@ -4720,11 +4720,10 @@ Concise query (max {max_length} chars):"""
                     if debug_mode:
                         print(f"⚠️ [Init] Unable to launch shell session: {exc}")
 
-            # OPTIMIZATION: Heuristic shell command detection (skip LLM entirely)
-            # Saves 8000-20000 tokens per command for obvious cases
-            heuristic_response = await self._try_heuristic_shell_execution(request, debug_mode)
-            if heuristic_response:
-                return heuristic_response
+            # NO HEURISTICS - LLM decides what tools to call
+            # This enables intelligent reasoning about fuzzy queries like:
+            # "I think there's data about taxation records, can you check?"
+            # LLM will browse files, search contents, and reason about matches
 
             # Initialize function calling agent
             if not hasattr(self, '_function_calling_agent'):
@@ -4958,80 +4957,14 @@ Concise query (max {max_length} chars):"""
             if debug_mode:
                 print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
 
-            # OPTIMIZATION: Skip synthesis for simple shell operations
-            # If single tool call and it's a shell command, return output directly
-            if len(all_tool_calls) == 1:
-                tool_call = all_tool_calls[0]
-                result = all_tool_results.get(tool_call.id, {})
-
-                if tool_call.name == "execute_shell_command" and "output" in result:
-                    command = result.get("command", "")
-                    output = result.get("output", "")
-                    cwd = result.get("working_directory", ".")
-
-                    if debug_mode:
-                        print(f"🔍 [Function Calling] Direct shell output - skipping synthesis")
-
-                    # Format based on command type
-                    if command.strip().startswith("cd "):
-                        final_text = f"Changed to {cwd}"
-                    elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
-                        final_text = output if output else "(no output)"
-                    else:
-                        final_text = f"$ {command}\n{output}" if output else f"$ {command}\n(completed)"
-
-                    # Update conversation history
-                    if hasattr(self, 'conversation_history'):
-                        self.conversation_history.append({"role": "user", "content": request.question})
-                        self.conversation_history.append({"role": "assistant", "content": final_text})
-
-                    return ChatResponse(
-                        response=final_text,
-                        tokens_used=total_tokens,
-                        tools_used=all_tools_used,
-                        confidence_score=0.9,
-                        api_results=all_tool_results
-                    )
-
-                elif tool_call.name == "list_directory" and "listing" in result:
-                    if debug_mode:
-                        print(f"🔍 [Function Calling] Direct directory listing - skipping synthesis")
-
-                    path = result.get("path", ".")
-                    listing = result.get("listing", "")
-                    final_text = f"Contents of {path}:\n\n{listing}"
-
-                    if hasattr(self, 'conversation_history'):
-                        self.conversation_history.append({"role": "user", "content": request.question})
-                        self.conversation_history.append({"role": "assistant", "content": final_text})
-
-                    return ChatResponse(
-                        response=final_text,
-                        tokens_used=total_tokens,
-                        tools_used=all_tools_used,
-                        confidence_score=0.9,
-                        api_results=all_tool_results
-                    )
-
-                elif tool_call.name == "read_file" and "content" in result:
-                    if debug_mode:
-                        print(f"🔍 [Function Calling] Direct file read - skipping synthesis")
-
-                    file_path = result.get("file_path", "unknown")
-                    content = result.get("content", "")
-                    final_text = f"Contents of {file_path}:\n\n{content}"
-
-                    if hasattr(self, 'conversation_history'):
-                        self.conversation_history.append({"role": "user", "content": request.question})
-                        self.conversation_history.append({"role": "assistant", "content": final_text})
-
-                    return ChatResponse(
-                        response=final_text,
-                        tokens_used=total_tokens,
-                        tools_used=all_tools_used,
-                        confidence_score=0.9,
-                        api_results=all_tool_results
-                    )
+            # NO SYNTHESIS SKIPPING - Let LLM reason about tool results
+            # Even for single tool calls, LLM should:
+            # 1. Look at the result
+            # 2. Decide if follow-up actions needed
+            # 3. Provide intelligent commentary
+            # 4. Answer the user's actual question
+            if debug_mode:
+                print(f"🔍 [Function Calling] Proceeding to synthesis - LLM will reason about results")
 
             # For multi-step: Use the full conversation that was built during iterations
             # For single-step: Build a fresh conversation with formatted results
@@ -5146,40 +5079,8 @@ Concise query (max {max_length} chars):"""
                 mode = "FUNCTION CALLING" if use_function_calling else "TRADITIONAL"
                 print(f"🔍 ROUTING: Using {mode} mode")
 
-            # HEURISTIC SHELL EXECUTION: Works even without LLM client
-            # This enables zero-token shell commands regardless of authentication status
-            if use_function_calling:
-                # Initialize tool executor if needed
-                if not hasattr(self, '_tool_executor') or self._tool_executor is None:
-                    self._tool_executor = ToolExecutor(agent=self)
-
-                # Initialize shell session if needed
-                if self.shell_session is None:
-                    try:
-                        if self._is_windows:
-                            shell_cmd = ['powershell', '-NoLogo', '-NoProfile']
-                        else:
-                            shell_cmd = ['bash']
-                        self.shell_session = subprocess.Popen(
-                            shell_cmd,
-                            stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            cwd=os.getcwd()
-                        )
-                        if debug_mode:
-                            print(f"🔧 [Init] Shell session initialized for heuristics")
-                    except Exception as exc:
-                        if debug_mode:
-                            print(f"⚠️ [Init] Unable to launch shell session: {exc}")
-
-                # Try heuristic execution (no LLM needed!)
-                heuristic_response = await self._try_heuristic_shell_execution(request, debug_mode)
-                if heuristic_response:
-                    return heuristic_response
-
             # FUNCTION CALLING MODE: Cursor-like iterative tool execution
+            # NO HEURISTIC BYPASSES - Let LLM reason about queries and decide tools
             if use_function_calling and self.client is not None:
                 return await self.process_request_with_function_calling(request)
 
@@ -6103,10 +6004,10 @@ JSON:"""
                     if api_results.get("shell_info"):
                         print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
 
-                # OPTIMIZATION: Check if we can skip synthesis for simple shell operations
-                skip_synthesis, direct_response = self._should_skip_synthesis(
-                    request.question, api_results, tools_used
-                )
+                # NO SYNTHESIS SKIPPING - LLM should always reason about results
+                # Even "simple" operations need intelligent context and follow-up
+                skip_synthesis = False
+                direct_response = None
 
                 if skip_synthesis:
                     if debug_mode:
