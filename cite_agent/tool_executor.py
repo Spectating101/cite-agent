@@ -467,7 +467,8 @@ class ToolExecutor:
                                 print(f"⚙️  [Shell Command] Fuzzy matching failed: {e}")
 
                 # Execute cd and get new pwd
-                cd_cmd = f"cd {target_dir} && pwd"
+                # Quote the path to handle spaces in directory names
+                cd_cmd = f'cd "{target_dir}" && pwd'
                 output = self.agent.execute_command(cd_cmd)
 
                 if "ERROR" not in output and output.strip():

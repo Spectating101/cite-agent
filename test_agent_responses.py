@@ -25,8 +25,16 @@ async def test_agent():
     print("CITE-AGENT RESPONSE QUALITY TESTS")
     print("=" * 60)
 
-    # Don't call initialize() - it requires API auth
-    # Instead, test the tool executor directly
+    # Initialize shell session manually (without full API auth)
+    import subprocess
+    agent.shell_session = subprocess.Popen(
+        ['bash'],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=os.path.expanduser("~/Downloads")
+    )
 
     from cite_agent.tool_executor import ToolExecutor
 
@@ -98,7 +106,7 @@ async def test_agent():
     print("Expected: Should match 'Code and Slides IVOL' directory")
     print()
 
-    result = executor.execute_tool("execute_shell_command", {"command": "cd code slides ivol"})
+    result = await executor.execute_tool("execute_shell_command", {"command": "cd code slides ivol"})
     print(f"Result: {result}")
     print(f"Current CWD after: {agent.file_context.get('current_cwd')}")
 
@@ -113,7 +121,7 @@ async def test_agent():
     print("Input: cd ..")
     print()
 
-    result = executor.execute_tool("execute_shell_command", {"command": "cd .."})
+    result = await executor.execute_tool("execute_shell_command", {"command": "cd .."})
     print(f"Result: {result}")
     print(f"Current CWD after: {agent.file_context.get('current_cwd')}")
 
