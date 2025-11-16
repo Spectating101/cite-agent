@@ -4409,6 +4409,23 @@ Concise query (max {max_length} chars):"""
             "git log": "git log --oneline -10",
             "show git log": "git log --oneline -10",
             "recent commits": "git log --oneline -10",
+            "git diff": "git diff",
+            "show changes": "git diff",
+            "what changed": "git diff",
+
+            # File statistics
+            "how many files": "ls | wc -l",
+            "count files": "ls | wc -l",
+            "count lines": "wc -l *",
+            "file sizes": "ls -lhS | head -20",
+            "disk usage": "du -sh *",
+            "largest files": "ls -lhS | head -10",
+
+            # System info
+            "disk space": "df -h",
+            "free space": "df -h",
+            "memory usage": "free -h",
+            "system info": "uname -a",
         }
 
         mapped_command = None
