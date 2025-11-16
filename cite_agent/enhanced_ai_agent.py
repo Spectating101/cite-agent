@@ -4432,6 +4432,8 @@ Concise query (max {max_length} chars):"""
             "show everything": "ls -la",
             "list all": "ls -la",
             "list everything": "ls -la",
+            "list directory": "ls -la",
+            "show directory": "ls -la",
             "what's available": "ls -la",
             "what's inside": "ls -la",
             "show current directory": "pwd && ls -la",
