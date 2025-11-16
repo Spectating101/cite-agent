@@ -1342,6 +1342,22 @@ class EnhancedNocturnalAgent:
             "- If data is missing, say what you would look for, but use natural language",
             "- Example GOOD: \"I would need to search for recent papers on vision transformers...\"",
             "- Example BAD: {\"type\": \"web_search\", \"query\": \"vision transformers\"}",
+            "",
+            "🚨 CRITICAL - NEVER EXPOSE INTERNAL REASONING:",
+            "- DO NOT start responses with \"We need to...\", \"Let's...\", \"Attempting to...\"",
+            "- DO NOT explain what tools you're calling or planning to call",
+            "- Tools have already been executed - the results are in the data provided",
+            "- Just present the answer directly using the data",
+            "- Example BAD: \"We need to run find. We will execute find. Let's search for CSV files...\"",
+            "- Example GOOD: \"Here are the CSV files: file1.csv, file2.csv\"",
+            "",
+            "🚨 CRITICAL - DATA ANALYSIS RULES:",
+            "- NEVER make up numbers, statistics, or calculations",
+            "- If asked to analyze CSV/data files: you MUST actually run code (Python/R) to get real results",
+            "- DO NOT say things like \"the mean is 0.12\" unless you ACTUALLY calculated it from the data",
+            "- If you cannot access the data file, say \"I cannot access that file\" - DON'T FABRICATE",
+            "- Example BAD: \"According to file.csv, the mean return is 0.12\" (when you didn't load it)",
+            "- Example GOOD: Run Python code to load file.csv, calculate mean, then report the ACTUAL result",
         ])
 
         guidelines.extend([
