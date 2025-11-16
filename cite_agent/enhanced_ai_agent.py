@@ -4419,6 +4419,40 @@ Concise query (max {max_length} chars):"""
                     print(f"🚀 [Heuristic] Mapped '{query}' to '{command}'")
                 break
 
+        # Dynamic file reading patterns: "read file.txt", "show me README.md", "open config.json"
+        if not mapped_command:
+            import re
+            # Match: "read <filename>", "show me <filename>", "open <filename>", "cat <filename>"
+            file_patterns = [
+                r"^read\s+(.+)$",
+                r"^show\s+(?:me\s+)?(.+?\.\w+)$",
+                r"^open\s+(.+?\.\w+)$",
+                r"^view\s+(.+?\.\w+)$",
+                r"^display\s+(.+?\.\w+)$",
+            ]
+            for pattern in file_patterns:
+                match = re.match(pattern, query_lower)
+                if match:
+                    # Extract filename from ORIGINAL query to preserve case
+                    original_match = re.match(pattern, query, re.IGNORECASE)
+                    if original_match:
+                        filename = original_match.group(1).strip()
+                    else:
+                        filename = match.group(1).strip()
+
+                    # Quote filenames with spaces
+                    if ' ' in filename:
+                        filename = f'"{filename}"'
+
+                    # Use cat for text files, head for large files
+                    if any(filename.lower().endswith(ext) for ext in ['.csv', '.log', '.txt', '.md', '.py', '.json', '.yaml', '.yml', '.toml', '.sh', '.r', '.qmd', '.do']):
+                        mapped_command = f"cat {filename}"
+                    else:
+                        mapped_command = f"head -50 {filename}"
+                    if debug_mode:
+                        print(f"🚀 [Heuristic] Mapped file read '{query}' to '{mapped_command}'")
+                    break
+
         if not is_shell_command and not mapped_command:
             return None  # Not a shell command, use LLM routing
 
