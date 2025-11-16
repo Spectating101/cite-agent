@@ -1,0 +1,44 @@
+{
+  "total_score": 11,
+  "total_possible": 12,
+  "success_rate": 0.9166666666666666,
+  "total_time": 132.98850321769714,
+  "by_category": {
+    "literature_review": 3,
+    "methodology": 3,
+    "implementation": 2,
+    "debugging": 3
+  },
+  "by_topic": [
+    {
+      "topic": "ESG and Stock Returns",
+      "scores": {
+        "literature_review": 1,
+        "methodology": 1,
+        "implementation": 1,
+        "debugging": 1
+      },
+      "time": 54.661991596221924
+    },
+    {
+      "topic": "Machine Learning for Credit Risk",
+      "scores": {
+        "literature_review": 1,
+        "methodology": 1,
+        "implementation": 1,
+        "debugging": 1
+      },
+      "time": 26.30847668647766
+    },
+    {
+      "topic": "Volatility Clustering in Forex",
+      "scores": {
+        "literature_review": 1,
+        "methodology": 1,
+        "implementation": 0,
+        "debugging": 1
+      },
+      "time": 40.008957386016846
+    }
+  ]
+}

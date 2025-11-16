@@ -223,6 +223,55 @@ def calculate_cost(tokens: int) -> float:
     COST_PER_1K_TOKENS = 0.0001  # $0.0001 per 1K tokens
     return (tokens / 1000) * COST_PER_1K_TOKENS
 
+def detect_small_talk(query: str) -> Optional[str]:
+    """
+    Detect simple small talk and return appropriate response without LLM call.
+    Returns None if not small talk (should proceed to LLM).
+    Returns response string if small talk detected.
+    """
+    query_lower = query.lower().strip()
+    query_normalized = ''.join(c for c in query_lower if c.isalnum() or c.isspace()).strip()
+    words = query_normalized.split()
+
+    # Single word small talk
+    if len(words) == 1:
+        responses = {
+            "test": "I'm ready to help. What would you like to work on?",
+            "testing": "I'm ready to help. What would you like to work on?",
+            "hi": "Hello! What can I help you with today?",
+            "hello": "Hello! What can I help you with today?",
+            "hey": "Hi! What can I assist you with?",
+            "ping": "Pong! I'm here and ready.",
+            "thanks": "You're welcome! Let me know if you need anything else.",
+            "thank": "You're welcome!",
+            "bye": "Goodbye! Feel free to return anytime.",
+            "ok": "Ready when you are.",
+            "okay": "Ready when you are.",
+        }
+        if query_normalized in responses:
+            return responses[query_normalized]
+
+    # Multi-word small talk patterns
+    if len(words) <= 5:
+        # "just testing", "this is a test", "just a test", etc.
+        if "test" in words and all(w in ["test", "testing", "just", "this", "is", "a", "only", "my"] for w in words):
+            return "I'm ready to help. What would you like to work on?"
+
+        # Greetings
+        if query_normalized in ["how are you", "how are you doing", "hows it going", "whats up"]:
+            return "I'm functioning well and ready to assist. What can I help you with?"
+
+        # Thanks variations
+        if query_normalized in ["thank you", "thanks a lot", "thanks so much", "thank you so much"]:
+            return "You're welcome! Let me know if you need anything else."
+
+        # Acknowledgments
+        if query_normalized in ["got it", "i see", "ok cool", "okay cool", "sounds good", "makes sense"]:
+            return "Great! Anything else I can help with?"
+
+    # Not small talk - proceed to LLM
+    return None
+
 # Main query endpoint
 @router.post("/", response_model=QueryResponse)
 async def process_query(
@@ -253,7 +302,7 @@ async def process_query(
                 user_id
             )
             tokens_remaining = DAILY_TOKEN_LIMIT - user['tokens_used_today']
-            
+
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
@@ -263,7 +312,31 @@ async def process_query(
                     "tokens_remaining": max(0, tokens_remaining)
                 }
             )
-        
+
+        # =====================================================================
+        # SMALL TALK DETECTION - Handle simple queries without LLM call
+        # =====================================================================
+        small_talk_response = detect_small_talk(request.query)
+        if small_talk_response:
+            logger.info("Small talk detected, returning quick response", query=request.query[:50])
+
+            # Get current token usage for response
+            user = await conn.fetchrow(
+                "SELECT tokens_used_today FROM users WHERE user_id = $1",
+                user_id
+            )
+            tokens_remaining = DAILY_TOKEN_LIMIT - user['tokens_used_today']
+
+            return QueryResponse(
+                response=small_talk_response,
+                tokens_used=0,  # No tokens used for small talk
+                tokens_remaining=tokens_remaining,
+                cost=0.0,
+                model="quick_reply",
+                provider="builtin",
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
+
         # Call LLM with automatic provider failover
         # Tries: Groq (4 keys) → Cerebras → Cloudflare → OpenRouter → others
         provider_manager = get_provider_manager()
@@ -339,6 +412,17 @@ User: "what columns does it have?" → api_context: {"file_context": {"structure
 
 🚨 If shell_info OR file_context exists, USE IT. Don't explain, don't apologize, just show the results.
 
+🚨 CRITICAL - ABSOLUTE ANTI-HALLUCINATION RULES:
+• You are FORBIDDEN from mentioning specific files, folders, or directories unless:
+  1. They appear in api_context shell_info/directory_contents (from ls/find/pwd)
+  2. OR the user explicitly mentioned them first
+• NEVER say "I can see X folders" without actual ls output in api_context
+• NEVER invent plausible names like: data/, scripts/, notes/, test.py, config.json, README.md
+• If asked "what folders/files can you see?" without shell_info in api_context:
+  → Say "I don't have that information" or "The file listing wasn't provided"
+• IF shell_info IS in api_context: Use ONLY exact files/folders from that output
+• Violation = hallucination = critical failure
+
 Examples:
 User: "Snowflake market share"
 ✅ GOOD: "18.33% in cloud data warehouses (web search)"
@@ -360,7 +444,9 @@ Otherwise: ANSWER using your tools. Be resourceful, not helpless.
 
 - COMMUNICATION RULES:
 - You MUST NOT return an empty response. EVER.
-- Before using a tool (like running a shell command or reading a file), you MUST first state your intent to the user in a brief, natural message. (e.g., "Okay, I'll check the contents of that directory," or "I will search for that file.")
+- When api_context has shell_info/file_context: Just show results directly, NO preambles like "Let me check"
+- The data is ALREADY provided in api_context - don't say you'll fetch it, just use it
+- NEVER say "I'll check" if the shell output is already in api_context - just present the results
 
 - PROACTIVE FILE SEARCH:
 - If a user asks to find a file or directory and you are not sure where it is, use the `find` command with wildcards to search for it.

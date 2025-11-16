@@ -1,0 +1,47 @@
+global:
+  resolve_timeout: 5m
+
+# Default route
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+
+receivers:
+  - name: 'default'
+    # Add your notification methods here
+    # Examples below:
+
+    # Email notifications (configure SMTP)
+    # email_configs:
+    #   - to: 'ops@yourdomain.com'
+    #     from: 'alerts@yourdomain.com'
+    #     smarthost: 'smtp.gmail.com:587'
+    #     auth_username: 'your-email@gmail.com'
+    #     auth_password: 'your-app-password'
+    #     send_resolved: true
+
+    # Slack notifications
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+    #     channel: '#alerts'
+    #     title: 'Cite-Agent Alert'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+    # PagerDuty
+    # pagerduty_configs:
+    #   - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+
+    # Webhook (generic)
+    # webhook_configs:
+    #   - url: 'http://your-webhook-endpoint/alerts'
+
+# Inhibit rules (prevent duplicate alerts)
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']
