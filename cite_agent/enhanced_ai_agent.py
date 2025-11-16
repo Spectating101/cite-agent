@@ -4368,14 +4368,32 @@ Concise query (max {max_length} chars):"""
             all_tool_results = {}
             total_tokens = 0
 
+            # Get current working directory for context
+            current_cwd = self.file_context.get('current_cwd', os.getcwd())
+
+            # Build rich system prompt with working directory context (Cursor-like)
+            system_prompt = (
+                f"You are a research assistant with access to tools for executing shell commands, "
+                f"searching files, reading papers, and analyzing data.\n\n"
+                f"CURRENT WORKING DIRECTORY: {current_cwd}\n\n"
+                f"TOOL USAGE GUIDELINES:\n"
+                f"- 'cd ~/path' or 'cd /path' → use execute_shell_command to change directory (persists)\n"
+                f"- 'ls', 'ls -la', 'find', 'grep' → use execute_shell_command\n"
+                f"- 'cat file.txt', 'head file.py' → use execute_shell_command OR read_file\n"
+                f"- File operations in current directory work without absolute paths\n"
+                f"- Multi-step tasks: Execute one tool, see result, then decide next action\n"
+                f"- Use relative paths from current directory (no absolute paths needed)\n\n"
+                f"RESPONSE STYLE:\n"
+                f"- Be direct and natural - no 'Let me...', 'I will...' preambles\n"
+                f"- After executing commands, report results concisely\n"
+                f"- For file system operations, show actual outputs\n"
+                f"- No JSON in responses - only natural language\n"
+            )
+
             # Build conversation context
             conversation = []
             if hasattr(self, 'conversation_history'):
                 conversation = self.conversation_history[-10:].copy()
-            conversation.append({
-                "role": "user",
-                "content": request.question
-            })
 
             current_query = request.question
             last_assistant_message = None
@@ -4384,10 +4402,18 @@ Concise query (max {max_length} chars):"""
                 if debug_mode:
                     print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
 
+                # Update system prompt with current cwd (may have changed from previous iteration)
+                current_cwd = self.file_context.get('current_cwd', os.getcwd())
+                updated_system_prompt = system_prompt.replace(
+                    f"CURRENT WORKING DIRECTORY: {current_cwd}",
+                    f"CURRENT WORKING DIRECTORY: {current_cwd}"
+                )
+
                 # Step 1: Get tool calls from LLM
                 fc_response = await self._function_calling_agent.process_query(
                     query=current_query,
-                    conversation_history=conversation
+                    conversation_history=conversation,
+                    system_prompt=updated_system_prompt
                 )
 
                 total_tokens += fc_response.tokens_used
@@ -4579,18 +4605,31 @@ Concise query (max {max_length} chars):"""
             # Traditional proven for financial (2,249 tokens, correct calculations)
             # Testing both modes with selective routing below
 
-            # TRADITIONAL MODE ONLY: Function calling disabled due to TLS errors
-            # Traditional mode tested and working perfectly:
-            # - Financial: 24.9% profit margin calculation (accurate!)
-            # - Research: Good paper retrieval with citations
-            # - Tokens: ~3,178 per query (reasonable)
+            # FUNCTION CALLING MODE: Enable via environment variable
+            # Default: OFF (traditional mode) for backward compatibility
+            # Set NOCTURNAL_FUNCTION_CALLING=1 for Cursor-like iterative tool execution
             #
-            # Function calling has httpx/proxy issues in container environment
-            # Keeping it simple: traditional mode works, use it for everything
+            # Function calling benefits:
+            # - Iterative multi-step tool execution (LLM controls tool invocation)
+            # - Natural directory navigation: "cd ~/Downloads" → "ls" → "find *.csv"
+            # - No "Run:" prefix or absolute path requirements
+            # - LLM can chain commands based on results
+            #
+            # Traditional mode benefits:
+            # - Proven 33% pass rate on CCT tests
+            # - Stable financial calculations
+            # - No TLS/proxy issues in container environments
 
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            use_function_calling = os.getenv("NOCTURNAL_FUNCTION_CALLING", "").lower() in ("1", "true", "yes")
+
             if debug_mode and self.client is not None:
-                print(f"🔍 ROUTING: Using TRADITIONAL mode (function calling disabled)")
+                mode = "FUNCTION CALLING" if use_function_calling else "TRADITIONAL"
+                print(f"🔍 ROUTING: Using {mode} mode")
+
+            # FUNCTION CALLING MODE: Cursor-like iterative tool execution
+            if use_function_calling and self.client is not None:
+                return await self._process_request_function_calling(request)
 
             # TRADITIONAL MODE: Works reliably for all query types
 

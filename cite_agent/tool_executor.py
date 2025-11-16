@@ -192,12 +192,20 @@ class ToolExecutor:
             return {"error": f"Web search error: {str(e)}"}
 
     def _execute_list_directory(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute list_directory tool"""
+        """Execute list_directory tool with PERSISTENT working directory context"""
         path = args.get("path", ".")
         show_hidden = args.get("show_hidden", False)
 
+        # Get current working directory from agent context
+        current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+
+        # If path is "." or default, use current working directory
+        if path == "." or path == "":
+            path = current_cwd
+
         if self.debug_mode:
             print(f"📁 [List Directory] Path: {path}, show_hidden: {show_hidden}")
+            print(f"📁 [List Directory] Current CWD: {current_cwd}")
 
         # Use shell command to list directory
         try:
@@ -206,6 +214,15 @@ class ToolExecutor:
                     command = f"ls -lah {path}"
                 else:
                     command = f"ls -lh {path}"
+
+                # Execute in context of current working directory
+                if path != current_cwd and not path.startswith('/') and not path.startswith('~'):
+                    # Relative path - prepend current directory
+                    full_path = os.path.join(current_cwd, path)
+                    if show_hidden:
+                        command = f"ls -lah {full_path}"
+                    else:
+                        command = f"ls -lh {full_path}"
 
                 output = self.agent.execute_command(command)
 
@@ -251,17 +268,26 @@ class ToolExecutor:
             return {"error": f"Failed to list directory: {str(e)}"}
 
     def _execute_read_file(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute read_file tool"""
+        """Execute read_file tool with PERSISTENT working directory context"""
         file_path = args.get("file_path", "")
         lines = args.get("lines", -1)
 
         if not file_path:
             return {"error": "Missing required parameter: file_path"}
 
+        # Get current working directory from agent context
+        current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+
         if self.debug_mode:
             print(f"📄 [Read File] Path: {file_path}, lines: {lines}")
+            print(f"📄 [Read File] Current CWD: {current_cwd}")
 
         try:
+            # Resolve path relative to current working directory
+            if not file_path.startswith('/') and not file_path.startswith('~'):
+                # Relative path - resolve from current working directory
+                file_path = os.path.join(current_cwd, file_path)
+
             path_obj = Path(file_path).expanduser()
             if not path_obj.exists():
                 return {"error": f"File does not exist: {file_path}"}
@@ -288,9 +314,17 @@ class ToolExecutor:
             return {"error": f"Failed to read file: {str(e)}"}
 
     def _execute_write_file(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute write_file tool"""
+        """Execute write_file tool with PERSISTENT working directory context"""
         file_path = args.get("file_path", "")
         content = args.get("content", "")
+
+        # Get current working directory from agent context
+        current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+
+        # Resolve path relative to current working directory
+        if file_path and not file_path.startswith('/') and not file_path.startswith('~'):
+            # Relative path - resolve from current working directory
+            file_path = os.path.join(current_cwd, file_path)
         overwrite = args.get("overwrite", False)
 
         if not file_path:
@@ -324,19 +358,23 @@ class ToolExecutor:
             return {"error": f"Failed to write file: {str(e)}"}
 
     def _execute_shell_command(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute execute_shell_command tool"""
+        """Execute execute_shell_command tool with PERSISTENT working directory"""
         command = args.get("command", "")
         working_directory = args.get("working_directory", ".")
 
         if not command:
             return {"error": "Missing required parameter: command"}
 
-        if self.debug_mode:
-            print(f"⚙️  [Shell Command] Executing: {command} (cwd: {working_directory})")
-
         # Safety check
         if not self.agent.shell_session:
             return {"error": "Shell session not available"}
+
+        # Get current working directory from agent context
+        current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
+
+        if self.debug_mode:
+            print(f"⚙️  [Shell Command] Executing: {command}")
+            print(f"⚙️  [Shell Command] Current CWD: {current_cwd}")
 
         # Classify command safety
         safety_level = self.agent._classify_command_safety(command)
@@ -347,15 +385,74 @@ class ToolExecutor:
             }
 
         try:
-            # Change directory if needed
-            if working_directory and working_directory != ".":
-                cd_command = f"cd {working_directory} 2>/dev/null && pwd"
-                cd_output = self.agent.execute_command(cd_command)
-                if "ERROR" in cd_output:
-                    return {"error": f"Failed to change directory: {working_directory}"}
+            # PERSISTENT WORKING DIRECTORY: Handle cd commands specially
+            command_stripped = command.strip()
+
+            # Detect cd commands (including cd &&, cd;, cd alone)
+            is_cd_command = (
+                command_stripped.startswith('cd ') or
+                command_stripped == 'cd' or
+                command_stripped.startswith('cd\t')
+            )
+
+            if is_cd_command:
+                # Extract target directory
+                # Handle: "cd ~/Downloads", "cd /path", "cd ..", "cd"
+                parts = command_stripped.split(maxsplit=1)
+                if len(parts) > 1:
+                    target_dir = parts[1].split('&&')[0].split(';')[0].strip()
+                else:
+                    target_dir = os.path.expanduser("~")  # cd alone goes home
+
+                # Expand ~ and resolve path
+                if target_dir.startswith('~'):
+                    target_dir = os.path.expanduser(target_dir)
+                elif not target_dir.startswith('/'):
+                    # Relative path - resolve from current_cwd
+                    target_dir = os.path.join(current_cwd, target_dir)
+
+                # Execute cd and get new pwd
+                cd_cmd = f"cd {target_dir} && pwd"
+                output = self.agent.execute_command(cd_cmd)
+
+                if "ERROR" not in output and output.strip():
+                    # Update persistent working directory
+                    new_cwd = output.strip().split('\n')[-1]
+                    self.agent.file_context['current_cwd'] = new_cwd
+                    self.agent.file_context['last_directory'] = new_cwd
+
+                    if self.debug_mode:
+                        print(f"⚙️  [Shell Command] Directory changed: {current_cwd} → {new_cwd}")
+
+                    return {
+                        "command": command,
+                        "output": f"Changed directory to {new_cwd}",
+                        "working_directory": new_cwd,
+                        "previous_directory": current_cwd,
+                        "success": True
+                    }
+                else:
+                    return {
+                        "command": command,
+                        "output": output,
+                        "error": f"Failed to change directory to {target_dir}",
+                        "working_directory": current_cwd,
+                        "success": False
+                    }
+
+            # Non-cd commands: Execute in current working directory
+            # Prepend cd to ensure we're in the right directory
+            if current_cwd and current_cwd != ".":
+                full_command = f"cd {current_cwd} && {command}"
+            else:
+                full_command = command
+
+            if working_directory and working_directory != "." and working_directory != current_cwd:
+                # User specified a different directory - use that instead
+                full_command = f"cd {working_directory} && {command}"
 
             # Execute command
-            output = self.agent.execute_command(command)
+            output = self.agent.execute_command(full_command)
 
             if self.debug_mode:
                 print(f"⚙️  [Shell Command] Output: {len(output)} characters")
@@ -363,7 +460,7 @@ class ToolExecutor:
             return {
                 "command": command,
                 "output": output,
-                "working_directory": working_directory,
+                "working_directory": current_cwd,
                 "success": "ERROR" not in output
             }
 
