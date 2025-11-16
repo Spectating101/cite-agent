@@ -20,7 +20,7 @@ router = APIRouter(prefix="/nocturnal", tags=["nocturnal"])
 class NocturnalRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=10000, description="User query")
     conversation_history: Optional[List[Dict[str, str]]] = Field(default=None, description="Optional conversation context")
-    model: str = Field(default="llama-3.3-70b-versatile", description="Model to use")
+    model: str = Field(default="gpt-oss-120b", description="Model to use")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4000, ge=1, le=8000)
 

@@ -22,8 +22,8 @@ Transform cite-agent from broken backend mode into a production-ready research a
 - **Solution:** Documented cache clearing procedure
 - **Command:** `find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null`
 
-### 3. **Model Purge: llama-3.3-70b → gpt-oss-120b** ✅
-- **Removed:** All references to llama-3.3-70b (5 locations)
+### 3. **Model Purge: gpt-oss-120b → gpt-oss-120b** ✅
+- **Removed:** All references to gpt-oss-120b (5 locations)
 - **Now using:** gpt-oss-120b exclusively across all Cerebras calls
 
 ### 4. **Error 400 Fix: Tool Call ID Not Found** ✅

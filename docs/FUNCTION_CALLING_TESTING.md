@@ -23,7 +23,7 @@ if "code" in query:  # "did you hardcode this?"
 **After (Function Calling - PROPER)**
 ```python
 response = client.chat.completions.create(
-    model="llama-3.3-70b",
+    model="gpt-oss-120b",
     messages=[{"role": "user", "content": query}],
     tools=TOOLS,  # LLM chooses
     tool_choice="auto"

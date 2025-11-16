@@ -81,7 +81,7 @@ $ code-agent "make this function faster"
 ## How It Works
 
 1. **Gathers context** - Reads your project files (Python, JS, etc.)
-2. **Sends to Cerebras** - Uses Llama 3.3 70B model (free tier)
+2. **Sends to Cerebras** - Uses gpt-oss-120b model (free tier)
 3. **Gets response** - AI analyzes and suggests changes
 4. **Shows diff** - You apply changes manually (or auto in v2)
 
@@ -164,7 +164,7 @@ code-agent "write pytest tests for the API"
 | **Cost** | $0 | $20/month | $10/month | $0 (beta) |
 | **Token limit** | 43,200/day | ~500/day | ~300/day | ~1000/day |
 | **Speed** | 2-3 sec | 5-10 sec | 3-5 sec | 5-10 sec |
-| **Model** | Llama 3.3 70B | Claude 3.5 | GPT-4 | Sonnet 4 |
+| **Model** | gpt-oss-120b | Claude 3.5 | GPT-4 | Sonnet 4 |
 | **Context** | 50KB | 200KB | 100KB | Unlimited |
 | **IDE integration** | CLI only | Native | Native | VS Code |
 | **Best for** | Power users | Everyone | Autocomplete | Research |
@@ -312,7 +312,7 @@ MIT - Do whatever you want
 ---
 
 **Built by:** You, for you
-**Powered by:** Cerebras Llama 3.3 70B
+**Powered by:** Cerebras gpt-oss-120b
 **Cost:** $0/month (free tier)
 **Token limit:** 43,200 requests/day (vs Cursor's 500/day)
 

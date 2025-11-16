@@ -139,8 +139,8 @@ CEREBRAS_API_KEY_4=csk-n5h26f263vr5rxp9fpn4w8xkfvpc5v9kjdw95vfc8d3x4ce9
 **Location:** `cite-agent-api/.env` (lines 7-11)
 
 **Models Available:**
-- `llama3.1-8b` - Fast, 2000 tok/sec (but hallucinates papers)
-- `llama-3.3-70b` - Better quality
+- `gpt-oss-120b` - Fast, 2000 tok/sec (but hallucinates papers)
+- `gpt-oss-120b` - Better quality
 - **`gpt-oss-120b` - BEST for research** (use this!)
 
 **Activation:**

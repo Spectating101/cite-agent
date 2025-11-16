@@ -28,8 +28,8 @@ class TokenBudget:
         
         # Model-specific token costs (rough estimates)
         self.model_costs = {
-            "llama-3.3-70b-versatile": {"input": 1.0, "output": 1.0},
-            "llama-3.1-8b-instant": {"input": 0.1, "output": 0.1},
+            "gpt-oss-120b": {"input": 1.0, "output": 1.0},
+            "gpt-oss-120b": {"input": 0.1, "output": 0.1},
             "gpt-3.5-turbo": {"input": 0.5, "output": 0.5},
             "gpt-4": {"input": 1.5, "output": 1.5}
         }
@@ -65,7 +65,7 @@ class TokenBudget:
         results = await pipe.execute()
         return results[0]
     
-    def estimate_tokens(self, text: str, model: str = "llama-3.3-70b-versatile") -> int:
+    def estimate_tokens(self, text: str, model: str = "gpt-oss-120b") -> int:
         """Estimate token count for text (rough approximation)"""
         # Rough estimation: 1 token ≈ 4 characters for most models
         base_tokens = len(text) // 4
@@ -77,7 +77,7 @@ class TokenBudget:
         
         return base_tokens
     
-    async def check_budget(self, user_id: str, estimated_tokens: int, model: str = "llama-3.3-70b-versatile") -> Tuple[bool, Dict[str, int]]:
+    async def check_budget(self, user_id: str, estimated_tokens: int, model: str = "gpt-oss-120b") -> Tuple[bool, Dict[str, int]]:
         """Check if user has enough token budget"""
         budget_info = {}
         
@@ -128,7 +128,7 @@ class TokenBudget:
         
         return True, budget_info
     
-    async def reserve_tokens(self, user_id: str, estimated_tokens: int, model: str = "llama-3.3-70b-versatile") -> bool:
+    async def reserve_tokens(self, user_id: str, estimated_tokens: int, model: str = "gpt-oss-120b") -> bool:
         """Reserve tokens for a request"""
         # Check budget first
         can_proceed, budget_info = await self.check_budget(user_id, estimated_tokens, model)
@@ -152,7 +152,7 @@ class TokenBudget:
         
         return True
     
-    async def record_actual_usage(self, user_id: str, actual_tokens: int, model: str = "llama-3.3-70b-versatile"):
+    async def record_actual_usage(self, user_id: str, actual_tokens: int, model: str = "gpt-oss-120b"):
         """Record actual token usage (for adjustment)"""
         # This could be used to adjust reservations based on actual usage
         # For now, we'll just log it
@@ -203,7 +203,7 @@ async def get_token_budget() -> TokenBudget:
     return token_budget
 
 # Token budget decorator
-def require_token_budget(estimated_tokens: int, model: str = "llama-3.3-70b-versatile"):
+def require_token_budget(estimated_tokens: int, model: str = "gpt-oss-120b"):
     """Decorator to check token budget before processing request"""
     async def decorator(request: Request, call_next):
         # Get user from request state (set by auth middleware)

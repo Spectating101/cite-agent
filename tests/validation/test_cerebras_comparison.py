@@ -37,7 +37,7 @@ def test_groq(query):
     client = Groq(api_key=groq_key)
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": TRUTH_SEEKING_PROMPT},
                 {"role": "user", "content": query}
@@ -60,7 +60,7 @@ def test_cerebras(query):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "llama-3.3-70b",  # Same as Groq
+                "model": "gpt-oss-120b",  # Same as Groq
                 "messages": [
                     {"role": "system", "content": TRUTH_SEEKING_PROMPT},
                     {"role": "user", "content": query}
@@ -96,11 +96,11 @@ def main():
         print(f"Expected: {expected}")
         print(f"{'='*70}\n")
         
-        print("GROQ (Llama 3.3 70B):")
+        print("GROQ (gpt-oss-120b):")
         groq_response = test_groq(query)
         print(f"  {groq_response[:200]}...")
         
-        print("\nCEREBRAS (Llama 3.1 70B):")
+        print("\nCEREBRAS (gpt-oss-120b):")
         cerebras_response = test_cerebras(query)
         print(f"  {cerebras_response[:200]}...")
         

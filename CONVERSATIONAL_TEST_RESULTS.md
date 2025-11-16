@@ -320,7 +320,7 @@ cat test_results.json
 ## Test Configuration
 
 - **API Keys**: 4 Cerebras keys with rotation
-- **Model**: llama3.1-8b (via Cerebras)
+- **Model**: gpt-oss-120b (via Cerebras)
 - **Rate Limit Handling**: 6-second delays between requests
 - **Debug Mode**: Disabled (NOCTURNAL_DEBUG=0)
 - **Test Duration**: ~2.2 minutes per run

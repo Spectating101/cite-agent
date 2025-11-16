@@ -28,7 +28,7 @@ CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
 # Model selection - uncomment the one you want
 MODEL = "qwen-3-coder-480b"      # Best for coding (480B params, 100 req/day)
 # MODEL = "qwen-3-235b-a22b-instruct-2507"  # Best general (235B params, 14.4k req/day)
-# MODEL = "llama-3.3-70b"          # Fast fallback (70B params, 14.4k req/day)
+# MODEL = "gpt-oss-120b"          # Fast fallback (70B params, 14.4k req/day)
 
 # Current API key index (rotates on rate limits)
 current_key_index = 0
@@ -270,7 +270,7 @@ def main():
     elif args.model == "general":
         MODEL = "qwen-3-235b-a22b-instruct-2507"
     elif args.model == "fast":
-        MODEL = "llama-3.3-70b"
+        MODEL = "gpt-oss-120b"
 
     # Initialize agent
     agent = CodeAgent()

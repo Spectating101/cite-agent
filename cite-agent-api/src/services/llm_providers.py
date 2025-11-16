@@ -49,7 +49,7 @@ class LLMProviderManager:
                 name='groq',
                 keys=groq_keys,
                 endpoint='https://api.groq.com/openai/v1/chat/completions',
-                models=['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+                models=['gpt-oss-120b', 'gpt-oss-120b'],
                 rate_limit_per_day=1000  # per key (70B model limit)
             )
         
@@ -68,7 +68,7 @@ class LLMProviderManager:
                 name='cerebras',
                 keys=cerebras_keys,
                 endpoint='https://api.cerebras.ai/v1/chat/completions',
-                models=['llama-3.3-70b', 'llama3.1-8b'],
+                models=['gpt-oss-120b', 'gpt-oss-120b'],
                 rate_limit_per_day=14400  # per key (verified from cerebras dashboard)
             )
         
@@ -80,7 +80,7 @@ class LLMProviderManager:
                 name='cloudflare',
                 keys=[cf_token],
                 endpoint=f'https://api.cloudflare.com/client/v4/accounts/{cf_account}/ai/run',
-                models=['@cf/meta/llama-3.1-70b-instruct', '@cf/meta/llama-3.1-8b-instruct'],
+                models=['@cf/meta/gpt-oss-120b-instruct', '@cf/meta/gpt-oss-120b-instruct'],
                 rate_limit_per_day=10000
             )
         
@@ -151,15 +151,15 @@ class LLMProviderManager:
             raise ValueError(f"Unknown provider: {provider_name}")
         
         # MODEL MAPPING: Translate model names between providers
-        # Cerebras uses 'llama-3.3-70b', Groq uses 'llama-3.3-70b-versatile'
+        # Cerebras uses 'gpt-oss-120b', Groq uses 'gpt-oss-120b'
         model_map = {
             'groq': {
-                'llama-3.3-70b': 'llama-3.3-70b-versatile',
-                'llama3.1-8b': 'llama-3.1-8b-instant'
+                'gpt-oss-120b': 'gpt-oss-120b',
+                'gpt-oss-120b': 'gpt-oss-120b'
             },
             'cerebras': {
-                'llama-3.3-70b-versatile': 'llama-3.3-70b',
-                'llama-3.1-8b-instant': 'llama3.1-8b'
+                'gpt-oss-120b': 'gpt-oss-120b',
+                'gpt-oss-120b': 'gpt-oss-120b'
             }
         }
         

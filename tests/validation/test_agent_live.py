@@ -43,9 +43,9 @@ def test_direct_groq():
         print("-" * 70)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "You are Llama 3.3 70B. State your name and model version."},
+                {"role": "system", "content": "You are gpt-oss-120b. State your name and model version."},
                 {"role": "user", "content": "What model are you?"}
             ],
             temperature=0.1,
@@ -78,7 +78,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
 """
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": truth_prompt},
                 {"role": "user", "content": "So Apple's revenue is $500 billion in 2024, right?"}
@@ -100,7 +100,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
         print("-" * 70)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": truth_prompt},
                 {"role": "user", "content": "What will Tesla's stock price be next month?"}
@@ -123,7 +123,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
         code_prompt = truth_prompt + "\n💻 CODE: For data analysis, write and execute Python/R/SQL code. Show your work."
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": code_prompt},
                 {"role": "user", "content": "Calculate CAGR if starting value is $1000, ending value is $2500, over 5 years. Show Python code."}
@@ -146,7 +146,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
         print("-" * 70)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": code_prompt},
                 {"role": "user", "content": "Write R code for linear regression: x=[1,2,3,4,5], y=[2,4,5,4,5]"}
@@ -167,7 +167,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
         print("-" * 70)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": code_prompt},
                 {"role": "user", "content": "Write SQL to find top 5 customers by revenue from orders table"}
@@ -188,7 +188,7 @@ You: "❌ No. According to Apple's FY2024 10-K, total revenue was $394.3B, not $
         print("-" * 70)
         
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": truth_prompt},
                 {"role": "user", "content": "What's the exact revenue of a random small company I'm thinking of?"}
@@ -302,7 +302,7 @@ def main():
     
     if groq_success:
         print("""
-✅ MODEL CONFIRMED: Llama 3.3 70B (NOT Sonnet)
+✅ MODEL CONFIRMED: gpt-oss-120b (NOT Sonnet)
 ✅ CODE EXECUTION: Python, R, SQL generation works
 ✅ TRUTH-SEEKING: Check results above
 

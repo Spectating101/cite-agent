@@ -102,7 +102,7 @@ call_backend_query()        # Sends to Heroku LLM
 #### **A. LLM Provider Management** (`src/services/llm_providers.py`)
 - Multi-provider failover: Groq (4 keys) → Cerebras → Cloudflare → OpenRouter
 - Rate limit handling: 14,400 req/min across providers
-- Model selection: `llama-3.3-70b` (Cerebras priority)
+- Model selection: `gpt-oss-120b` (Cerebras priority)
 
 #### **B. Archive API** (`src/routes/search.py`)
 - Sources: Semantic Scholar, OpenAlex, PubMed
@@ -158,7 +158,7 @@ call_backend_query(
 
 **Step 5: LLM Synthesis**
 ```
-Backend LLM (Cerebras llama-3.3-70b):
+Backend LLM (Cerebras gpt-oss-120b):
 - Has: Snowflake revenue ($3B) from SEC
 - Has: Market share (18.33%) from web
 - Synthesizes: "Snowflake has 18.33% market share in cloud data warehouses"

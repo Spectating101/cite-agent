@@ -183,7 +183,7 @@ When backend is available, returns:
 {
   "response": "2 + 2 = 4.",
   "tokens_used": 1054,
-  "model": "llama-3.3-70b"
+  "model": "gpt-oss-120b"
 }
 ```
 

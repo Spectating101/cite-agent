@@ -37,7 +37,7 @@ def call_llm(system_prompt: str, user_query: str) -> str:
     """Call LLM"""
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}
@@ -80,7 +80,7 @@ def main():
     print("╔══════════════════════════════════════════════════════════════════╗")
     print("║     🔬 繁體中文真相追求測試 (Traditional Chinese Testing)       ║")
     print("╚══════════════════════════════════════════════════════════════════╝")
-    print(f"\n模型 (Model): llama-3.3-70b-versatile")
+    print(f"\n模型 (Model): gpt-oss-120b")
     print(f"溫度 (Temperature): 0.2")
     print(f"語言 (Language): 繁體中文 (Traditional Chinese)")
     print()

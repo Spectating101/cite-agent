@@ -47,7 +47,7 @@ def call_llm(system_prompt: str, user_query: str) -> str:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.3-70b",
+                    "model": "gpt-oss-120b",
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_query}
@@ -66,7 +66,7 @@ def call_llm(system_prompt: str, user_query: str) -> str:
             from groq import Groq
             client = Groq(api_key=groq_key)
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="gpt-oss-120b",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_query}
@@ -111,7 +111,7 @@ def main():
     print("╚══════════════════════════════════════════════════════════════════╝")
     provider = "Cerebras" if use_cerebras else "Groq"
     print(f"\nProvider: {provider}")
-    print(f"Model: llama-3.3-70b")
+    print(f"Model: gpt-oss-120b")
     print(f"Temperature: 0.2")
     print(f"Prompt: Truth-seeking with anti-appeasement")
     print()

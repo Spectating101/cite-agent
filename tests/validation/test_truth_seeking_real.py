@@ -18,7 +18,7 @@ if not os.getenv("GROQ_API_KEY"):
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def call_llm(system_prompt: str, user_query: str, model: str = "llama-3.3-70b-versatile") -> str:
+def call_llm(system_prompt: str, user_query: str, model: str = "gpt-oss-120b") -> str:
     """Call LLM with given prompts"""
     try:
         response = client.chat.completions.create(
@@ -215,7 +215,7 @@ def test_temperature_effect():
     CREATIVE_PROMPT = "You are a helpful AI assistant."
     try:
         response_high = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-oss-120b",
             messages=[
                 {"role": "system", "content": CREATIVE_PROMPT},
                 {"role": "user", "content": query}

@@ -77,7 +77,7 @@ await agent.initialize()  # Sets up self.client with Cerebras
 ```
 
 ✅ **Models available:**
-- Light: `llama3.1-8b` (fast, but hallucinates papers)
+- Light: `gpt-oss-120b` (fast, but hallucinates papers)
 - Heavy: `gpt-oss-120b` (better quality, USE THIS for research)
 
 **STOP saying "no API keys" - they're in the code!**

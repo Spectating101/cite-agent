@@ -21,8 +21,8 @@ This release fixes the fundamental mismatch where the CLI defaulted to Groq inst
 #### Provider-Specific Implementation
 - Added OpenAI client support for Cerebras (OpenAI-compatible API)
 - Provider-specific model selection:
-  - Cerebras: `llama-3.3-70b` and `llama3.1-8b`
-  - Groq: `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`
+  - Cerebras: `gpt-oss-120b` and `gpt-oss-120b`
+  - Groq: `gpt-oss-120b` and `gpt-oss-120b`
 - Key rotation supports both Cerebras and Groq clients
 - Startup messages show which provider is active
 

@@ -1688,7 +1688,7 @@ class EnhancedNocturnalAgent:
         apis = request_analysis.get("apis", [])
         use_light_model = False
 
-        # CRITICAL: NEVER use light model for research queries - llama3.1-8b hallucinates papers
+        # CRITICAL: NEVER use light model for research queries - gpt-oss-120b hallucinates papers
         research_indicators = [
             'research', 'papers', 'find papers', 'academic', 'literature', 'studies',
             'methodology', 'regression', 'experiment', 'hypothesis', 'dataset'
@@ -1709,7 +1709,7 @@ class EnhancedNocturnalAgent:
         if getattr(self, 'llm_provider', 'groq') == 'cerebras':
             if use_light_model:
                 return {
-                    "model": "llama3.1-8b",  # Cerebras 8B model
+                    "model": "gpt-oss-120b",  # Cerebras 8B model
                     "max_tokens": 520,
                     "temperature": 0.2
                 }
@@ -1722,7 +1722,7 @@ class EnhancedNocturnalAgent:
             # Groq models
             if use_light_model:
                 return {
-                    "model": "llama-3.1-8b-instant",
+                    "model": "gpt-oss-120b",
                     "max_tokens": 520,
                     "temperature": 0.2
                 }
@@ -4321,7 +4321,7 @@ Concise query (max {max_length} chars):"""
         if self.llm_provider == "cerebras":
             return "gpt-oss-120b"
         elif self.llm_provider == "groq":
-            return "llama-3.1-70b-versatile"
+            return "gpt-oss-120b"
         else:
             return "gpt-4o-mini"  # Fallback
 
@@ -5310,7 +5310,7 @@ JSON:"""
                         if hasattr(self, 'client') and self.client:
                             # Local mode with temp key or dev keys
                             # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
-                            model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
+                            model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "gpt-oss-120b"
                             response = self.client.chat.completions.create(
                                 model=model_name,
                                 messages=[{"role": "user", "content": planner_prompt}],
@@ -5955,7 +5955,7 @@ JSON:"""
                     if hasattr(self, 'client') and self.client:
                         # Local mode
                         # Use gpt-oss-120b for Cerebras (100% test pass, better accuracy)
-                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "llama-3.1-70b-versatile"
+                        model_name = "gpt-oss-120b" if self.llm_provider == "cerebras" else "gpt-oss-120b"
                         response = self.client.chat.completions.create(
                             model=model_name,
                             messages=[{"role": "user", "content": web_decision_prompt}],
@@ -6391,7 +6391,7 @@ JSON:"""
                 try:
                     if self._ensure_client_ready():
                         summary_response = self.client.chat.completions.create(
-                            model="llama-3.1-8b-instant",
+                            model="gpt-oss-120b",
                             messages=summary_messages,
                             max_tokens=160,
                             temperature=0.2

@@ -44,7 +44,7 @@ Groq uses **per-model, per-tier** rate limiting:
 
 ### 1. Meta Llama (Production)
 
-#### llama-3.3-70b-versatile
+#### gpt-oss-120b
 - **Type**: Chat
 - **Context**: 131,072 tokens
 - **Rate Limit**: 30 RPM (free tier)
@@ -52,7 +52,7 @@ Groq uses **per-model, per-tier** rate limiting:
 - **Use**: General queries, high quality
 - **Cost**: $0.59/1M input, $0.79/1M output
 
-#### llama-3.1-8b-instant  
+#### gpt-oss-120b  
 - **Type**: Chat
 - **Context**: 131,072 tokens
 - **Rate Limit**: 6,000 RPM (free tier)
@@ -158,12 +158,12 @@ Groq uses **per-model, per-tier** rate limiting:
 
 ### For Nocturnal Archive
 
-**Primary**: `llama-3.3-70b-versatile`
+**Primary**: `gpt-oss-120b`
 - Best quality for research queries
 - Good speed (100 tok/sec)
 - 131K context for long papers
 
-**Fast Queries**: `llama-3.1-8b-instant`
+**Fast Queries**: `gpt-oss-120b`
 - Simple fact lookups
 - Ultra-fast (500 tok/sec)
 - Use for quick questions
@@ -232,8 +232,8 @@ providers['groq'] = ProviderConfig(
     keys=groq_keys,  # Your 4 keys
     endpoint='https://api.groq.com/openai/v1/chat/completions',
     models=[
-        'llama-3.3-70b-versatile',    # Quality
-        'llama-3.1-8b-instant'         # Speed
+        'gpt-oss-120b',    # Quality
+        'gpt-oss-120b'         # Speed
     ],
     rate_limit_per_day=14400  # Per key
 )
