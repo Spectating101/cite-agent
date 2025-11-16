@@ -4752,16 +4752,19 @@ Concise query (max {max_length} chars):"""
                 f"searching files, reading papers, and analyzing data.\n\n"
                 f"CURRENT WORKING DIRECTORY: {current_cwd}\n\n"
                 f"TOOL USAGE GUIDELINES:\n"
-                f"- 'cd ~/path' or 'cd /path' → use execute_shell_command to change directory (persists)\n"
-                f"- 'ls', 'ls -la', 'find', 'grep' → use execute_shell_command\n"
-                f"- 'cat file.txt', 'head file.py' → use execute_shell_command OR read_file\n"
-                f"- File operations in current directory work without absolute paths\n"
-                f"- Multi-step tasks: Execute one tool, see result, then decide next action\n"
-                f"- Use relative paths from current directory (no absolute paths needed)\n\n"
+                f"- Data analysis: load_dataset (for CSV files), analyze_data (statistics), run_python_code\n"
+                f"- File operations: list_directory, read_file, execute_shell_command (grep, find)\n"
+                f"- Research: search_papers (academic papers), get_financial_data (stocks/financials)\n"
+                f"- Directory navigation: execute_shell_command with 'cd' (persists across commands)\n"
+                f"- Conversational: chat (greetings, thanks, clarifications)\n\n"
+                f"CONTEXT AWARENESS:\n"
+                f"- Remember what was discussed previously in this conversation\n"
+                f"- If user asks about 'the data' or 'mean spread', use loaded dataset context\n"
+                f"- If dataset was loaded, use analyze_data for statistics queries\n"
+                f"- Multi-step tasks: Execute one tool, see result, then decide next action\n\n"
                 f"RESPONSE STYLE:\n"
                 f"- Be direct and natural - no 'Let me...', 'I will...' preambles\n"
                 f"- After executing commands, report results concisely\n"
-                f"- For file system operations, show actual outputs\n"
                 f"- No JSON in responses - only natural language\n"
             )
 
@@ -4999,7 +5002,10 @@ Concise query (max {max_length} chars):"""
 
             total_tokens += final_response.tokens_used
 
-            # Update conversation history
+            # CRITICAL: Clean JSON artifacts from FC synthesis FIRST
+            cleaned_response = self._clean_formatting(final_response.response)
+
+            # Update conversation history with CLEANED response (no JSON artifacts)
             if hasattr(self, 'conversation_history'):
                 self.conversation_history.append({
                     "role": "user",
@@ -5007,14 +5013,11 @@ Concise query (max {max_length} chars):"""
                 })
                 self.conversation_history.append({
                     "role": "assistant",
-                    "content": final_response.response
+                    "content": cleaned_response  # Use cleaned, not raw
                 })
 
             if debug_mode:
-                print(f"🔍 [Function Calling] Final response: {final_response.response[:100]}...")
-
-            # CRITICAL: Clean JSON artifacts from FC synthesis
-            cleaned_response = self._clean_formatting(final_response.response)
+                print(f"🔍 [Function Calling] Final response: {cleaned_response[:100]}...")
 
             return ChatResponse(
                 response=cleaned_response,
