@@ -1059,6 +1059,71 @@ Examples:
             updater.show_update_status()
             sys.exit(0)
     
+    # First-run detection - auto-launch setup wizard for new users
+    def check_first_run():
+        """Check if this is the first time running Cite Agent"""
+        try:
+            first_run_marker = Path.home() / ".cite_agent" / ".first_run_complete"
+            config_dir = Path.home() / ".cite_agent"
+
+            # Create config directory if it doesn't exist
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            # If marker doesn't exist, this is first run
+            if not first_run_marker.exists():
+                # Check if user has any auth configured
+                has_auth = False
+
+                # Check environment variables
+                if os.getenv("NOCTURNAL_ACCOUNT_EMAIL") or os.getenv("ARCHIVE_API_KEY"):
+                    has_auth = True
+
+                # Check keyring if available
+                if not has_auth:
+                    try:
+                        import keyring
+                        email = keyring.get_password("nocturnal-archive", "account_email")
+                        if email:
+                            has_auth = True
+                    except:
+                        pass
+
+                # If no auth configured, show welcome and run setup
+                if not has_auth:
+                    print("\n" + "=" * 60)
+                    print("🎉 Welcome to Cite Agent!")
+                    print("=" * 60)
+                    print("It looks like this is your first time running Cite Agent.")
+                    print("Let's set up your account so you can start researching!\n")
+
+                    setup_cli = NocturnalCLI()
+                    success = setup_cli.setup_wizard()
+
+                    if success:
+                        # Mark first run as complete
+                        first_run_marker.write_text(str(time.time()))
+                        print("\n✅ Setup complete! You're ready to go.")
+                        print("Type 'cite-agent' to start researching.\n")
+                    else:
+                        print("\n⚠️  Setup was not completed.")
+                        print("Run 'cite-agent --setup' anytime to configure your account.\n")
+
+                    return not success  # Return True to exit if setup failed
+                else:
+                    # Auth exists, mark as complete
+                    first_run_marker.write_text(str(time.time()))
+
+            return False  # Continue normal startup
+        except Exception as e:
+            # Don't block startup on errors
+            return False
+
+    # Check first run (unless running specific commands)
+    if not any([args.setup, args.version, args.tips, args.update, args.check_updates,
+                args.feedback, args.library, args.history, args.cache_stats, args.clear_cache]):
+        if check_first_run():
+            sys.exit(0)
+
     # Auto-upgrade on startup (silent, non-blocking)
     def auto_upgrade_if_needed():
         """Automatically upgrade to latest version if available"""
