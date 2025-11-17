@@ -7,7 +7,7 @@ long_description = readme_path.read_text() if readme_path.exists() else "Termina
 
 setup(
     name="cite-agent",
-    version="1.4.5",
+    version="1.4.8",
     author="Cite-Agent Team",
     author_email="contact@citeagent.dev",
     description="Terminal AI assistant for academic research with citation verification",
@@ -35,6 +35,11 @@ setup(
         "rich>=13.7.0",
         "keyring>=24.3.0",
         "ddgs>=1.0.0",  # For web search fallback (DuckDuckGo)
+        "pandas>=2.0.0",  # For data analysis features
+        "numpy>=1.24.0",  # For numerical computations
+        "scipy>=1.10.0",  # For statistical analysis
+        "scikit-learn>=1.2.0",  # For PCA, Factor Analysis
+        "plotext>=5.2.0",  # For terminal plotting
     ],
     entry_points={
         "console_scripts": [
