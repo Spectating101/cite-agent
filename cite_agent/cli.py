@@ -29,6 +29,7 @@ from .updater import NocturnalUpdater
 from .cli_workflow import WorkflowCLI
 from .workflow import WorkflowManager, Paper, parse_paper_from_response
 from .session_manager import SessionManager
+from .streaming_ui import StreamingChatUI, groq_stream_to_generator
 
 PRESET_SCENARIOS: Dict[str, Dict[str, str]] = {
     "Research sprint": {
@@ -486,7 +487,119 @@ class NocturnalCLI:
         finally:
             if self.agent:
                 await self.agent.close()
-    
+
+    async def streaming_interactive_mode(self):
+        """Interactive mode with real-time streaming responses (Cursor/Claude style)"""
+        if not await self.initialize():
+            return
+
+        # Initialize streaming UI
+        streaming_ui = StreamingChatUI(
+            app_name="Cite Agent",
+            working_dir=str(Path.cwd())
+        )
+
+        streaming_ui.show_header()
+        streaming_ui.show_info("Type your questions. Use 'quit' to exit, '/stream off' to disable streaming.")
+
+        stream_enabled = True
+
+        try:
+            while True:
+                try:
+                    user_input = streaming_ui.get_user_input("You: ")
+
+                    if user_input.lower() in ['quit', 'exit', 'q']:
+                        break
+
+                    # Toggle streaming
+                    if user_input.lower() == '/stream off':
+                        stream_enabled = False
+                        streaming_ui.show_info("Streaming disabled. Use '/stream on' to re-enable.")
+                        continue
+                    if user_input.lower() == '/stream on':
+                        stream_enabled = True
+                        streaming_ui.show_info("Streaming enabled.")
+                        continue
+
+                    # Handle workflow commands
+                    if user_input.lower() in ['show my library', 'library', 'list library']:
+                        self.list_library()
+                        continue
+                    if user_input.lower() in ['show history', 'history']:
+                        self.show_history()
+                        continue
+
+                    if not user_input:
+                        continue
+
+                except (EOFError, KeyboardInterrupt):
+                    streaming_ui.show_info("Goodbye!")
+                    break
+
+                try:
+                    request = ChatRequest(
+                        question=user_input,
+                        user_id="cli_user",
+                        conversation_id=self.session_id
+                    )
+
+                    if stream_enabled:
+                        # STREAMING MODE: Real-time token-by-token output
+                        indicator = streaming_ui.show_action_indicator("thinking...")
+
+                        try:
+                            stream = await self.agent.process_request_streaming(request)
+                            indicator.stop()
+
+                            # Stream the response
+                            full_response = await streaming_ui.stream_agent_response(stream)
+
+                            # Save to history
+                            self.workflow.save_query_result(
+                                query=user_input,
+                                response=full_response,
+                                metadata={"streaming": True}
+                            )
+                        except Exception as e:
+                            indicator.stop()
+                            streaming_ui.show_error(f"Streaming failed: {e}")
+                            # Fallback to non-streaming
+                            response = await self.agent.process_request(request)
+                            streaming_ui.console.print(response.response)
+                            self.workflow.save_query_result(
+                                query=user_input,
+                                response=response.response,
+                                metadata={"streaming": False, "fallback": True}
+                            )
+                    else:
+                        # NON-STREAMING MODE
+                        indicator = streaming_ui.show_action_indicator("processing...")
+                        response = await self.agent.process_request(request)
+                        indicator.stop()
+
+                        streaming_ui.console.print(response.response)
+                        streaming_ui.console.print()
+
+                        self.workflow.save_query_result(
+                            query=user_input,
+                            response=response.response,
+                            metadata={
+                                "tools_used": response.tools_used,
+                                "tokens_used": response.tokens_used
+                            }
+                        )
+
+                except KeyboardInterrupt:
+                    streaming_ui.show_info("Interrupted. Ask another question when ready.")
+                    continue
+                except Exception as e:
+                    streaming_ui.show_error(str(e))
+
+        finally:
+            if self.agent:
+                await self.agent.close()
+
     async def single_query(self, question: str):
         """Process a single query"""
         if not await self.initialize(non_interactive=True):
@@ -931,6 +1044,12 @@ Examples:
         help='Run in offline mode (cache-only, no API calls)'
     )
 
+    parser.add_argument(
+        '--stream',
+        action='store_true',
+        help='Enable streaming mode (real-time token output like Cursor/Claude)'
+    )
+
     args = parser.parse_args()
     
     # Handle version
@@ -1193,7 +1312,7 @@ Examples:
     # Handle query or interactive mode
     async def run_cli():
         cli_instance = NocturnalCLI()
-        
+
         if args.query and not args.interactive:
             # Check if workflow flags are set
             if args.save or args.copy or args.format:
@@ -1206,7 +1325,11 @@ Examples:
             else:
                 await cli_instance.single_query(args.query)
         else:
-            await cli_instance.interactive_mode()
+            # Use streaming mode if --stream flag is set
+            if args.stream:
+                await cli_instance.streaming_interactive_mode()
+            else:
+                await cli_instance.interactive_mode()
     
     try:
         asyncio.run(run_cli())
