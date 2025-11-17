@@ -3013,16 +3013,21 @@ class EnhancedNocturnalAgent:
         """Check if query is a shell command (should not be cached)"""
         query_lower = query.lower().strip()
         shell_prefixes = ['!', 'run ', 'execute ', 'shell ']
-        shell_keywords = ['ls ', 'cd ', 'pwd', 'mkdir ', 'rm ', 'cat ', 'grep ', 'find ']
 
-        # Check prefixes
+        # Check prefixes - must be at start
         for prefix in shell_prefixes:
             if query_lower.startswith(prefix):
                 return True
 
-        # Check keywords
-        for keyword in shell_keywords:
-            if keyword in query_lower:
+        # Check for actual shell command patterns (more specific)
+        # These must be at the START of the query to avoid false positives
+        shell_start_patterns = [
+            'ls ', 'ls\n', 'cd ', 'pwd', 'mkdir ', 'rm ', 'cat ',
+            'grep ', 'find . ', 'find / ', 'find ~',  # More specific find patterns
+        ]
+
+        for pattern in shell_start_patterns:
+            if query_lower.startswith(pattern):
                 return True
 
         return False
