@@ -912,14 +912,43 @@ Examples:
         metavar='TAG',
         help='Filter library by tag'
     )
-    
+
+    parser.add_argument(
+        '--cache-stats',
+        action='store_true',
+        help='Show query cache statistics'
+    )
+
+    parser.add_argument(
+        '--clear-cache',
+        action='store_true',
+        help='Clear the query cache'
+    )
+
+    parser.add_argument(
+        '--offline',
+        action='store_true',
+        help='Run in offline mode (cache-only, no API calls)'
+    )
+
     args = parser.parse_args()
     
     # Handle version
     if args.version:
-        from cite_agent.__version__ import __version__
+        from cite_agent import __version__, PACKAGE_URL
+        import platform
+
         print(f"Cite Agent v{__version__}")
         print("AI Research Assistant with real data integration")
+        print(f"\nPython: {sys.version.split()[0]}")
+        print(f"Platform: {platform.system()} {platform.release()}")
+        print(f"Architecture: {platform.machine()}")
+
+        # Show backend URL if configured
+        backend_url = os.getenv("ARCHIVE_API_URL") or os.getenv("NOCTURNAL_ARCHIVE_API_URL") or "https://cite-agent-api-720dfadd602c.herokuapp.com"
+        print(f"Backend: {backend_url}")
+        print(f"\nRepository: {PACKAGE_URL}")
+        print("PyPI: https://pypi.org/project/cite-agent/")
         return
 
     if args.presets:
@@ -969,7 +998,31 @@ Examples:
     if args.search_library:
         cli.search_library_interactive(args.search_library)
         sys.exit(0)
-    
+
+    # Handle cache commands
+    if args.cache_stats:
+        from cite_agent.query_cache import cache_stats
+        stats = cache_stats()
+        cli.console.print("[bold]📊 Query Cache Statistics[/]")
+        cli.console.print(f"  Entries: {stats['entries']}/{stats['max_size']}")
+        cli.console.print(f"  Hit Rate: {stats['hit_rate']}")
+        cli.console.print(f"  Hits: {stats['hits']} | Misses: {stats['misses']}")
+        cli.console.print(f"  Evictions: {stats['evictions']} | Expirations: {stats['expirations']}")
+        cli.console.print(f"  TTL: {stats['ttl_seconds']}s (1 hour)")
+        sys.exit(0)
+
+    if args.clear_cache:
+        from cite_agent.query_cache import clear_cache
+        clear_cache()
+        cli.console.print("[success]✅ Query cache cleared[/]")
+        sys.exit(0)
+
+    # Handle offline mode
+    if args.offline:
+        os.environ["CITE_AGENT_CACHE"] = "true"
+        os.environ["CITE_AGENT_OFFLINE"] = "true"
+        cli.console.print("[warning]🔌 Offline mode enabled (cache-only)[/]")
+
     # Handle secret import before setup as it can be used non-interactively
     if args.import_secrets:
         config = NocturnalConfig()
