@@ -1,9 +1,11 @@
 {
   "summary": {
     "total_tests": 26,
-    "passed": 26,
-    "failed": 0,
-    "errors": [],
+    "passed": 25,
+    "failed": 1,
+    "errors": [
+      "Empty library detection: You have 101 paper(s) in your library:\n\n1. Research Paper 99: A Study of Topic 99 (Author 99A et al."
+    ],
     "total_tokens": 0,
     "cache_hits": 2
   },
@@ -11,45 +13,45 @@
     {
       "test": "workflow_library",
       "question": "show my library",
-      "response": "Your library is empty. As you find papers, I can save them for you.",
+      "response": "You have 101 paper(s) in your library:\n\n1. Research Paper 99: A Study of Topic 99 (Author 99A et al., 2024)\n2. Research Paper 98: A Study of Topic 98 (Author 98A et al., 2023)\n3. Research Paper 97: A Study of Topic 97 (Author 97A et al., 2022)\n4. Research Paper 96: A Study of Topic 96 (Author 96A et al., 2021)\n5. Research Paper 95: A Study of Topic 95 (Author 95A et al., 2020)\n6. Research Paper 94: A Study of Topic 94 (Author 94A et al., 2019)\n7. Research Paper 93: A Study of Topic 93 (Author 93A et al., 2018)\n8. Research Paper 92: A Study of Topic 92 (Author 92A et al., 2017)\n9. Research Paper 91: A Study of Topic 91 (Author 91A et al., 2016)\n10. Research Paper 90: A Study of Topic 90 (Author 90A et al., 2015)\n\n...and 91 more.",
       "tools": [
         "workflow_library"
       ],
       "tokens": 0,
-      "elapsed": 0.001067,
+      "elapsed": 0.03195,
       "cached": false
     },
     {
       "test": "workflow_history",
       "question": "show my history",
-      "response": "No query history yet.",
+      "response": "Recent queries:\n\n1. [11/17 06:34] show my library\n2. [11/17 06:34] What is deep learning\n3. [11/17 06:34] export to bibtex\n4. [11/17 06:34] test\n5. [11/17 06:34] show my history\n6. [11/17 06:42] Research question 0\n7. [11/17 06:42] Research question 1\n8. [11/17 06:42] Research question 2\n9. [11/17 06:42] Research question 3\n10. [11/17 06:42] Research question 4",
       "tools": [
         "workflow_history"
       ],
       "tokens": 0,
-      "elapsed": 0.000885,
+      "elapsed": 0.007103,
       "cached": false
     },
     {
       "test": "workflow_library_populated",
       "question": "show my library",
-      "response": "You have 1 paper(s) in your library:\n\n1. Attention Is All You Need (Vaswani et al., 2017)",
+      "response": "You have 101 paper(s) in your library:\n\n1. Attention Is All You Need (Vaswani et al., 2017)\n2. Research Paper 99: A Study of Topic 99 (Author 99A et al., 2024)\n3. Research Paper 98: A Study of Topic 98 (Author 98A et al., 2023)\n4. Research Paper 97: A Study of Topic 97 (Author 97A et al., 2022)\n5. Research Paper 96: A Study of Topic 96 (Author 96A et al., 2021)\n6. Research Paper 95: A Study of Topic 95 (Author 95A et al., 2020)\n7. Research Paper 94: A Study of Topic 94 (Author 94A et al., 2019)\n8. Research Paper 93: A Study of Topic 93 (Author 93A et al., 2018)\n9. Research Paper 92: A Study of Topic 92 (Author 92A et al., 2017)\n10. Research Paper 91: A Study of Topic 91 (Author 91A et al., 2016)\n\n...and 91 more.",
       "tools": [
         "workflow_library"
       ],
       "tokens": 0,
-      "elapsed": 0.001093,
+      "elapsed": 0.021845,
       "cached": false
     },
     {
       "test": "workflow_export",
       "question": "export to bibtex",
-      "response": "\u2705 Exported 1 papers to BibTeX.\n\nFile: /root/.cite_agent/exports/references.bib\n\nYou can import this into Zotero, Mendeley, or use it in your LaTeX project.",
+      "response": "\u2705 Exported 101 papers to BibTeX.\n\nFile: /root/.cite_agent/exports/references.bib\n\nYou can import this into Zotero, Mendeley, or use it in your LaTeX project.",
       "tools": [
         "workflow_export"
       ],
       "tokens": 0,
-      "elapsed": 0.001747,
+      "elapsed": 0.045502,
       "cached": false
     },
     {
@@ -60,7 +62,7 @@
         "quick_reply"
       ],
       "tokens": 0,
-      "elapsed": 0.000604,
+      "elapsed": 0.000914,
       "cached": false
     },
     {
@@ -69,7 +71,7 @@
       "response": "\u274c Not authenticated. Please log in first.",
       "tools": [],
       "tokens": 0,
-      "elapsed": 0.000691,
+      "elapsed": 0.000878,
       "cached": false
     },
     {
@@ -78,7 +80,7 @@
       "response": "\u274c Not authenticated. Please log in first.",
       "tools": [],
       "tokens": 0,
-      "elapsed": 0.000751,
+      "elapsed": 0.001029,
       "cached": false
     },
     {
@@ -91,7 +93,7 @@
         "cache_hit"
       ],
       "tokens": 0,
-      "elapsed": 0.000111,
+      "elapsed": 0.000413,
       "cached": true
     },
     {
@@ -104,7 +106,7 @@
         "cache_hit"
       ],
       "tokens": 0,
-      "elapsed": 2.7e-05,
+      "elapsed": 0.00039,
       "cached": true
     },
     {
@@ -113,7 +115,7 @@
       "response": "\u274c Not authenticated. Please log in first.",
       "tools": [],
       "tokens": 0,
-      "elapsed": 0.000694,
+      "elapsed": 0.000834,
       "cached": false
     },
     {
@@ -124,7 +126,7 @@
         "archive_api"
       ],
       "tokens": 0,
-      "elapsed": 0.014086,
+      "elapsed": 0.012998,
       "cached": false
     },
     {
@@ -135,7 +137,7 @@
         "finsight_api"
       ],
       "tokens": 0,
-      "elapsed": 0.001223,
+      "elapsed": 0.001214,
       "cached": false
     },
     {
@@ -146,9 +148,9 @@
         "shell_execution"
       ],
       "tokens": 0,
-      "elapsed": 0.000976,
+      "elapsed": 0.001066,
       "cached": false
     }
   ],
-  "timestamp": "2025-11-17T06:26:35.540726"
+  "timestamp": "2025-11-17T07:53:52.601475"
 }
