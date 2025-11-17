@@ -1202,6 +1202,12 @@ class EnhancedNocturnalAgent:
             request.conversation_id,
             f"Q: {request.question[:100]}... A: {message[:100]}..."
         )
+        # Save to persistent history (disk)
+        self.workflow.save_query_result(
+            query=request.question,
+            response=message,
+            metadata={"tools_used": tools, "tokens_used": 0, "quick_reply": True}
+        )
         self._emit_telemetry(
             "quick_reply",
             request,
@@ -3545,6 +3551,12 @@ class EnhancedNocturnalAgent:
                     # Update conversation history even for cached responses (important for context!)
                     self.conversation_history.append({"role": "user", "content": request.question})
                     self.conversation_history.append({"role": "assistant", "content": cached["response"]})
+                    # Save to persistent history (disk) - even cached responses
+                    self.workflow.save_query_result(
+                        query=request.question,
+                        response=cached["response"],
+                        metadata={"tools_used": cached["tools_used"] + ["cache_hit"], "tokens_used": 0, "cached": True}
+                    )
                     return ChatResponse(
                         response=cached["response"] + "\n\n*(cached response)*",
                         tools_used=cached["tools_used"] + ["cache_hit"],
