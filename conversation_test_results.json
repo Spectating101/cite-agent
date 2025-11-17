@@ -1,0 +1,154 @@
+{
+  "summary": {
+    "total_tests": 26,
+    "passed": 26,
+    "failed": 0,
+    "errors": [],
+    "total_tokens": 0,
+    "cache_hits": 2
+  },
+  "conversation": [
+    {
+      "test": "workflow_library",
+      "question": "show my library",
+      "response": "Your library is empty. As you find papers, I can save them for you.",
+      "tools": [
+        "workflow_library"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001067,
+      "cached": false
+    },
+    {
+      "test": "workflow_history",
+      "question": "show my history",
+      "response": "No query history yet.",
+      "tools": [
+        "workflow_history"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000885,
+      "cached": false
+    },
+    {
+      "test": "workflow_library_populated",
+      "question": "show my library",
+      "response": "You have 1 paper(s) in your library:\n\n1. Attention Is All You Need (Vaswani et al., 2017)",
+      "tools": [
+        "workflow_library"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001093,
+      "cached": false
+    },
+    {
+      "test": "workflow_export",
+      "question": "export to bibtex",
+      "response": "\u2705 Exported 1 papers to BibTeX.\n\nFile: /root/.cite_agent/exports/references.bib\n\nYou can import this into Zotero, Mendeley, or use it in your LaTeX project.",
+      "tools": [
+        "workflow_export"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001747,
+      "cached": false
+    },
+    {
+      "test": "quick_reply_test",
+      "question": "test",
+      "response": "Looks like you're just testing. Let me know what you'd like me to dig into and I'll jump on it.",
+      "tools": [
+        "quick_reply"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000604,
+      "cached": false
+    },
+    {
+      "test": "quick_reply_hello",
+      "question": "hello",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000691,
+      "cached": false
+    },
+    {
+      "test": "vague_query",
+      "question": "papers?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000751,
+      "cached": false
+    },
+    {
+      "test": "cache_hit_test",
+      "question": "What is machine learning?",
+      "response": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. Key types include supervised learning (labeled data), unsupervised learning (pattern discovery), and reinforcement learning (reward-based).\n\n*(cached response)*",
+      "tools": [
+        "web_search",
+        "backend_llm",
+        "cache_hit"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000111,
+      "cached": true
+    },
+    {
+      "test": "cache_normalize",
+      "question": "what is machine learning",
+      "response": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. Key types include supervised learning (labeled data), unsupervised learning (pattern discovery), and reinforcement learning (reward-based).\n\n*(cached response)*",
+      "tools": [
+        "web_search",
+        "backend_llm",
+        "cache_hit"
+      ],
+      "tokens": 0,
+      "elapsed": 2.7e-05,
+      "cached": true
+    },
+    {
+      "test": "cache_miss",
+      "question": "What is deep learning?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000694,
+      "cached": false
+    },
+    {
+      "test": "research_detection",
+      "question": "Find papers on neural architecture search",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [
+        "archive_api"
+      ],
+      "tokens": 0,
+      "elapsed": 0.014086,
+      "cached": false
+    },
+    {
+      "test": "financial_detection",
+      "question": "What is Tesla stock price?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [
+        "finsight_api"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001223,
+      "cached": false
+    },
+    {
+      "test": "system_detection",
+      "question": "What directory am I in?",
+      "response": "We're in /home/user/cite-agent (via `pwd`).",
+      "tools": [
+        "shell_execution"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000976,
+      "cached": false
+    }
+  ],
+  "timestamp": "2025-11-17T06:26:35.540726"
+}
