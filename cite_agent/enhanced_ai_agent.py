@@ -1480,6 +1480,12 @@ class EnhancedNocturnalAgent:
             request.conversation_id,
             f"Q: {request.question[:100]}... A: {message[:100]}..."
         )
+        # Save to persistent history (disk)
+        self.workflow.save_query_result(
+            query=request.question,
+            response=message,
+            metadata={"tools_used": tools, "tokens_used": 0, "quick_reply": True}
+        )
         self._emit_telemetry(
             "quick_reply",
             request,
@@ -3726,16 +3732,51 @@ Concise query (max {max_length} chars):"""
         """Check if query is a shell command (should not be cached)"""
         query_lower = query.lower().strip()
         shell_prefixes = ['!', 'run ', 'execute ', 'shell ']
-        shell_keywords = ['ls ', 'cd ', 'pwd', 'mkdir ', 'rm ', 'cat ', 'grep ', 'find ']
 
-        # Check prefixes
+        # Check prefixes - must be at start
         for prefix in shell_prefixes:
             if query_lower.startswith(prefix):
                 return True
 
-        # Check keywords
-        for keyword in shell_keywords:
-            if keyword in query_lower:
+        # Exact matches for single commands
+        if query_lower in ['pwd', 'ls']:
+            return True
+
+        # Check for actual shell command patterns (more specific)
+        # These must be at the START and followed by arguments, not natural language
+        shell_patterns = [
+            ('ls ', ['-', '/', '.', '~']),  # ls -la, ls /path, ls .
+            ('cd ', ['-', '/', '.', '~', '$']),  # cd /path, cd ~
+            ('mkdir ', ['-', '/', '.', '~', '$']),  # mkdir /path (not "mkdir is...")
+            ('rm ', ['-', '/', '.', '~']),  # rm -rf, rm /path
+            ('cat ', ['-', '/', '.', '~', '$']),  # cat file.txt
+        ]
+
+        # Special check for grep (commonly used with patterns)
+        if query_lower.startswith('grep '):
+            # grep followed by pattern and file is a shell command
+            parts = query_lower.split()
+            # "grep pattern file" or "grep -r pattern" are shell commands
+            if len(parts) >= 3 or (len(parts) == 2 and parts[1].startswith('-')):
+                return True
+
+        for cmd, valid_follows in shell_patterns:
+            if query_lower.startswith(cmd):
+                rest = query_lower[len(cmd):].lstrip()
+                # Check if followed by shell-like arguments
+                if rest and (rest[0] in ''.join(valid_follows) or '/' in rest.split()[0] if rest.split() else False):
+                    return True
+                # Also check if it's a simple command with path/filename (no spaces suggesting natural language)
+                first_word = rest.split()[0] if rest.split() else ''
+                # If first word after command contains path chars, it's shell
+                if any(c in first_word for c in ['/', '.', '_', '-']) and ' ' not in rest[:20]:
+                    return True
+
+        # Find command needs special handling
+        if query_lower.startswith('find '):
+            rest = query_lower[5:].lstrip()
+            # Actual find: find . -name, find /path, find ~
+            if rest and rest[0] in '.~/':
                 return True
 
         return False
@@ -5166,6 +5207,15 @@ Concise query (max {max_length} chars):"""
                 if cached:
                     if debug_mode:
                         print(f"🎯 Cache HIT (age: {cached['cache_age']:.1f}s)")
+                    # Update conversation history even for cached responses (important for context!)
+                    self.conversation_history.append({"role": "user", "content": request.question})
+                    self.conversation_history.append({"role": "assistant", "content": cached["response"]})
+                    # Save to persistent history (disk) - even cached responses
+                    self.workflow.save_query_result(
+                        query=request.question,
+                        response=cached["response"],
+                        metadata={"tools_used": cached["tools_used"] + ["cache_hit"], "tokens_used": 0, "cached": True}
+                    )
                     return ChatResponse(
                         response=cached["response"] + "\n\n*(cached response)*",
                         tools_used=cached["tools_used"] + ["cache_hit"],

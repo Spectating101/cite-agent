@@ -1,68 +1,154 @@
-[
-  {
-    "test_name": "Simple File Listing",
-    "query": "what files are here?",
-    "response": "Here\u2019s a quick overview of the **Cite\u2011Agent** project directory you just listed:\n\n**Top\u2011level folders (11)**\n- `cite-agent` \u2013 core package source\n- `cite_agent` \u2013 alternate naming / possibly legacy code\n- `cite-agent-api` \u2013 API layer (likely Flask/FastAPI)\n- `cite_agent.egg-info` \u2013 packaging metadata\n- `data` \u2013 sample data, test fixtures, or model assets\n- `dist` \u2013 built distributions (wheels, tarballs)\n- `docs` \u2013 documentation (architecture, usage, etc.)\n- `monitoring` \u2013 scripts or configs for health checks / metrics\n- `__pycache__` \u2013 compiled Python bytecode\n- `scripts` \u2013 helper/automation scripts\n- `tests` \u2013 unit and integration test suite\n\n**Key file types**\n\n- **Markdown (`.md`) \u2013 40 files**\n  Includes detailed docs such as `ARCHITECTURE.md`, `ACTUAL_CODE_VERIFICATION_REPORT.md`, and various instruction/branch\u2011testing notes. Good places to start for understanding design and recent changes.\n\n- **Python (`.py`) \u2013 16 files**\n  Core code and test harnesses: `debug_loading.py`, `setup.py`, `test_actual_quality.py`, `test_agent_responses.py`, `test_conversational_research.py`, etc.\n\n- **Shell scripts (`.sh`) \u2013 11 files**\n  Automation for development, deployment, and testing (e.g., `dev_setup.sh`, `deploy.sh`, `run_conversation_test.sh`).\n\n- **Log files (`.log`) \u2013 10 files**\n  Recent run logs like `cli_test_run.log`, useful for debugging recent test runs.\n\n**What to explore first**\n\n1. **Docs** \u2013 `ARCHITECTURE.md` and `CCT_INSTRUCTIONS.md` give a solid high\u2011level view of the system and how to run the CCT (continuous code testing) workflow.\n2. **Tests** \u2013 Look at `tests/` for concrete usage examples; `test_conversational_research.py` is the largest and likely covers end\u2011to\u2011end behavior.\n3. **Scripts** \u2013 `dev_setup.sh` will set up the development environment; `run_conversation_test.sh` shows how to execute a typical conversation test.\n\nThis snapshot should help you navigate the repository quickly and locate the most relevant resources for development or troubleshooting.",
-    "tools_used": [
-      "list_directory"
-    ],
-    "tokens_used": 10331,
-    "confidence": 0.85,
-    "timestamp": "2025-11-17T05:39:40.722358+00:00"
+{
+  "summary": {
+    "total_tests": 26,
+    "passed": 26,
+    "failed": 0,
+    "errors": [],
+    "total_tokens": 0,
+    "cache_hits": 2
   },
-  {
-    "test_name": "Conversational Query",
-    "query": "thanks for that",
-    "response": "You\u2019re welcome! Let me know if you\u2019d like to dive into any specific file or run a particular analysis.",
-    "tools_used": [
-      "chat"
-    ],
-    "tokens_used": 5041,
-    "confidence": 0.8,
-    "timestamp": "2025-11-17T05:39:42.216342+00:00"
-  },
-  {
-    "test_name": "Fuzzy Query - Find Data",
-    "query": "I think there's some CSV data around here somewhere, can you check?",
-    "response": "Here\u2019s a quick snapshot of what\u2019s in the **Cite\u2011Agent** project directory:\n\n**Top\u2011level folders (11)**\n- `cite-agent` \u2013 core source code\n- `cite_agent` \u2013 alternate naming / legacy code\n- `cite-agent-api` \u2013 API layer (likely Flask/FastAPI)\n- `cite_agent.egg-info` \u2013 packaging metadata\n- `data` \u2013 sample data, test fixtures, model assets\n- `dist` \u2013 built distributions (wheels, tarballs)\n- `docs` \u2013 documentation (architecture, usage, etc.)\n- `monitoring` \u2013 health\u2011check / metrics scripts\n- `__pycache__` \u2013 compiled Python bytecode\n- `scripts` \u2013 helper/automation scripts\n- `tests` \u2013 unit & integration test suite\n\n**Key file types**\n\n| Type | Count | Notable examples |\n|------|-------|-------------------|\n| **Markdown (`.md`)** | 40 | `ARCHITECTURE.md`, `ACTUAL_CODE_VERIFICATION_REPORT.md`, `CCT_INSTRUCTIONS.md` |\n| **Python (`.py`)** | 16 | `debug_loading.py`, `setup.py`, `test_conversational_research.py`, `test_agent_responses.py` |\n| **Shell scripts (`.sh`)** | 11 | `dev_setup.sh`, `deploy.sh`, `run_conversation_test.sh`, `CCT_TEST_CURRENT_VERSION.sh` |\n| **Log files (`.log`)** | 10 | `cli_test_run.log`, `comprehensive_test.log` (useful for debugging) |\n\n**Where to start**\n\n1. **Docs** \u2013 `ARCHITECTURE.md` & `CCT_INSTRUCTIONS.md` give a solid high\u2011level view and explain the continuous\u2011code\u2011testing workflow.\n2. **Tests** \u2013 `tests/` contain concrete usage examples; `test_conversational_research.py` is the largest and shows end\u2011to\u2011end behavior.\n3. **Scripts** \u2013 `dev_setup.sh` sets up the dev environment; `run_conversation_test.sh` demonstrates a typical conversation test run.\n\nLet me know if you\u2019d like to explore a particular file, run a test, or need help with anything else!",
-    "tools_used": [
-      "list_directory"
-    ],
-    "tokens_used": 11918,
-    "confidence": 0.85,
-    "timestamp": "2025-11-17T05:39:44.509999+00:00"
-  },
-  {
-    "test_name": "Load Dataset",
-    "query": "load the data/test_stats.csv file",
-    "response": "Here\u2019s the quick summary of the **`data/test_stats.csv`** file:\n\n| Metric                | Mean   | Std Dev | Min   | Max   | Median |\n|-----------------------|--------|---------|-------|-------|--------|\n| **Spread**            | -0.695 | 0.191   | -1.00 | -0.40 | -0.675 |\n| **Low\u202fIvol\u202fReturn**   | 0.150  | 0.0316  | 0.110 | 0.200 | 0.145 |\n| **High\u202fIvol\u202fReturn**  | 0.098  | 0.0266  | 0.060 | 0.140 | 0.095 |\n\n- The CSV contains **10 rows** and **4 columns** (`Method`, `Spread`, `Low_Ivol_Return`, `High_Ivol_Return`).\n- The **Spread** values are all negative, ranging from -1.0 to -0.4, with an average of -0.695.\n- **Low Ivol Return** averages **0.150**, while **High Ivol Return** averages **0.098**.\n\nLet me know if you\u2019d like any further analysis (e.g., correlations, visualizations, or filtering by method).",
-    "tools_used": [
-      "load_dataset"
-    ],
-    "tokens_used": 13077,
-    "confidence": 0.85,
-    "timestamp": "2025-11-17T05:39:46.887626+00:00"
-  },
-  {
-    "test_name": "Statistics Query",
-    "query": "what's the mean spread?",
-    "response": "The mean\u202fSpread is **\u20110.695**.",
-    "tools_used": [
-      "chat"
-    ],
-    "tokens_used": 5859,
-    "confidence": 0.8,
-    "timestamp": "2025-11-17T05:39:48.327631+00:00"
-  },
-  {
-    "test_name": "Academic Paper Search",
-    "query": "find papers on transformer neural networks",
-    "response": "Here\u2019s a concise snapshot of the five papers you asked about:\n\n| # | Title (Year) | Authors | Main Focus | Citations* | DOI |\n|---|--------------|---------|------------|------------|-----|\n| 1 | **Gradient\u2011based learning applied to document recognition** (1998) | Yann LeCun et\u202fal. | Classic CNN work that laid groundwork for modern deep learning, including later transformer research. | 54,796 | 10.1109/5.726791 |\n| 2 | **Predicting Retrosynthetic Reactions Using Self\u2011Corrected Transformer Neural Networks** (2019) | Shuangjia Zheng et\u202fal. | Applies a self\u2011correcting transformer to predict chemical retrosynthesis pathways. | 257 | 10.1021/acs.jcim.9b00949 |\n| 3 | **Transformer neural network for protein\u2011specific de\u202fnovo drug generation as a machine translation problem** (2021) | Daria\u202fGrechishnikova et\u202fal. | Treats drug design as a translation task; uses transformers to generate protein\u2011targeted molecules. | 202 | 10.1038/s41598\u2011020\u201179682\u20114 |\n| 4 | **Short\u2011term multi\u2011step wind\u2011power forecasting based on spatio\u2011temporal correlations and transformer networks** (2023) | Shilin\u202fSun et\u202fal. | Combines spatio\u2011temporal correlation modeling with transformers for accurate wind\u2011power forecasts. | 137 | 10.1016/j.enconman.2023.116916 |\n| 5 | **A Wide and Deep Transformer Neural Network for 12\u2011Lead ECG Classification** (2020) | Annamalai\u202fNatarajan et\u202fal. | Introduces a hybrid \u201cwide\u2011and\u2011deep\u201d transformer architecture for automated ECG interpretation. | 120 | 10.22489/cinc.20 |\n\n\\*Citation counts are as of today (Nov\u202f2025) and may change over time.\n\nIf you\u2019d like deeper details\u2014abstracts, key results, or links to full PDFs\u2014just let me know!",
-    "tools_used": [
-      "search_papers"
-    ],
-    "tokens_used": 14352,
-    "confidence": 0.85,
-    "timestamp": "2025-11-17T05:39:53.115586+00:00"
-  }
-]
+  "conversation": [
+    {
+      "test": "workflow_library",
+      "question": "show my library",
+      "response": "Your library is empty. As you find papers, I can save them for you.",
+      "tools": [
+        "workflow_library"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001067,
+      "cached": false
+    },
+    {
+      "test": "workflow_history",
+      "question": "show my history",
+      "response": "No query history yet.",
+      "tools": [
+        "workflow_history"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000885,
+      "cached": false
+    },
+    {
+      "test": "workflow_library_populated",
+      "question": "show my library",
+      "response": "You have 1 paper(s) in your library:\n\n1. Attention Is All You Need (Vaswani et al., 2017)",
+      "tools": [
+        "workflow_library"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001093,
+      "cached": false
+    },
+    {
+      "test": "workflow_export",
+      "question": "export to bibtex",
+      "response": "\u2705 Exported 1 papers to BibTeX.\n\nFile: /root/.cite_agent/exports/references.bib\n\nYou can import this into Zotero, Mendeley, or use it in your LaTeX project.",
+      "tools": [
+        "workflow_export"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001747,
+      "cached": false
+    },
+    {
+      "test": "quick_reply_test",
+      "question": "test",
+      "response": "Looks like you're just testing. Let me know what you'd like me to dig into and I'll jump on it.",
+      "tools": [
+        "quick_reply"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000604,
+      "cached": false
+    },
+    {
+      "test": "quick_reply_hello",
+      "question": "hello",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000691,
+      "cached": false
+    },
+    {
+      "test": "vague_query",
+      "question": "papers?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000751,
+      "cached": false
+    },
+    {
+      "test": "cache_hit_test",
+      "question": "What is machine learning?",
+      "response": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. Key types include supervised learning (labeled data), unsupervised learning (pattern discovery), and reinforcement learning (reward-based).\n\n*(cached response)*",
+      "tools": [
+        "web_search",
+        "backend_llm",
+        "cache_hit"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000111,
+      "cached": true
+    },
+    {
+      "test": "cache_normalize",
+      "question": "what is machine learning",
+      "response": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. Key types include supervised learning (labeled data), unsupervised learning (pattern discovery), and reinforcement learning (reward-based).\n\n*(cached response)*",
+      "tools": [
+        "web_search",
+        "backend_llm",
+        "cache_hit"
+      ],
+      "tokens": 0,
+      "elapsed": 2.7e-05,
+      "cached": true
+    },
+    {
+      "test": "cache_miss",
+      "question": "What is deep learning?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [],
+      "tokens": 0,
+      "elapsed": 0.000694,
+      "cached": false
+    },
+    {
+      "test": "research_detection",
+      "question": "Find papers on neural architecture search",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [
+        "archive_api"
+      ],
+      "tokens": 0,
+      "elapsed": 0.014086,
+      "cached": false
+    },
+    {
+      "test": "financial_detection",
+      "question": "What is Tesla stock price?",
+      "response": "\u274c Not authenticated. Please log in first.",
+      "tools": [
+        "finsight_api"
+      ],
+      "tokens": 0,
+      "elapsed": 0.001223,
+      "cached": false
+    },
+    {
+      "test": "system_detection",
+      "question": "What directory am I in?",
+      "response": "We're in /home/user/cite-agent (via `pwd`).",
+      "tools": [
+        "shell_execution"
+      ],
+      "tokens": 0,
+      "elapsed": 0.000976,
+      "cached": false
+    }
+  ],
+  "timestamp": "2025-11-17T06:26:35.540726"
+}
