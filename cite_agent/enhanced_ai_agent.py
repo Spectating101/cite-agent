@@ -38,6 +38,13 @@ from .observability import ObservabilitySystem, EventType
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from .request_queue import IntelligentRequestQueue, RequestPriority
 
+# CCWeb's production polish features
+from .response_validation import (
+    safe_get, safe_list, safe_str, safe_int, safe_float,
+    validate_paper_response, handle_api_error
+)
+from .query_cache import get_cache, cache_query, get_cached_response
+
 # Suppress noise
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -208,6 +215,11 @@ class EnhancedNocturnalAgent:
         debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         if debug_mode:
             logger.info("Infrastructure initialized: Observability, Circuit Breakers, Request Queue")
+
+        # Initialize query cache (CCWeb's production polish)
+        self._query_cache = get_cache()
+        self._cache_enabled = os.getenv("CITE_AGENT_CACHE", "true").lower() == "true"
+        self._offline_mode = os.getenv("CITE_AGENT_OFFLINE", "false").lower() == "true"
 
     def _remove_expired_temp_key(self, session_file):
         """Remove expired temporary API key from session file"""
@@ -3710,6 +3722,24 @@ Concise query (max {max_length} chars):"""
         if user_id:
             self.user_token_usage[user_id] = self.user_token_usage.get(user_id, 0) + tokens
 
+    def _is_shell_command(self, query: str) -> bool:
+        """Check if query is a shell command (should not be cached)"""
+        query_lower = query.lower().strip()
+        shell_prefixes = ['!', 'run ', 'execute ', 'shell ']
+        shell_keywords = ['ls ', 'cd ', 'pwd', 'mkdir ', 'rm ', 'cat ', 'grep ', 'find ']
+
+        # Check prefixes
+        for prefix in shell_prefixes:
+            if query_lower.startswith(prefix):
+                return True
+
+        # Check keywords
+        for keyword in shell_keywords:
+            if keyword in query_lower:
+                return True
+
+        return False
+
     def _finalize_interaction(
         self,
         request: ChatRequest,
@@ -3734,6 +3764,18 @@ Concise query (max {max_length} chars):"""
 
         self.conversation_history.append({"role": "user", "content": request.question})
         self.conversation_history.append({"role": "assistant", "content": response.response})
+
+        # Cache successful responses (skip shell commands and errors)
+        if (self._cache_enabled and
+            not self._is_shell_command(request.question) and
+            not response.error_message and
+            response.tokens_used > 0):
+            cache_query(
+                request.question,
+                response.response,
+                response.tools_used,
+                response.tokens_used
+            )
 
         self._update_memory(
             request.user_id,
@@ -5109,14 +5151,38 @@ Concise query (max {max_length} chars):"""
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
-            
+
             # Detect and store language preference from user input
             self._detect_language_preference(request.question)
-            
+
             # Initialize
             api_results = {}
             tools_used = []
             debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+
+            # Check cache for repeated queries (skip for shell commands)
+            if self._cache_enabled and not self._is_shell_command(request.question):
+                cached = get_cached_response(request.question)
+                if cached:
+                    if debug_mode:
+                        print(f"🎯 Cache HIT (age: {cached['cache_age']:.1f}s)")
+                    return ChatResponse(
+                        response=cached["response"] + "\n\n*(cached response)*",
+                        tools_used=cached["tools_used"] + ["cache_hit"],
+                        tokens_used=0,  # No tokens used for cached response
+                        confidence_score=0.95,
+                    )
+                elif self._offline_mode:
+                    # Offline mode - no cache hit means we can't answer
+                    return ChatResponse(
+                        response="🔌 **Offline Mode**: This query is not in the cache. "
+                                 "Previous queries are available, but new API calls are disabled.\n\n"
+                                 "To see cached queries, ask something you've asked before, "
+                                 "or run `cite-agent --cache-stats` to see cache info.",
+                        tools_used=["offline_mode"],
+                        tokens_used=0,
+                        confidence_score=0.0,
+                    )
 
             if self._is_generic_test_prompt(request.question):
                 return self._quick_reply(
@@ -5833,11 +5899,12 @@ JSON:"""
                     if "error" not in result:
                         # Strip abstracts to save tokens - only keep essential fields
                         if "results" in result:
-                            for paper in result["results"]:
-                                # Remove heavy fields
-                                paper.pop("abstract", None)
-                                paper.pop("tldr", None)
-                                paper.pop("full_text", None)
+                            for paper in safe_list(result, "results"):
+                                # Safely remove heavy fields (handles non-dict items)
+                                if isinstance(paper, dict):
+                                    paper.pop("abstract", None)
+                                    paper.pop("tldr", None)
+                                    paper.pop("full_text", None)
                                 # Keep only: title, authors, year, doi, url
                         api_results["research"] = result
                         tools_used.append("archive_api")

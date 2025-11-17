@@ -425,3 +425,82 @@ def quick_export_bibtex(paper_data: Dict[str, Any]) -> str:
     )
     return paper.to_bibtex()
 
+
+def safe_create_paper_from_dict(paper_data: Dict[str, Any]) -> Optional[Paper]:
+    """
+    Safely create a Paper object from a dictionary with validation.
+    Handles malformed or incomplete data gracefully.
+    """
+    try:
+        # Extract and validate fields with safe defaults
+        title = paper_data.get('title', '') or paper_data.get('name', '')
+        if not title:
+            return None  # Title is required
+
+        # Handle authors in various formats
+        authors_raw = paper_data.get('authors', []) or paper_data.get('author', [])
+        if isinstance(authors_raw, str):
+            # Single author string - split if needed
+            authors = [a.strip() for a in re.split(r'[,&]|\sand\s', authors_raw) if a.strip()]
+        elif isinstance(authors_raw, list):
+            # List of authors (could be dicts or strings)
+            authors = []
+            for author in authors_raw:
+                if isinstance(author, dict):
+                    # Extract name from dict
+                    name = author.get('name', '') or f"{author.get('given', '')} {author.get('family', '')}".strip()
+                    if name:
+                        authors.append(name)
+                elif isinstance(author, str) and author.strip():
+                    authors.append(author.strip())
+        else:
+            authors = ['Unknown Author']
+
+        if not authors:
+            authors = ['Unknown Author']
+
+        # Extract year with multiple fallback options
+        year = paper_data.get('year', 0)
+        if not year:
+            year = paper_data.get('publication_year', 0)
+        if not year:
+            year = paper_data.get('pub_year', 0)
+        if not year:
+            # Try to extract from date string
+            date_str = paper_data.get('date', '') or paper_data.get('publication_date', '')
+            if date_str and len(str(date_str)) >= 4:
+                try:
+                    year = int(str(date_str)[:4])
+                except (ValueError, TypeError):
+                    year = 0
+
+        if not isinstance(year, int):
+            try:
+                year = int(year)
+            except (ValueError, TypeError):
+                year = 0
+
+        # Extract DOI from various locations
+        doi = paper_data.get('doi', '')
+        if not doi:
+            doi = paper_data.get('DOI', '')
+        if not doi:
+            # Try nested identifiers
+            identifiers = paper_data.get('identifiers', {})
+            if isinstance(identifiers, dict):
+                doi = identifiers.get('doi', '')
+
+        return Paper(
+            title=str(title),
+            authors=authors,
+            year=year,
+            doi=str(doi) if doi else None,
+            url=str(paper_data.get('url', '')) if paper_data.get('url') else None,
+            abstract=str(paper_data.get('abstract', '')) if paper_data.get('abstract') else None,
+            venue=str(paper_data.get('venue', '') or paper_data.get('journal', '')) or None,
+            citation_count=int(paper_data.get('citation_count', 0) or 0),
+        )
+    except Exception as e:
+        print(f"Error creating paper from dict: {e}")
+        return None
+
