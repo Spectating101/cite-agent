@@ -159,12 +159,13 @@ class LLMProviderManager:
             },
             'cerebras': {
                 'llama-3.3-70b-versatile': 'llama-3.3-70b',
-                'llama-3.1-8b-instant': 'llama3.1-8b'
+                'llama-3.1-8b-instant': 'llama3.1-8b',
+                'openai/gpt-oss-120b': 'gpt-oss-120b'  # Strip openai/ prefix for Cerebras
             }
         }
-        
+
         requested_model = model or provider.models[0]
-        
+
         # Map model if needed
         if provider_name in model_map and requested_model in model_map[provider_name]:
             model_to_use = model_map[provider_name][requested_model]
