@@ -4747,10 +4747,26 @@ Concise query (max {max_length} chars):"""
             current_cwd = self.file_context.get('current_cwd', os.getcwd())
 
             # Build rich system prompt with working directory context (Cursor-like)
+            # Check if dataset is currently loaded
+            dataset_info = ""
+            if hasattr(self, 'tool_executor') and hasattr(self.tool_executor, '_data_analyzer'):
+                analyzer = self.tool_executor._data_analyzer
+                if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                    df = analyzer.current_dataset
+                    cols = list(df.columns)
+                    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+                    dataset_info = (
+                        f"\n\nLOADED DATASET:\n"
+                        f"- Rows: {len(df)}, Columns: {len(cols)}\n"
+                        f"- Column names: {', '.join(cols)}\n"
+                        f"- Numeric columns (can compute stats): {', '.join(numeric_cols) if numeric_cols else 'None'}\n"
+                        f"- USE analyze_data tool to get statistics on these columns\n"
+                    )
+
             system_prompt = (
                 f"You are a research assistant with access to tools for executing shell commands, "
                 f"searching files, reading papers, and analyzing data.\n\n"
-                f"CURRENT WORKING DIRECTORY: {current_cwd}\n\n"
+                f"CURRENT WORKING DIRECTORY: {current_cwd}{dataset_info}\n\n"
                 f"TOOL USAGE GUIDELINES:\n"
                 f"- Data analysis: load_dataset (for CSV files), analyze_data (statistics), run_python_code\n"
                 f"- File operations: list_directory, read_file, execute_shell_command (grep, find)\n"

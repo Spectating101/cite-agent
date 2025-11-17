@@ -69,7 +69,7 @@ async def run_conversation_tests():
         # Test 4: Data analysis request
         {
             "name": "Load Dataset",
-            "query": "load the ivol_summary_results.csv file",
+            "query": "load the data/test_stats.csv file",
             "expected_tool": "load_dataset",
             "description": "Should load CSV and compute statistics"
         },
@@ -78,7 +78,7 @@ async def run_conversation_tests():
         {
             "name": "Statistics Query",
             "query": "what's the mean spread?",
-            "expected_tool": None,  # Should use cached data
+            "expected_tool": "analyze_data",  # Should use loaded data
             "description": "Should report statistics from loaded data"
         },
 
