@@ -3542,6 +3542,9 @@ class EnhancedNocturnalAgent:
                 if cached:
                     if debug_mode:
                         print(f"🎯 Cache HIT (age: {cached['cache_age']:.1f}s)")
+                    # Update conversation history even for cached responses (important for context!)
+                    self.conversation_history.append({"role": "user", "content": request.question})
+                    self.conversation_history.append({"role": "assistant", "content": cached["response"]})
                     return ChatResponse(
                         response=cached["response"] + "\n\n*(cached response)*",
                         tools_used=cached["tools_used"] + ["cache_hit"],
