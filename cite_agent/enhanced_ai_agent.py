@@ -3025,15 +3025,45 @@ class EnhancedNocturnalAgent:
             if query_lower.startswith(prefix):
                 return True
 
+        # Exact matches for single commands
+        if query_lower in ['pwd', 'ls']:
+            return True
+
         # Check for actual shell command patterns (more specific)
-        # These must be at the START of the query to avoid false positives
-        shell_start_patterns = [
-            'ls ', 'ls\n', 'cd ', 'pwd', 'mkdir ', 'rm ', 'cat ',
-            'grep ', 'find . ', 'find / ', 'find ~',  # More specific find patterns
+        # These must be at the START and followed by arguments, not natural language
+        shell_patterns = [
+            ('ls ', ['-', '/', '.', '~']),  # ls -la, ls /path, ls .
+            ('cd ', ['-', '/', '.', '~', '$']),  # cd /path, cd ~
+            ('mkdir ', ['-', '/', '.', '~', '$']),  # mkdir /path (not "mkdir is...")
+            ('rm ', ['-', '/', '.', '~']),  # rm -rf, rm /path
+            ('cat ', ['-', '/', '.', '~', '$']),  # cat file.txt
         ]
 
-        for pattern in shell_start_patterns:
-            if query_lower.startswith(pattern):
+        # Special check for grep (commonly used with patterns)
+        if query_lower.startswith('grep '):
+            # grep followed by pattern and file is a shell command
+            parts = query_lower.split()
+            # "grep pattern file" or "grep -r pattern" are shell commands
+            if len(parts) >= 3 or (len(parts) == 2 and parts[1].startswith('-')):
+                return True
+
+        for cmd, valid_follows in shell_patterns:
+            if query_lower.startswith(cmd):
+                rest = query_lower[len(cmd):].lstrip()
+                # Check if followed by shell-like arguments
+                if rest and (rest[0] in ''.join(valid_follows) or '/' in rest.split()[0] if rest.split() else False):
+                    return True
+                # Also check if it's a simple command with path/filename (no spaces suggesting natural language)
+                first_word = rest.split()[0] if rest.split() else ''
+                # If first word after command contains path chars, it's shell
+                if any(c in first_word for c in ['/', '.', '_', '-']) and ' ' not in rest[:20]:
+                    return True
+
+        # Find command needs special handling
+        if query_lower.startswith('find '):
+            rest = query_lower[5:].lstrip()
+            # Actual find: find . -name, find /path, find ~
+            if rest and rest[0] in '.~/':
                 return True
 
         return False
