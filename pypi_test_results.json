@@ -1,0 +1,58 @@
+{
+  "version": "1.4.5",
+  "timestamp": "2025-11-17T13:43:30.577767",
+  "total_tokens": 45673,
+  "cost_usd": 0.0274038,
+  "results": [
+    {
+      "test": "File Listing",
+      "query": "what files are here?",
+      "expected": "list_directory",
+      "actual": [
+        "list_directory"
+      ],
+      "tokens": 10415,
+      "pass": true
+    },
+    {
+      "test": "Conversational",
+      "query": "thanks",
+      "expected": "chat",
+      "actual": [
+        "chat"
+      ],
+      "tokens": 5129,
+      "pass": true
+    },
+    {
+      "test": "Load CSV",
+      "query": "load data/test_stats.csv",
+      "expected": "load_dataset",
+      "actual": [
+        "load_dataset"
+      ],
+      "tokens": 11833,
+      "pass": true
+    },
+    {
+      "test": "Statistics Query",
+      "query": "what's the mean spread?",
+      "expected": "analyze_data",
+      "actual": [
+        "chat"
+      ],
+      "tokens": 5396,
+      "pass": false
+    },
+    {
+      "test": "Paper Search",
+      "query": "find papers on BERT transformers",
+      "expected": "search_papers",
+      "actual": [
+        "search_papers"
+      ],
+      "tokens": 12900,
+      "pass": true
+    }
+  ]
+}
