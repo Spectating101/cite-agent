@@ -1,0 +1,6 @@
+cat > test_sales.csv <<EOF
+product,quantity,price
+WidgetA,10,15.5
+WidgetB,5,23.0
+WidgetC,8,9.75
+EOF

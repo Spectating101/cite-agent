@@ -42,9 +42,12 @@ from .request_queue import IntelligentRequestQueue, RequestPriority
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Removed: No direct Groq import in production
-# All LLM calls go through backend API for monetization
-# Backend has the API keys, not the client
+# Groq import with graceful fallback (API keys unavailable/banned)
+# Used only in local mode fallback scenarios
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None  # Graceful fallback - will log error if needed
 
 @dataclass
 class ChatRequest:
@@ -85,6 +88,14 @@ class EnhancedNocturnalAgent:
         self.daily_limit = 100000
         self.daily_query_limit = self._resolve_daily_query_limit()
         self.per_user_query_limit = self.daily_query_limit
+        
+        # Cache debug mode at initialization (performance optimization)
+        self.debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        
+        # Initialize LLM provider (default to cerebras if keys available, else groq)
+        self.llm_provider = None  # Will be set in _ensure_client_ready()
+        self.cerebras_keys = []
+        self.groq_keys = []
         
         # Initialize web search for fallback
         self.web_search = None
@@ -205,7 +216,7 @@ class EnhancedNocturnalAgent:
             max_concurrent_per_user=5
         )
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             logger.info("Infrastructure initialized: Observability, Circuit Breakers, Request Queue")
 
@@ -231,7 +242,7 @@ class EnhancedNocturnalAgent:
         """Load authentication from session file"""
         use_local_keys = os.getenv("USE_LOCAL_KEYS", "false").lower() == "true"
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 _load_authentication: USE_LOCAL_KEYS={os.getenv('USE_LOCAL_KEYS')}, use_local_keys={use_local_keys}")
 
@@ -429,7 +440,7 @@ class EnhancedNocturnalAgent:
             self._update_service_roots()
             
             # Only show init messages in debug mode
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 if self.api_key == "demo-key-123":
                     print("⚠️ Using demo API key")
@@ -1728,7 +1739,7 @@ class EnhancedNocturnalAgent:
         FIXED: Preserve LaTeX for math formulas - do NOT strip LaTeX!
         FIXED: Remove multi-line JSON blocks that leak from LLM
         """
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         has_json_before = '{' in response_text and '"type"' in response_text
         if debug_mode and has_json_before:
             print(f"🧹 [CLEANING] Input has JSON, cleaning...")
@@ -1740,17 +1751,52 @@ class EnhancedNocturnalAgent:
 
         # CRITICAL FIX: Remove multi-line JSON blocks (tool call leakage)
         # The LLM outputs things like {"type": "search", "query": "..."}
+        # Also outputs {"command": "..."} and internal reasoning
         # We need to strip these aggressively
 
         # Match any JSON object - use [\s\S] to match any character including newlines
         # This is more reliable than . with DOTALL
-        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results']
+        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results', 'command', 'action']
 
         for keyword in tool_keywords:
             # Match: { anything "keyword" anything }
             # Using [\s\S]*? for non-greedy match that includes newlines
             pattern = r'\{[\s\S]*?"' + keyword + r'"[\s\S]*?\}'
             cleaned = re.sub(pattern, '', cleaned)
+
+        # ENHANCED FIX: Remove internal reasoning chains that leak from LLM
+        # Examples: "We need to...", "Probably need to...", "Let's try:", "Will run:"
+        # IMPORTANT: Only remove at START of response (first 300 chars) to avoid removing legitimate content
+        
+        # Check if response starts with reasoning/planning text (first 300 chars)
+        prefix = cleaned[:300]
+        
+        # Patterns that indicate internal planning (only remove from START)
+        start_reasoning_patterns = [
+            r'^[\s]*We need to [^.]*?\.[\s]*',  # Start: "We need to run a command."
+            r'^[\s]*I need to [^.]*?\.[\s]*',   # Start: "I need to check..."
+            r'^[\s]*Probably [^.]*?\.[\s]*',     # Start: "Probably need to use the tool."
+            r"^[\s]*Let's try:[\s\S]*?(?=\n\n|\Z)",  # Start: "Let's try: ..."
+            r"^[\s]*Let me try[\s\S]*?(?=\n\n|\Z)",  # Start: "Let me try..."
+            r'^[\s]*Will run:[\s\S]*?(?=\n\n|\Z)',   # Start: "Will run: `command`"
+            r'^[\s]*According to system[^.]*?\.[\s]*',     # Start: "According to system..."
+            r'^[\s]*The system expects[^.]*?\.[\s]*',
+            r'^[\s]*The platform expects[^.]*?\.[\s]*',
+        ]
+        
+        # Only clean these patterns from the beginning
+        for pattern in start_reasoning_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+        
+        # Patterns that can appear anywhere (more specific, less likely to be legitimate)
+        anywhere_patterns = [
+            r'We need to actually execute[^.]*?\.[\s]*',    # Very specific
+            r'But the format is not specified[^.]*?\.[\s]*',  # Meta-reasoning
+            r'According to the system instructions[^.]*?\.[\s]*',  # Meta
+        ]
+        
+        for pattern in anywhere_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
 
         # Also remove common tool planning text that precedes JSON
         planning_phrases = [
@@ -1793,7 +1839,17 @@ class EnhancedNocturnalAgent:
                 print(f"❌ [CLEANING] JSON STILL PRESENT after cleaning!")
                 print(f"   First 200 chars: {cleaned[:200]}")
 
-        return cleaned.strip()
+        cleaned_final = cleaned.strip()
+        
+        # CRITICAL FIX: Prevent blank responses from over-aggressive cleaning
+        # If cleaning removed everything, return a fallback message
+        if not cleaned_final or len(cleaned_final) < 3:
+            if debug_mode:
+                print(f"⚠️ [CLEANING] Over-cleaned! Returning fallback message")
+                print(f"   Original: {response_text[:200]}")
+            return "I encountered an issue processing your request. Please try rephrasing or simplifying your question."
+        
+        return cleaned_final
 
     def _select_model(
         self,
@@ -1884,8 +1940,14 @@ class EnhancedNocturnalAgent:
                         base_url="https://api.cerebras.ai/v1",
                         http_client=http_client
                     )
-                else:
+                elif self.llm_provider == "groq":
+                    if Groq is None:
+                        logger.error("Groq provider requested but groq library not available (API keys unavailable/banned)")
+                        return False
                     self.client = Groq(api_key=key)
+                else:
+                    logger.error(f"Unknown LLM provider: {self.llm_provider}")
+                    return False
                 self.current_api_key = key
                 return True
             except Exception as e:
@@ -1926,8 +1988,14 @@ class EnhancedNocturnalAgent:
                         base_url="https://api.cerebras.ai/v1",
                         http_client=http_client
                     )
-                else:
+                elif self.llm_provider == "groq":
+                    if Groq is None:
+                        logger.error("Groq provider requested but groq library not available (API keys unavailable/banned)")
+                        return False
                     self.client = Groq(api_key=key)
+                else:
+                    logger.error(f"Unknown LLM provider: {self.llm_provider}")
+                    return False
                 self.current_api_key = key
                 return True
             except Exception as e:
@@ -2235,7 +2303,7 @@ class EnhancedNocturnalAgent:
                 self.temp_api_key = temp_api_key_from_session
                 self.temp_key_provider = temp_key_provider_from_session
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"✅ Using temporary local key for fast mode!")
             elif use_local_keys_env == "false":
@@ -2249,7 +2317,7 @@ class EnhancedNocturnalAgent:
                 use_local_keys = False
 
             if not use_local_keys:
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 DEBUG: Taking BACKEND MODE path (use_local_keys=False)")
                 self.api_keys = []  # Empty - keys stay on server
@@ -2281,7 +2349,7 @@ class EnhancedNocturnalAgent:
                     self.user_id = None
 
                 # Suppress messages in production (only show in debug mode)
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     if self.auth_token:
                         print(f"✅ Enhanced Nocturnal Agent Ready! (Authenticated)")
@@ -2289,7 +2357,7 @@ class EnhancedNocturnalAgent:
                         print("⚠️ Not authenticated. Please log in to use the agent.")
             else:
                 # Local keys mode - use temporary key if available, otherwise load from env
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 DEBUG: Taking LOCAL MODE path (use_local_keys=True)")
 
@@ -2298,7 +2366,7 @@ class EnhancedNocturnalAgent:
                     # Use temporary key provided by backend
                     self.api_keys = [self.temp_api_key]
                     self.llm_provider = getattr(self, 'temp_key_provider', 'cerebras')
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    debug_mode = self.debug_mode
                     if debug_mode:
                         print(f"🔍 Using temp API key: {self.temp_api_key[:10]}... (provider: {self.llm_provider})")
                 else:
@@ -2323,7 +2391,7 @@ class EnhancedNocturnalAgent:
                 else:
                     self.llm_provider = "cerebras"
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if not self.api_keys:
                     if debug_mode:
                         print("⚠️ No LLM API keys found. Set CEREBRAS_API_KEY or GROQ_API_KEY")
@@ -2484,7 +2552,7 @@ class EnhancedNocturnalAgent:
         Includes API results (Archive, FinSight) in context for better responses
         """
         # DEBUG: Print auth status
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
         
@@ -2551,7 +2619,7 @@ class EnhancedNocturnalAgent:
                     # Backend AI service temporarily unavailable (Cerebras/Groq rate limited)
                     # Auto-retry silently with exponential backoff
 
-                    print("\n💭 Thinking... (backend is busy, retrying automatically)")
+                    print("\n💭 Thinking... (backend experiencing high traffic, retrying automatically)")
 
                     retry_delays = [5, 15, 30]  # Exponential backoff
                     
@@ -2589,14 +2657,21 @@ class EnhancedNocturnalAgent:
                                     timestamp=data.get('timestamp', datetime.now(timezone.utc).isoformat()),
                                     api_results=api_results
                                 )
+                            elif retry_response.status == 429:
+                                # Rate limit hit
+                                print("\n⚠️ Rate limit exceeded, waiting longer...")
+                            elif retry_response.status >= 500:
+                                # Server error
+                                print(f"\n❌ Backend server error (HTTP {retry_response.status})")
+                                break
                             elif retry_response.status != 503:
                                 # Different error, stop retrying
                                 break
                     
-                    # All retries exhausted
+                    # All retries exhausted - provide specific error message
                     return ChatResponse(
-                        response="❌ Service unavailable. Please try again in a few minutes.",
-                        error_message="Service unavailable after retries"
+                        response="🔴 LLM model is down at the moment. The backend service is experiencing issues. Sorry for the inconvenience. Try again later.",
+                        error_message="Backend service unavailable after retries (503)"
                     )
                 
                 elif response.status == 200:
@@ -2631,19 +2706,38 @@ class EnhancedNocturnalAgent:
                 
                 else:
                     error_text = await response.text()
+                    # Provide specific error messages based on HTTP status
+                    if response.status == 400:
+                        error_msg = "⚠️ Invalid request. Your query couldn't be processed. Please try rephrasing."
+                    elif response.status == 429:
+                        error_msg = "⚠️ Rate limit exceeded. Too many requests. Please wait a moment and try again."
+                    elif response.status >= 500:
+                        error_msg = f"🔴 Backend server error (HTTP {response.status}). The service is experiencing technical difficulties. Sorry for the inconvenience."
+                    else:
+                        error_msg = f"❌ Backend error (HTTP {response.status}): {error_text[:200]}"
+                    
                     return ChatResponse(
-                        response=f"❌ Backend error (HTTP {response.status}): {error_text}",
+                        response=error_msg,
                         error_message=f"HTTP {response.status}"
                     )
         
         except asyncio.TimeoutError:
             return ChatResponse(
-                response="❌ Request timeout. Please try again.",
+                response="⏱️ Request timeout. The backend did not respond in time. Please try again.",
                 error_message="Timeout"
             )
         except Exception as e:
+            error_str = str(e).lower()
+            # Provide specific error message based on exception type
+            if "connection" in error_str or "network" in error_str:
+                error_msg = "🔴 Connection error. Unable to reach the backend service. Please check your internet connection."
+            elif "ssl" in error_str or "certificate" in error_str:
+                error_msg = "🔒 SSL/Certificate error. There's a security issue connecting to the backend."
+            else:
+                error_msg = f"❌ Error calling backend: {type(e).__name__} - {str(e)[:200]}"
+            
             return ChatResponse(
-                response=f"❌ Error calling backend: {str(e)}",
+                response=error_msg,
                 error_message=str(e)
             )
     
@@ -2723,7 +2817,7 @@ class EnhancedNocturnalAgent:
                 if self.auth_token:
                     headers["Authorization"] = f"Bearer {self.auth_token}"
                 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 Archive headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
                     print(f"🔍 Archive URL: {url}")
@@ -2814,7 +2908,7 @@ class EnhancedNocturnalAgent:
                 if self.auth_token:
                     headers["Authorization"] = f"Bearer {self.auth_token}"
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 FinSight headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
                     print(f"🔍 FinSight URL: {url}")
@@ -2917,7 +3011,7 @@ Concise query (max {max_length} chars):"""
 
                 # Validate
                 if len(extracted) <= max_length and len(extracted) > 5:
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    debug_mode = self.debug_mode
                     if debug_mode:
                         print(f"🔍 Extracted query: '{user_question[:80]}...' → '{extracted}'")
                     return extracted
@@ -2943,7 +3037,7 @@ Concise query (max {max_length} chars):"""
         result = ' '.join(keywords[:15])  # Max 15 words
         result = result[:max_length]  # Hard limit
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 Heuristic extracted: '{user_question[:80]}...' → '{result}'")
 
@@ -2971,7 +3065,7 @@ Concise query (max {max_length} chars):"""
             result = await self._call_archive_api("search", data)
 
             # DEBUG: Log actual API response
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
                 if "error" in result:
@@ -3143,7 +3237,7 @@ Concise query (max {max_length} chars):"""
                     break
             
             output = '\n'.join(output_lines).strip()
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             
             # Log execution details in debug mode
             if debug_mode:
@@ -3154,7 +3248,7 @@ Concise query (max {max_length} chars):"""
             return output if output else "Command executed (no output)"
 
         except Exception as e:
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"❌ Command failed: {command}")
                 print(f"❌ Error: {e}")
@@ -3698,6 +3792,17 @@ Concise query (max {max_length} chars):"""
         for pattern in nuclear_patterns:
             if pattern in cmd_lower:
                 return 'BLOCKED'
+        
+        # DANGEROUS: SQL destructive operations
+        sql_destructive_patterns = [
+            'drop table',
+            'drop database',
+            'truncate table',
+            'delete from',
+        ]
+        for pattern in sql_destructive_patterns:
+            if pattern in cmd_lower:
+                return 'DANGEROUS'
         
         # SAFE: Read-only commands
         safe_commands = {
@@ -4435,9 +4540,12 @@ Concise query (max {max_length} chars):"""
 
     def _get_model_name(self) -> str:
         """Get the appropriate model name for the current provider"""
-        if self.llm_provider == "cerebras":
+        # Safe fallback if llm_provider not set yet
+        provider = getattr(self, 'llm_provider', None)
+        
+        if provider == "cerebras":
             return "gpt-oss-120b"
-        elif self.llm_provider == "groq":
+        elif provider == "groq":
             return "llama-3.1-70b-versatile"
         else:
             return "gpt-4o-mini"  # Fallback
@@ -4659,9 +4767,16 @@ Concise query (max {max_length} chars):"""
         3. Execute requested tools
         4. Get final response from LLM with tool results
         """
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
 
         try:
+            # Ensure LLM client is ready
+            if not self._ensure_client_ready():
+                return ChatResponse(
+                    response="❌ Unable to initialize LLM client. Please check your API keys.",
+                    error_message="Client initialization failed"
+                )
+            
             # Check workflow commands first
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
@@ -4711,10 +4826,11 @@ Concise query (max {max_length} chars):"""
                 f"- Multi-step tasks: Execute one tool, see result, then decide next action\n"
                 f"- Use relative paths from current directory (no absolute paths needed)\n\n"
                 f"RESPONSE STYLE:\n"
-                f"- Be direct and natural - no 'Let me...', 'I will...' preambles\n"
+                f"- Be direct and natural - no 'Let me...', 'I will...', 'We need to...' preambles\n"
                 f"- After executing commands, report results concisely\n"
                 f"- For file system operations, show actual outputs\n"
-                f"- No JSON in responses - only natural language\n"
+                f"- Write in natural language - no JSON markup or tool syntax in your responses\n"
+                f"- Exception: If user explicitly asks for JSON data, provide it cleanly formatted\n"
             )
 
             # Build conversation context
@@ -4726,6 +4842,10 @@ Concise query (max {max_length} chars):"""
             last_assistant_message = None
 
             for iteration in range(MAX_ITERATIONS):
+                # Progress indicator for multi-step queries (user-facing)
+                if iteration > 0:
+                    print(f"💭 Processing step {iteration + 1}/{MAX_ITERATIONS}...")
+                
                 if debug_mode:
                     print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
 
@@ -4779,6 +4899,20 @@ Concise query (max {max_length} chars):"""
 
                 iteration_results = {}
                 for tool_call in fc_response.tool_calls:
+                    # Progress indicator: Show which tool is being executed (user-facing)
+                    tool_display_names = {
+                        "search_papers": "searching papers",
+                        "get_financial_data": "fetching financial data",
+                        "list_directory": "listing directory",
+                        "read_file": "reading file",
+                        "execute_shell_command": "executing command",
+                        "web_search": "searching web",
+                        "load_dataset": "loading dataset",
+                        "analyze_data": "analyzing data"
+                    }
+                    display_name = tool_display_names.get(tool_call.name, tool_call.name)
+                    print(f"🔧 {display_name}...")
+                    
                     result = await self._tool_executor.execute_tool(
                         tool_name=tool_call.name,
                         arguments=tool_call.arguments
@@ -5090,7 +5224,7 @@ Concise query (max {max_length} chars):"""
             # - Stable financial calculations
             # - No TLS/proxy issues in container environments
 
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             use_function_calling = os.getenv("NOCTURNAL_FUNCTION_CALLING", "").lower() in ("1", "true", "yes")
 
             if debug_mode and self.client is not None:
@@ -5114,7 +5248,7 @@ Concise query (max {max_length} chars):"""
             # Initialize
             api_results = {}
             tools_used = []
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
 
             if self._is_generic_test_prompt(request.question):
                 return self._quick_reply(
@@ -5387,17 +5521,43 @@ JSON:"""
                                 print(f"🔍 Command: {command}")
                                 print(f"🔍 Safety: {safety_level}")
                             
-                            if safety_level in ('BLOCKED', 'DANGEROUS'):
-                                reason = (
-                                    "Command classified as destructive; requires manual confirmation"
-                                    if safety_level == 'DANGEROUS'
-                                    else "This command could cause system damage"
-                                )
+                            # Determine if command should be executed
+                            should_execute = False
+                            
+                            if safety_level == 'BLOCKED':
+                                # BLOCKED commands (catastrophic) - never allow
                                 api_results["shell_info"] = {
                                     "error": f"Command blocked for safety: {command}",
-                                    "reason": reason
+                                    "reason": "This command could cause irreversible system damage"
                                 }
+                            elif safety_level == 'DANGEROUS':
+                                # DANGEROUS commands - require interactive confirmation
+                                print(f"\n⚠️  DESTRUCTIVE COMMAND DETECTED:")
+                                print(f"   Command: {command}")
+                                print(f"   This command will modify or delete files/directories.")
+                                
+                                try:
+                                    confirmation = input("\n   Type 'yes' to proceed, or anything else to cancel: ").strip().lower()
+                                    if confirmation == 'yes':
+                                        should_execute = True
+                                        if debug_mode:
+                                            print("✅ User confirmed destructive command")
+                                    else:
+                                        api_results["shell_info"] = {
+                                            "error": f"Command cancelled by user: {command}",
+                                            "reason": "User declined to confirm destructive command"
+                                        }
+                                except (EOFError, KeyboardInterrupt):
+                                    # Non-interactive mode or interrupted
+                                    api_results["shell_info"] = {
+                                        "error": f"Command blocked for safety: {command}",
+                                        "reason": "Destructive command requires interactive confirmation (non-interactive mode detected)"
+                                    }
                             else:
+                                # SAFE or WRITE commands - proceed
+                                should_execute = True
+                            
+                            if should_execute:
                                 # ========================================
                                 # COMMAND INTERCEPTOR: Translate shell commands to file operations
                                 # (Claude Code / Cursor parity)
@@ -6149,7 +6309,7 @@ JSON:"""
 
             # LOCAL MODE: Direct LLM calls using temp key or dev keys
             # Executes when self.client is NOT None (temp key loaded or USE_LOCAL_KEYS=true)
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
 
@@ -6646,7 +6806,7 @@ JSON:"""
         except Exception as e:
             import traceback
             details = str(e)
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()

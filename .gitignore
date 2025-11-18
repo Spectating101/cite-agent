@@ -143,3 +143,8 @@ TEST_*.md
 # Keep personal reference files
 !cerebras-limit.md
 !groq-limit.md
+
+# Test artifacts
+test_data_*/
+test_*research*.py
+*.zip

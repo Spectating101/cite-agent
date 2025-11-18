@@ -18,7 +18,16 @@ from .function_tools import TOOLS, validate_tool_call
 
 @dataclass
 class ToolCall:
-    """Represents a tool call from the LLM"""
+    """Represents a too                if tool_name == "chat":
+                    if self.debug_mode:
+                        print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
+                    return FunctionCallingResponse(
+                        response=result["message"],
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
+                        model=self.model
+                    )m the LLM"""
     id: str
     name: str
     arguments: Dict[str, Any]
@@ -172,7 +181,21 @@ def format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
             return f"Code executed: {code[:100]}...\nResult ({result_type}):\n{res[:1000]}"
         return result.get("error", json.dumps(result)[:400])
 
-    # Default: truncated JSON
+    # Default: Try to extract meaningful info, avoid raw JSON dump
+    if result.get("success"):
+        msg = result.get("message", "")
+        if msg:
+            return msg
+    
+    # Extract error message if present
+    if "error" in result:
+        return f"Error: {result['error']}"
+    
+    # Extract message if present
+    if "message" in result:
+        return result["message"]
+    
+    # Last resort: truncated JSON (but this shouldn't normally be shown to user)
     return json.dumps(result)[:400]
 
 
@@ -272,32 +295,80 @@ class FunctionCallingAgent:
                 print(f"🔍 [Function Calling] Got response from {self.provider}")
 
         except Exception as e:
-            error_str = str(e)
+            error_str = str(e).lower()
+            error_type = type(e).__name__
 
-            # Check if it's a rate limit error (429)
-            if "429" in error_str or "rate" in error_str.lower() or "queue" in error_str.lower():
+            # TRANSPARENT ERROR MESSAGES: Give users specific information about what went wrong
+            
+            # 1. Rate limit errors (429)
+            if "429" in error_str or "rate" in error_str or "queue" in error_str or "rate_limit" in error_str:
                 if self.debug_mode:
                     print(f"⚠️ [Function Calling] {self.provider} rate limited (429)")
-                # Return user-friendly rate limit message
                 return FunctionCallingResponse(
-                    response="The AI service is experiencing high traffic right now. Please try again in a moment.",
+                    response=f"⚠️ Rate limit exceeded. The {self.provider.capitalize()} API has received too many requests. Please wait a moment and try again.",
                     tool_calls=[],
                     tool_results={},
                     tokens_used=0
                 )
-
-            if self.debug_mode:
-                print(f"❌ [Function Calling] LLM call failed: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-
-            # Fallback: return error as chat response
-            return FunctionCallingResponse(
-                response=f"I encountered an error calling the LLM: {str(e)}",
-                tool_calls=[],
-                tool_results={},
-                tokens_used=0
-            )
+            
+            # 2. Timeout errors
+            elif "timeout" in error_str or error_type in ("TimeoutError", "ReadTimeout", "ConnectTimeout"):
+                if self.debug_mode:
+                    print(f"⚠️ [Function Calling] {self.provider} timeout")
+                return FunctionCallingResponse(
+                    response=f"⏱️ Request timeout. The {self.provider.capitalize()} API did not respond in time. Please try again.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
+            
+            # 3. Connection errors / Infrastructure down
+            elif ("500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str or
+                  "cloudflare" in error_str or "internal server error" in error_str or
+                  "connection" in error_str or "network" in error_str or error_type in ("ConnectionError", "ConnectError")):
+                if self.debug_mode:
+                    print(f"❌ [Function Calling] {self.provider} infrastructure down")
+                return FunctionCallingResponse(
+                    response=f"🔴 LLM model is down at the moment. The {self.provider.capitalize()} infrastructure is experiencing issues. Sorry for the inconvenience. Try again later.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
+            
+            # 4. Authentication errors
+            elif "401" in error_str or "403" in error_str or "unauthorized" in error_str or "authentication" in error_str or "api key" in error_str:
+                if self.debug_mode:
+                    print(f"❌ [Function Calling] {self.provider} authentication failed")
+                return FunctionCallingResponse(
+                    response=f"🔑 Authentication error. There's an issue with the API credentials. Please contact support.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
+            
+            # 5. Invalid request / Bad parameters
+            elif "400" in error_str or "invalid" in error_str or "bad request" in error_str:
+                if self.debug_mode:
+                    print(f"❌ [Function Calling] {self.provider} invalid request")
+                return FunctionCallingResponse(
+                    response=f"⚠️ Invalid request. Your query couldn't be processed. Please try rephrasing.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
+            
+            # 6. Generic fallback with error type
+            else:
+                if self.debug_mode:
+                    print(f"❌ [Function Calling] LLM call failed: {error_type}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                return FunctionCallingResponse(
+                    response=f"❌ Error: {error_type} - {str(e)[:200]}. Please try again or rephrase your question.",
+                    tool_calls=[],
+                    tool_results={},
+                    tokens_used=0
+                )
 
         message = response.choices[0].message
         tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
@@ -424,7 +495,7 @@ class FunctionCallingAgent:
                     response=f"Contents of {path}:\n\n{listing}",
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
-                    tokens_used=0,
+                    tokens_used=tokens_used,  # Include initial LLM call tokens
                     model=self.model
                 )
 
@@ -438,7 +509,7 @@ class FunctionCallingAgent:
                     response=f"Contents of {file_path}:\n\n{content}",
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
-                    tokens_used=0,
+                    tokens_used=tokens_used,  # Include initial LLM call tokens
                     model=self.model
                 )
 
@@ -459,7 +530,7 @@ class FunctionCallingAgent:
                         response=f"Changed to {new_dir}",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
                 elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
@@ -468,7 +539,7 @@ class FunctionCallingAgent:
                         response=output if output else "(no output)",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
                 else:
@@ -477,7 +548,7 @@ class FunctionCallingAgent:
                         response=f"$ {command}\n{output}" if output else f"$ {command}\n(completed)",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
 
