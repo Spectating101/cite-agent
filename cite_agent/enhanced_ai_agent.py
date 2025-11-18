@@ -92,6 +92,11 @@ class EnhancedNocturnalAgent:
         # Cache debug mode at initialization (performance optimization)
         self.debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         
+        # Initialize LLM provider (default to cerebras if keys available, else groq)
+        self.llm_provider = None  # Will be set in _ensure_client_ready()
+        self.cerebras_keys = []
+        self.groq_keys = []
+        
         # Initialize web search for fallback
         self.web_search = None
         try:
@@ -4418,9 +4423,12 @@ Concise query (max {max_length} chars):"""
 
     def _get_model_name(self) -> str:
         """Get the appropriate model name for the current provider"""
-        if self.llm_provider == "cerebras":
+        # Safe fallback if llm_provider not set yet
+        provider = getattr(self, 'llm_provider', None)
+        
+        if provider == "cerebras":
             return "gpt-oss-120b"
-        elif self.llm_provider == "groq":
+        elif provider == "groq":
             return "llama-3.1-70b-versatile"
         else:
             return "gpt-4o-mini"  # Fallback
@@ -4645,6 +4653,13 @@ Concise query (max {max_length} chars):"""
         debug_mode = self.debug_mode
 
         try:
+            # Ensure LLM client is ready
+            if not self._ensure_client_ready():
+                return ChatResponse(
+                    response="❌ Unable to initialize LLM client. Please check your API keys.",
+                    error_message="Client initialization failed"
+                )
+            
             # Check workflow commands first
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
