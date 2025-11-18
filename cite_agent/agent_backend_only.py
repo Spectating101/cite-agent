@@ -65,6 +65,69 @@ class EnhancedNocturnalAgent:
                             self.auth_token = line.split("=", 1)[1].strip()
                             break
 
+    def _clean_response(self, response: str) -> str:
+        """
+        Clean backend response from JSON artifacts and internal thinking.
+
+        The backend sometimes includes:
+        - JSON command structures: {"cmd":["bash",...]}
+        - Internal reasoning: "We need to...", "Let's...", "Will run..."
+
+        This method strips these artifacts for professional output.
+        """
+        import re
+
+        if not response:
+            return response
+
+        # Remove JSON command artifacts anywhere in response (not just start)
+        # Pattern: {"cmd":["bash","-lc","..."]}
+        response = re.sub(r'\{\"cmd\":\[.*?\]\}', '', response, flags=re.DOTALL)
+
+        # Remove JSON search/query artifacts
+        # Pattern: {"search_query": "..."} or {"shell_command": "..."} or {"command": "..."}
+        response = re.sub(r'\{\"(?:search_query|shell_command|command|tool)\":\s*[^\}]+\}', '', response, flags=re.DOTALL)
+
+        # Remove internal thinking - more comprehensive patterns
+        # These patterns match common AI reasoning artifacts
+        thinking_patterns = [
+            r'We need to [^.!?]*[.!?]',
+            r'Let\'s [^.!?]*[.!?]',
+            r'Will [^.!?]*[.!?]',
+            r'We\'ll [^.!?]*[.!?]',
+            r'We will [^.!?]*[.!?]',
+            r'I will [^.!?]*[.!?]',
+            r'I\'ll [^.!?]*[.!?]',
+            r'Proceed\.',
+            r'Now [^.!?]*[.!?]',
+            r'Okay[^.!?]*[.!?]',
+            r'Given [^.!?]*[.!?]',
+            r'Probably [^.!?]*[.!?]',
+            r'I think [^.!?]*[.!?]',
+            r'Actually [^.!?]*[.!?]',
+            r'Executing[^.!?]*[.!?]',
+            r'Running[^.!?]*[.!?]',
+            r'Let me [^.!?]*[.!?]',
+        ]
+
+        # Apply thinking pattern removal iteratively
+        max_iterations = 20  # Prevent infinite loops
+        iteration = 0
+        while iteration < max_iterations:
+            iteration += 1
+            original = response
+            for pattern in thinking_patterns:
+                response = re.sub(pattern, '', response, flags=re.IGNORECASE)
+            # If no changes were made, we're done
+            if response == original:
+                break
+
+        # Clean up extra whitespace and newlines
+        response = re.sub(r'\n{3,}', '\n\n', response)  # Max 2 consecutive newlines
+        response = response.strip()
+
+        return response
+
     async def initialize(self):
         """Initialize agent"""
         if not self.auth_token:
@@ -121,8 +184,12 @@ class EnhancedNocturnalAgent:
 
             data = response.json()
 
+            # Clean response from JSON artifacts and internal thinking
+            raw_response = data.get("response", data.get("answer", ""))
+            cleaned_response = self._clean_response(raw_response)
+
             return ChatResponse(
-                response=data.get("response", data.get("answer", "")),
+                response=cleaned_response,
                 citations=data.get("citations", []),
                 tools_used=data.get("tools_used", []),
                 model=data.get("model", "backend"),
