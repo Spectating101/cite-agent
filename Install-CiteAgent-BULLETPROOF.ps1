@@ -19,7 +19,8 @@ $CITE_AGENT_VERSION = "1.4.8"
 $MIN_PYTHON_VERSION = [version]"3.10.0"
 $MAX_PYTHON_VERSION = [version]"3.13.99"
 $PYTHON_DOWNLOAD_VERSION = "3.11.9"
-$PYTHON_DOWNLOAD_URL = "https://www.python.org/ftp/python/$PYTHON_DOWNLOAD_VERSION/python-$PYTHON_DOWNLOAD_VERSION-amd64.exe"
+$PYTHON_DOWNLOAD_URL = "https://www.python.org/ftp/python/$PYTHON_DOWNLOAD_VERSION/python-$PYTHON_DOWNLOAD_VERSION-embed-amd64.zip"
+$GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 $INSTALL_ROOT = "$env:LOCALAPPDATA\Cite-Agent"
 $VENV_PATH = "$INSTALL_ROOT\venv"
 $PYTHON_EMBEDDED_PATH = "$INSTALL_ROOT\python"
@@ -239,6 +240,30 @@ function Remove-OldInstallation {
         Write-Log "PATH already clean" -Level "INFO"
     }
 
+    # 7. Clean up stale py launcher registry entries
+    Write-Log "Cleaning py launcher registry for stale Python installations..." -Level "INFO"
+    try {
+        # Remove any py launcher entries pointing to our deleted installation
+        $pyLauncherPaths = @(
+            "HKCU:\Software\Python\PythonCore",
+            "HKLM:\Software\Python\PythonCore"
+        )
+
+        foreach ($regPath in $pyLauncherPaths) {
+            if (Test-Path $regPath) {
+                Get-ChildItem $regPath -ErrorAction SilentlyContinue | ForEach-Object {
+                    $installPath = (Get-ItemProperty "$($_.PSPath)\InstallPath" -ErrorAction SilentlyContinue).'(default)'
+                    if ($installPath -and $installPath -like "*Cite-Agent*" -and -not (Test-Path $installPath)) {
+                        Write-Log "Removing stale registry entry: $($_.PSChildName)" -Level "PROGRESS"
+                        Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Log "Registry cleanup skipped (non-critical)" -Level "PROGRESS"
+    }
+
     Write-Log "Cleanup complete - ready for fresh installation" -Level "SUCCESS"
     Start-Sleep -Seconds 1
 }
@@ -345,57 +370,77 @@ function Find-PythonExecutable {
 function Install-Python {
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
-    Write-Host "  Installing Python $PYTHON_DOWNLOAD_VERSION" -ForegroundColor Yellow
+    Write-Host "  Installing Python $PYTHON_DOWNLOAD_VERSION (Embeddable)" -ForegroundColor Yellow
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
     Write-Host ""
 
-    Write-Log "No compatible Python found - installing Python $PYTHON_DOWNLOAD_VERSION..." -Level "INFO"
+    Write-Log "Installing Python embeddable package..." -Level "INFO"
     Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 20 -Status "Downloading Python..."
 
-    $tempInstaller = Join-Path ([System.IO.Path]::GetTempPath()) "python-$PYTHON_DOWNLOAD_VERSION-installer.exe"
+    $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "python-$PYTHON_DOWNLOAD_VERSION-embed.zip"
 
-    # Download Python with retry
+    # Download Python embeddable package
     Invoke-WithRetry -Description "Python download" -ScriptBlock {
         Write-Log "Downloading Python from: $PYTHON_DOWNLOAD_URL" -Level "PROGRESS"
         $webClient = New-Object System.Net.WebClient
-        $webClient.DownloadFile($PYTHON_DOWNLOAD_URL, $tempInstaller)
+        $webClient.DownloadFile($PYTHON_DOWNLOAD_URL, $tempZip)
 
-        if (-not (Test-Path $tempInstaller)) {
-            throw "Python installer download failed"
+        if (-not (Test-Path $tempZip)) {
+            throw "Python download failed"
         }
 
-        $fileSize = (Get-Item $tempInstaller).Length / 1MB
+        $fileSize = (Get-Item $tempZip).Length / 1MB
         $fileSizeMB = [math]::Round($fileSize, 2)
-        Write-Log "Downloaded Python installer ($fileSizeMB MB)" -Level 'PROGRESS'
+        Write-Log "Downloaded Python package ($fileSizeMB MB)" -Level 'PROGRESS'
     }
 
-    Write-Log "Running Python installer (silent mode)..." -Level "INFO"
-    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 30 -Status "Installing Python..."
+    Write-Log "Extracting Python to: $PYTHON_EMBEDDED_PATH" -Level "INFO"
+    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 30 -Status "Extracting Python..."
 
-    $installArgs = @(
-        "/quiet",
-        "InstallAllUsers=0",
-        "PrependPath=0",
-        "Include_test=0",
-        "Include_launcher=1",
-        "Shortcuts=0",
-        "SimpleInstall=1",
-        "TargetDir=`"$PYTHON_EMBEDDED_PATH`""
-    )
+    # Extract Python
+    if (Test-Path $PYTHON_EMBEDDED_PATH) {
+        Remove-Item $PYTHON_EMBEDDED_PATH -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $PYTHON_EMBEDDED_PATH -Force | Out-Null
 
-    $process = Start-Process -FilePath $tempInstaller -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-    Write-Log "Python installer exit code: $($process.ExitCode)" -Level "PROGRESS"
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($tempZip, $PYTHON_EMBEDDED_PATH)
 
-    if ($process.ExitCode -ne 0) {
-        throw "Python installation failed with exit code: $($process.ExitCode)"
+    Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+
+    # Enable pip by uncommenting import site in python311._pth
+    $pthFile = Get-ChildItem $PYTHON_EMBEDDED_PATH -Filter "python*._pth" | Select-Object -First 1
+    if ($pthFile) {
+        Write-Log "Enabling pip support..." -Level "PROGRESS"
+        $content = Get-Content $pthFile.FullName
+        $content = $content -replace "#import site", "import site"
+        $content | Set-Content $pthFile.FullName -Force
     }
 
-    Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+    # Download and install pip
+    Write-Log "Installing pip..." -Level "INFO"
+    $getPipPath = Join-Path $PYTHON_EMBEDDED_PATH "get-pip.py"
+
+    Invoke-WithRetry -Description "Pip download" -ScriptBlock {
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadFile($GET_PIP_URL, $getPipPath)
+    }
 
     $pythonExe = Join-Path $PYTHON_EMBEDDED_PATH "python.exe"
-    if (-not (Test-Path $pythonExe)) {
-        throw "Python executable not found after installation at: $pythonExe"
+    $oldErrorActionPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"  # Allow warnings to pass through
+    $pipInstall = & $pythonExe $getPipPath 2>&1 | Out-String
+    $ErrorActionPreference = $oldErrorActionPref
+
+    # Check if pip actually installed (Scripts\pip.exe should exist)
+    if (Test-Path (Join-Path $PYTHON_EMBEDDED_PATH "Scripts\pip.exe")) {
+        Write-Log "Pip installed successfully" -Level "SUCCESS"
+    } else {
+        Write-Log "Pip installation output: $pipInstall" -Level "WARNING"
+        throw "Pip installation failed"
     }
+
+    Remove-Item $getPipPath -Force -ErrorAction SilentlyContinue
 
     Write-Log "Python installed successfully: $pythonExe" -Level "SUCCESS"
     return $pythonExe
@@ -446,12 +491,52 @@ function New-VirtualEnvironment {
         }
     }
 
-    # Create fresh venv with retry
-    Invoke-WithRetry -Description "Virtual environment creation" -ScriptBlock {
-        & $PythonPath -m venv "$VENV_PATH" 2>&1 | Out-File $LOG_FILE -Append -Encoding UTF8
+    # For embeddable Python, we need to use virtualenv instead of venv
+    # First check if this is embeddable Python (no venv module)
+    $oldErrorActionPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $hasVenv = & $PythonPath -m venv --help 2>&1 | Out-String
+    $venvExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldErrorActionPref
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "venv creation failed with exit code: $LASTEXITCODE"
+    $useVirtualenv = $venvExitCode -ne 0
+
+    if ($useVirtualenv) {
+        Write-Log "Using virtualenv (embeddable Python detected)" -Level "INFO"
+        # Install virtualenv
+        $pipExe = Join-Path (Split-Path $PythonPath -Parent) "Scripts\pip.exe"
+
+        $oldErrPref = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & $pipExe install virtualenv 2>&1 | Out-File $LOG_FILE -Append -Encoding UTF8
+        $pipResult = $LASTEXITCODE
+        $ErrorActionPreference = $oldErrPref
+
+        if ($pipResult -ne 0) {
+            throw "virtualenv installation failed"
+        }
+
+        # Create venv using virtualenv
+        Invoke-WithRetry -Description "Virtual environment creation" -ScriptBlock {
+            $oldErrPref2 = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            & $PythonPath -m virtualenv "$VENV_PATH" 2>&1 | Out-File $LOG_FILE -Append -Encoding UTF8
+            $venvResult = $LASTEXITCODE
+            $ErrorActionPreference = $oldErrPref2
+
+            if ($venvResult -ne 0) {
+                throw "virtualenv creation failed with exit code: $venvResult"
+            }
+        }
+    } else {
+        Write-Log "Using built-in venv module" -Level "INFO"
+        # Create fresh venv with retry
+        Invoke-WithRetry -Description "Virtual environment creation" -ScriptBlock {
+            & $PythonPath -m venv "$VENV_PATH" 2>&1 | Out-File $LOG_FILE -Append -Encoding UTF8
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "venv creation failed with exit code: $LASTEXITCODE"
+            }
         }
     }
 

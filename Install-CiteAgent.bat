@@ -25,28 +25,14 @@ echo Installation location: %LOCALAPPDATA%\Cite-Agent
 echo.
 pause
 
-REM Check if running as administrator
-net session >nul 2>&1
-if %errorLevel% == 0 (
-    echo Running with administrator privileges...
-    goto :RunInstaller
-)
-
-REM Not running as admin - try to elevate
 echo.
-echo Requesting administrator privileges...
-echo (A UAC prompt will appear - click Yes to continue)
+echo Starting installation...
 echo.
 
-REM Run PowerShell installer with elevation
-powershell -Command "Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -NoProfile -File \"%~dp0Install-CiteAgent-BULLETPROOF.ps1\"' -Verb RunAs -Wait"
-goto :End
-
-:RunInstaller
-REM Already running as admin
+REM Run PowerShell installer (no admin needed - installs to user directory)
 powershell -ExecutionPolicy Bypass -NoProfile -File "%~dp0Install-CiteAgent-BULLETPROOF.ps1"
 
-:End
+echo.
 echo.
 echo ========================================================================
 echo Installation process completed.
