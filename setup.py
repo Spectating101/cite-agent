@@ -7,7 +7,7 @@ long_description = readme_path.read_text() if readme_path.exists() else "Termina
 
 setup(
     name="cite-agent",
-    version="1.4.8",
+    version="1.4.9",
     author="Cite-Agent Team",
     author_email="contact@citeagent.dev",
     description="Terminal AI assistant for academic research with citation verification",
@@ -38,8 +38,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "cite-agent=cite_agent.cli:main",
-            "nocturnal=cite_agent.cli:main",
+            "cite-agent=cite_agent.enhanced_ai_agent:main",
+            "nocturnal=cite_agent.enhanced_ai_agent:main",
         ],
     },
 )
