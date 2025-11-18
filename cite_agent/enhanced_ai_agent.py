@@ -90,7 +90,7 @@ class EnhancedNocturnalAgent:
         self.per_user_query_limit = self.daily_query_limit
         
         # Cache debug mode at initialization (performance optimization)
-        self.debug_mode = self.debug_mode
+        self.debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
         
         # Initialize web search for fallback
         self.web_search = None
