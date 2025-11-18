@@ -193,10 +193,57 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"Web search error: {str(e)}"}
 
+    def _filter_notable_files(self, entries: list, limit: int = 10) -> tuple:
+        """
+        Filter and prioritize notable files for better UX.
+        Returns (filtered_entries, hidden_count)
+        """
+        import re
+
+        # Priority patterns (higher priority shown first)
+        HIGH_PRIORITY = [
+            r'^README.*',  r'^CHANGELOG.*', r'^LICENSE.*',
+            r'setup\.py$', r'package\.json$', r'requirements\.txt$',
+            r'Makefile$', r'\.md$', r'pyproject\.toml$'
+        ]
+
+        # Skip patterns (hide these unless show_hidden=True)
+        SKIP_PATTERNS = [
+            r'^\.git$', r'^__pycache__$', r'^node_modules$',
+            r'\.pyc$', r'\.pyo$', r'\.egg-info$',
+            r'^\.pytest_cache$', r'^\.mypy_cache$',
+            r'^\.venv$', r'^venv$', r'^env$'
+        ]
+
+        def should_skip(name: str) -> bool:
+            return any(re.search(pattern, name) for pattern in SKIP_PATTERNS)
+
+        def priority_score(entry: dict) -> int:
+            name = entry.get('name', '')
+            # Directories get base score of 100
+            score = 100 if entry.get('is_dir', False) else 50
+            # High priority files get bonus
+            if any(re.search(pattern, name) for pattern in HIGH_PRIORITY):
+                score += 1000
+            return score
+
+        # Filter out junk
+        filtered = [e for e in entries if not should_skip(e.get('name', ''))]
+
+        # Sort by priority
+        sorted_entries = sorted(filtered, key=priority_score, reverse=True)
+
+        # Limit to top N
+        visible = sorted_entries[:limit]
+        hidden = len(sorted_entries) - len(visible)
+
+        return visible, hidden
+
     def _execute_list_directory(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute list_directory tool with PERSISTENT working directory context"""
+        """Execute list_directory tool with PERSISTENT working directory context and smart filtering"""
         path = args.get("path", ".")
         show_hidden = args.get("show_hidden", False)
+        limit = args.get("limit", 10)  # Default to 10 items for better UX
 
         # Get current working directory from agent context
         current_cwd = self.agent.file_context.get('current_cwd', os.getcwd())
@@ -206,7 +253,7 @@ class ToolExecutor:
             path = current_cwd
 
         if self.debug_mode:
-            print(f"📁 [List Directory] Path: {path}, show_hidden: {show_hidden}")
+            print(f"📁 [List Directory] Path: {path}, show_hidden: {show_hidden}, limit: {limit}")
             print(f"📁 [List Directory] Current CWD: {current_cwd}")
 
         # Use shell command to list directory
@@ -231,10 +278,39 @@ class ToolExecutor:
                 if self.debug_mode:
                     print(f"📁 [List Directory] Got {len(output)} chars of output")
 
+                # Parse ls output into structured data for filtering
+                lines = output.strip().split('\n')
+                entries = []
+                for line in lines:
+                    if not line or line.startswith('total'):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 9:
+                        name = ' '.join(parts[8:])
+                        is_dir = line.startswith('d')
+                        entries.append({'name': name, 'is_dir': is_dir, 'is_file': not is_dir, 'raw': line})
+
+                # Apply smart filtering
+                if not show_hidden:
+                    filtered, hidden_count = self._filter_notable_files(entries, limit)
+                else:
+                    filtered = entries[:limit]
+                    hidden_count = max(0, len(entries) - limit)
+
+                # Rebuild listing from filtered entries
+                filtered_listing = '\n'.join([e['raw'] for e in filtered])
+
+                # Add helpful note if files were hidden
+                note = ""
+                if hidden_count > 0:
+                    note = f"\n\n({hidden_count} more items not shown - use 'ls -la' or ask for 'all files' to see everything)"
+
                 return {
                     "path": path,
-                    "listing": output,
-                    "command": command
+                    "listing": filtered_listing + note,
+                    "command": command,
+                    "filtered": True,
+                    "hidden_count": hidden_count
                 }
             else:
                 # Fallback to Python's pathlib
@@ -255,15 +331,28 @@ class ToolExecutor:
                         "is_file": entry.is_file()
                     })
 
+                # Apply smart filtering
+                if not show_hidden:
+                    filtered, hidden_count = self._filter_notable_files(entries, limit)
+                else:
+                    filtered = entries[:limit]
+                    hidden_count = max(0, len(entries) - limit)
+
                 listing = "\n".join([
                     f"{'[DIR]' if e['is_dir'] else '[FILE]'} {e['name']}"
-                    for e in entries
+                    for e in filtered
                 ])
+
+                # Add note if files were hidden
+                if hidden_count > 0:
+                    listing += f"\n\n({hidden_count} more items - ask for 'all files' to see everything)"
 
                 return {
                     "path": str(path_obj),
                     "listing": listing,
-                    "entries": entries
+                    "entries": filtered,
+                    "filtered": True,
+                    "hidden_count": hidden_count
                 }
 
         except Exception as e:
