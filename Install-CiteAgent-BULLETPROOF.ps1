@@ -1,4 +1,4 @@
-# Cite-Agent BULLETPROOF Installer v1.4.1
+﻿# Cite-Agent BULLETPROOF Installer v1.4.8
 # Works on ANY Windows machine - even without Python
 # Right-click → Run with PowerShell (or use one-liner)
 # One-liner: iwr -useb https://raw.githubusercontent.com/Spectating101/cite-agent/main/Install-CiteAgent-BULLETPROOF.ps1 | iex
@@ -15,7 +15,7 @@ param(
 # Configuration
 # ============================================================================
 $ErrorActionPreference = "Stop"
-$CITE_AGENT_VERSION = "1.4.1"
+$CITE_AGENT_VERSION = "1.4.8"
 $MIN_PYTHON_VERSION = [version]"3.10.0"
 $MAX_PYTHON_VERSION = [version]"3.13.99"
 $PYTHON_DOWNLOAD_VERSION = "3.11.9"
@@ -225,9 +225,9 @@ function Remove-OldInstallation {
     foreach ($pathToRemove in $pathsToRemove) {
         if ($newPath -like "*$pathToRemove*") {
             $escapedPath = [regex]::Escape($pathToRemove)
-            $newPath = $newPath -replace ";$escapedPath", ""
-            $newPath = $newPath -replace "$escapedPath;", ""
-            $newPath = $newPath -replace "$escapedPath", ""
+            $newPath = $newPath -replace ";$escapedPath", ''
+            $newPath = $newPath -replace "$escapedPath;", ''
+            $newPath = $newPath -replace "$escapedPath", ''
             $pathCleaned = $true
         }
     }
@@ -300,13 +300,20 @@ function Find-PythonExecutable {
     Write-Log "Checking system PATH..." -Level "PROGRESS"
     $pathPython = Get-Command python -ErrorAction SilentlyContinue
     if ($pathPython) {
-        $versionOutput = & $pathPython.Path --version 2>&1 | Select-String -Pattern '(\d+\.\d+\.\d+)'
-        if ($versionOutput -and $versionOutput.Matches.Groups.Count -gt 1) {
-            $version = [version]$versionOutput.Matches.Groups[1].Value
-            $pythonCandidates += [PSCustomObject]@{
-                Path = $pathPython.Path
-                Version = $version
+        try {
+            $versionOutput = & $pathPython.Path --version 2>&1
+            # Check if it's the Windows Store stub (error message contains "Microsoft Store")
+            if ($versionOutput -like "*Microsoft Store*") {
+                Write-Log "Found Windows Store Python stub (not actual Python)" -Level "PROGRESS"
+            } elseif ($versionOutput -match '(\d+\.\d+\.\d+)') {
+                $version = [version]$Matches[1]
+                $pythonCandidates += [PSCustomObject]@{
+                    Path = $pathPython.Path
+                    Version = $version
+                }
             }
+        } catch {
+            Write-Log "Python command failed (likely Windows Store stub)" -Level "PROGRESS"
         }
     }
 
@@ -359,7 +366,7 @@ function Install-Python {
 
         $fileSize = (Get-Item $tempInstaller).Length / 1MB
         $fileSizeMB = [math]::Round($fileSize, 2)
-        Write-Log "Downloaded Python installer ($fileSizeMB MB)" -Level "PROGRESS"
+        Write-Log "Downloaded Python installer ($fileSizeMB MB)" -Level 'PROGRESS'
     }
 
     Write-Log "Running Python installer (silent mode)..." -Level "INFO"
@@ -412,7 +419,31 @@ function New-VirtualEnvironment {
     # Remove old venv if exists
     if (Test-Path $VENV_PATH) {
         Write-Log "Removing existing virtual environment..." -Level "WARNING"
-        Remove-Item $VENV_PATH -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Kill any Python processes using the venv
+        try {
+            Get-Process python -ErrorAction SilentlyContinue | Where-Object {
+                $_.Path -like "$VENV_PATH*"
+            } | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+        } catch {
+            # Ignore errors killing processes
+        }
+
+        # Aggressive removal with retries
+        $retries = 0
+        while ((Test-Path $VENV_PATH) -and $retries -lt 5) {
+            try {
+                Remove-Item $VENV_PATH -Recurse -Force -ErrorAction Stop
+            } catch {
+                Start-Sleep -Milliseconds 500
+                $retries++
+            }
+        }
+
+        if (Test-Path $VENV_PATH) {
+            Write-Log "Warning: Could not fully remove old venv, will overwrite" -Level "WARNING"
+        }
     }
 
     # Create fresh venv with retry
