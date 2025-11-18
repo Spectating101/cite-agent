@@ -91,13 +91,3 @@ python-multipart==0.0.6
 
 # Total: ~25 core packages, ~1.3GB install size
 # vs Previous: ~50+ packages, 7.4GB install size (82% reduction!)
-# Core runtime dependencies for the beta agent
-aiohttp>=3.9.0
-groq>=0.4.0
-python-dotenv>=1.0.0
-rich>=13.7.0
-keyring>=24.3.0
-plotext>=5.2.8
-flask==3.0.0
-flask-cors==4.0.0
-requests>=2.31.0

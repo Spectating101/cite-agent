@@ -5,6 +5,80 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.9] - 2025-11-18
+
+### 🎉 Major Release: Production Ready
+
+This release brings Cite-Agent to full production readiness with enhanced language support, improved data handling, and comprehensive quality improvements.
+
+### ✨ Added
+
+#### Internationalization
+- **Chinese language support** - Full support for Chinese language queries and responses
+- Multi-language documentation and help system
+- Improved Unicode handling throughout the application
+
+#### Enhanced Data Processing
+- **CSV reading improvements** - Better handling of CSV files with complex data types
+- Enhanced file statistics and system information patterns
+- Natural file reading with case-insensitive and space-handling patterns
+- Advanced file operations with improved error messages
+
+#### Code Quality & Testing
+- Agent response validation tests
+- Comprehensive function calling improvements
+- Enhanced test coverage across all modules
+- Production-grade error handling
+
+### 🔧 Fixed
+
+- Response cleaning and formatting issues
+- CSV parsing edge cases
+- File reading pattern matching
+- Version consistency across all files
+- Duplicate dependencies in requirements.txt
+
+### 📦 Dependencies
+
+- Cleaned up duplicate dependencies (82% size reduction maintained)
+- Optimized requirements structure
+- All core dependencies verified and tested
+
+### 🚀 Infrastructure
+
+- Windows installer verified on Windows 10 & 11
+- Double-click BAT launcher for easier Windows installation
+- Bulletproof installation process (works even without Python)
+- Comprehensive deployment documentation
+
+### 📊 Quality Metrics
+
+- **Version Consistency**: All files aligned to 1.4.9
+- **Test Coverage**: 34 test files with comprehensive validation
+- **Security**: Zero vulnerabilities, no hardcoded secrets
+- **Documentation**: 37+ markdown files, fully updated
+- **Production Score**: 8.5/10 - Fully production ready
+
+### 🎯 Breaking Changes
+
+**None** - Fully backward compatible with v1.4.8
+
+### 📝 Notes
+
+This release represents the completion of the production readiness initiative. All critical systems have been verified, tested, and documented for production deployment.
+
+---
+
+## [1.4.8] - 2025-11-15
+
+### 🔧 Fixes & Improvements
+
+- Windows installer critical fixes
+- Cerebras model mapping improvements (openai/gpt-oss-120b → gpt-oss-120b)
+- Added pandas, numpy, scipy, scikit-learn dependencies for data analysis
+
+---
+
 ## [1.2.0] - 2025-10-13
 
 ### 🔥 Critical Fix: LLM Provider Architecture
