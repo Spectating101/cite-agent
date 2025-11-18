@@ -485,6 +485,31 @@ class EnhancedNocturnalAgent:
         if len(self._recent_sources) > 10:
             self._recent_sources = self._recent_sources[-10:]
 
+    def _t(self, key: str) -> str:
+        """Simple translation helper for common UI strings"""
+        lang = getattr(self, 'language_preference', 'en')
+        translations = {
+            'en': {
+                'data_sources': 'Data sources: ',
+                'no_api_results': 'No API results yet.',
+                'shell_not_init': 'ERROR: Shell session not initialized',
+                'welcome_title': 'ENHANCED NOCTURNAL AI AGENT',
+                'welcome_subtitle': 'Research Assistant with Archive API + FinSight API Integration',
+                'type_quit': "Type 'quit' to exit",
+                'goodbye': 'Goodbye!'
+            },
+            'zh-TW': {
+                'data_sources': '資料來源：',
+                'no_api_results': '尚無API結果。',
+                'shell_not_init': '錯誤：Shell會話未初始化',
+                'welcome_title': '增強型夜行AI助理',
+                'welcome_subtitle': '研究助理（Archive API + FinSight API 整合）',
+                'type_quit': "輸入 'quit' 退出",
+                'goodbye': '再見！'
+            }
+        }
+        return translations.get(lang, translations['en']).get(key, key)
+
     def _format_data_sources_footer(self) -> str:
         if not self._recent_sources:
             return ""
@@ -495,7 +520,7 @@ class EnhancedNocturnalAgent:
             snippets.append(f"{item.get('service')} {item.get('endpoint')} – {status}")
         if len(self._recent_sources) > 4:
             snippets.append("…")
-        return "Data sources: " + "; ".join(snippets)
+        return self._t('data_sources') + "; ".join(snippets)
 
     def _reset_data_sources(self) -> None:
         self._recent_sources = []
@@ -1032,7 +1057,7 @@ class EnhancedNocturnalAgent:
     def _format_api_results_for_prompt(self, api_results: Dict[str, Any]) -> str:
         if not api_results:
             logger.info("🔍 DEBUG: _format_api_results_for_prompt called with EMPTY api_results")
-            return "No API results yet."
+            return self._t('no_api_results')
 
         # Special formatting for shell results to make them VERY clear
         if "shell_info" in api_results:
@@ -1734,16 +1759,17 @@ class EnhancedNocturnalAgent:
             from .updater import NocturnalUpdater
             updater = NocturnalUpdater()
             update_info = updater.check_for_updates()
-            
+
             if update_info and update_info["available"]:
-                # Auto-update silently in background
-                import threading
-                def do_update():
-                    try:
-                        updater.update_package(silent=True)
-                    except:
-                        pass
-                threading.Thread(target=do_update, daemon=True).start()
+                print(f"\n🆕 New version available: {update_info['current']} → {update_info['latest']}")
+                print("⏳ Starting upgrade (this may take 10-30 seconds)...\n")
+                # Run update with progress (blocking, but shows progress)
+                try:
+                    updater.update_package(silent=False, show_progress=True)
+                    print("\n✅ Upgrade complete! Please restart cite-agent to use the new version.\n")
+                except Exception as e:
+                    print(f"\n⚠️ Upgrade failed: {e}")
+                    print("You can continue using the current version.\n")
                 
         except Exception:
             # Silently ignore update check failures
@@ -2276,7 +2302,7 @@ class EnhancedNocturnalAgent:
         """Execute command and return output - improved with echo markers"""
         try:
             if self.shell_session is None:
-                return "ERROR: Shell session not initialized"
+                return self._t('shell_not_init')
             
             # Clean command - remove natural language prefixes
             command = command.strip()
@@ -5209,10 +5235,10 @@ JSON:"""
             return
             
         print("\n" + "="*70)
-        print("🤖 ENHANCED NOCTURNAL AI AGENT")
+        print(f"🤖 {self._t('welcome_title')}")
         print("="*70)
-        print("Research Assistant with Archive API + FinSight API Integration")
-        print("Type 'quit' to exit")
+        print(self._t('welcome_subtitle'))
+        print(self._t('type_quit'))
         print("="*70)
         
         while True:
@@ -5220,7 +5246,7 @@ JSON:"""
                 user_input = input("\n👤 You: ").strip()
                 
                 if user_input.lower() in ['quit', 'exit', 'bye']:
-                    print("👋 Goodbye!")
+                    print(f"👋 {self._t('goodbye')}")
                     await self.close()
                     break
                 
@@ -5242,7 +5268,7 @@ JSON:"""
                 print(f"🛠️ Tools used: {', '.join(response.tools_used) if response.tools_used else 'None'}")
                 
             except KeyboardInterrupt:
-                print("\n👋 Goodbye!")
+                print(f"\n👋 {self._t('goodbye')}")
                 await self.close()
                 break
             except Exception as e:

@@ -124,12 +124,12 @@ class NocturnalUpdater:
         except:
             return False
     
-    def update_package(self, force: bool = False, silent: bool = False) -> bool:
+    def update_package(self, force: bool = False, silent: bool = False, show_progress: bool = True) -> bool:
         """Update the package to latest version"""
         try:
             if not silent:
                 print("🔄 Updating cite-agent...")
-            
+
             # Check if update is needed
             if not force:
                 update_info = self.check_for_updates()
@@ -137,10 +137,20 @@ class NocturnalUpdater:
                     if not silent:
                         print("✅ No updates available")
                     return True
-            
+                else:
+                    if not silent and show_progress:
+                        print(f"📥 Downloading v{update_info['latest']}...")
+
             # Perform update with user flag to avoid system package conflicts
             cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--user", self.package_name]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            # Show progress if not silent
+            if not silent and show_progress:
+                # Stream output in real-time so user sees progress
+                result = subprocess.run(cmd, text=True)
+            else:
+                # Capture output for silent mode
+                result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:
                 # Create flag file to notify next launch
