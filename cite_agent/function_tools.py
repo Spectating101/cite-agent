@@ -136,10 +136,10 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "list_directory",
             "description": (
-                "List files and folders in a directory. "
-                "Use when user asks: 'what folders are here', 'list files', 'show directory contents', "
-                "'what's in this folder', 'ls'. "
-                "DO NOT use for conversational questions about the agent itself."
+                "List files and folders in a directory (BROWSING only). "
+                "Use ONLY when user wants to SEE what files exist: 'what files are here?', 'list files', 'show directory', 'ls'. "
+                "⚠️ DO NOT use if user mentions a SPECIFIC file by name (use read_file or load_dataset instead). "
+                "⚠️ DO NOT use for .csv/.xlsx files or data analysis (use load_dataset instead)."
             ),
             "parameters": {
                 "type": "object",
@@ -334,12 +334,11 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "load_dataset",
             "description": (
-                "Load a dataset from CSV or Excel file and AUTOMATICALLY compute statistics (mean, std, min, max, median). "
-                "ALWAYS use this tool (not read_file) when user asks for: mean, average, standard deviation, min, max, median, statistics, "
-                "calculate, compute, analyze data, load CSV/Excel, work with datasets. "
-                "This tool returns pre-computed statistics so you can answer statistical questions immediately. "
-                "Examples: 'load data.csv and calculate mean', 'analyze this Excel file', "
-                "'what is the average in my dataset', 'compute standard deviation'"
+                "🎯 PRIMARY TOOL for CSV/Excel files! Loads dataset and AUTOMATICALLY computes ALL statistics in ONE call. "
+                "⚠️ ALWAYS use this (NEVER use list_directory or read_file) when user mentions: "
+                "ANY .csv/.xlsx/.xls/.tsv file by name, OR words: load, dataset, data, mean, average, std, statistics, analyze data, calculate. "
+                "This tool does EVERYTHING: loads file + computes statistics (mean/std/min/max/median) + returns preview. "
+                "Examples: 'load data.csv', 'analyze sample.xlsx', 'calculate mean in dataset.csv', 'what's the average in data.csv'"
             ),
             "parameters": {
                 "type": "object",

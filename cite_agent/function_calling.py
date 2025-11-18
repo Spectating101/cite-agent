@@ -246,6 +246,23 @@ class FunctionCallingAgent:
         if conversation_history is None:
             conversation_history = []
 
+        # ENHANCEMENT: Detect data file patterns and force correct tool selection
+        # This works around gpt-oss-120b's tendency to choose list_directory over load_dataset
+        import re
+        force_tool = None
+        data_file_pattern = r'\b\w+\.(csv|xlsx|xls|tsv)\b'
+        data_keywords = ['load', 'dataset', 'mean', 'average', 'std', 'statistics', 'analyze data', 'calculate']
+        
+        # Check if query mentions a data file OR data analysis keywords
+        has_data_file = re.search(data_file_pattern, query, re.IGNORECASE)
+        has_data_keyword = any(keyword in query.lower() for keyword in data_keywords)
+        
+        if has_data_file or (has_data_keyword and any(ext in query.lower() for ext in ['.csv', '.xlsx', '.xls', '.tsv'])):
+            # Force load_dataset tool for data files
+            force_tool = {"type": "function", "function": {"name": "load_dataset"}}
+            if self.debug_mode:
+                print(f"🎯 [Function Calling] Data file/analysis detected, forcing load_dataset tool")
+
         # Build messages
         messages = []
 
@@ -253,14 +270,19 @@ class FunctionCallingAgent:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         else:
-            # Default system prompt (compressed for token efficiency)
+            # Enhanced system prompt for better tool selection (especially data analysis)
             messages.append({
                 "role": "system",
                 "content": (
-                    "Route queries to tools: papers/research→search_papers, "
-                    "financials/stocks→get_financial_data, files/folders→list_directory, "
-                    "shell commands→execute_shell_command, news/current events→web_search. "
-                    "Use chat only for greetings/thanks. Prefer action tools."
+                    "You are a research assistant with specialized tools. Route queries carefully:\n"
+                    "- DATA/CSV/EXCEL/STATISTICS (load, mean, analyze, dataset, .csv, .xlsx) → load_dataset\n"
+                    "- PAPERS/RESEARCH → search_papers\n"
+                    "- FINANCIALS/STOCKS → get_financial_data\n"
+                    "- FILE BROWSING (what files?, list, ls) → list_directory\n"
+                    "- FILE CONTENT (show/read file) → read_file\n"
+                    "- SHELL/TERMINAL → execute_shell_command\n"
+                    "- NEWS/WEB → web_search\n"
+                    "⚠️ CRITICAL: Use load_dataset (NOT list_directory) for ANY .csv/.xlsx file or statistics request!"
                 )
             })
 
@@ -286,8 +308,8 @@ class FunctionCallingAgent:
                 model=self.model,
                 messages=messages,
                 tools=TOOLS,
-                tool_choice="auto",  # Let LLM decide
-                temperature=0.2,  # Low temperature for more consistent tool selection
+                tool_choice=force_tool if force_tool else "auto",  # Force specific tool if detected, else let LLM decide
+                temperature=0.05,  # Ultra-low temperature for maximum determinism in tool selection
                 timeout=timeout
             )
 
