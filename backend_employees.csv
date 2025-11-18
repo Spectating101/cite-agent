@@ -1,0 +1,6 @@
+cat > /tmp/backend_employees.csv << 'EOF'
+Name,Department,Salary,Performance
+Alice Chen,Engineering,95000,Excellent
+Bob Smith,Marketing,72000,Good
+Charlie Wang,Engineering,88000,Excellent
+EOF

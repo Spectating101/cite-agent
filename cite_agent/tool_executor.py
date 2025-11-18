@@ -231,6 +231,28 @@ class ToolExecutor:
                 if self.debug_mode:
                     print(f"📁 [List Directory] Got {len(output)} chars of output")
 
+                # INTELLIGENT TRUNCATION: Prevent overwhelming output
+                # If output has more than 50 lines, truncate and show summary
+                lines = output.strip().split('\n')
+                MAX_LINES = 50
+                
+                if len(lines) > MAX_LINES:
+                    truncated_output = '\n'.join(lines[:MAX_LINES])
+                    truncated_output += f"\n\n... ({len(lines) - MAX_LINES} more items not shown)\n"
+                    truncated_output += f"Total: {len(lines)} items in {path}\n"
+                    truncated_output += f"💡 Tip: Use `grep` or `find` to filter specific files"
+                    
+                    if self.debug_mode:
+                        print(f"📁 [List Directory] Truncated from {len(lines)} to {MAX_LINES} lines")
+                    
+                    return {
+                        "path": path,
+                        "listing": truncated_output,
+                        "command": command,
+                        "truncated": True,
+                        "total_items": len(lines)
+                    }
+
                 return {
                     "path": path,
                     "listing": output,
@@ -255,15 +277,27 @@ class ToolExecutor:
                         "is_file": entry.is_file()
                     })
 
+                # INTELLIGENT TRUNCATION: Prevent overwhelming output
+                MAX_ENTRIES = 50
+                truncated = len(entries) > MAX_ENTRIES
+                displayed_entries = entries[:MAX_ENTRIES] if truncated else entries
+
                 listing = "\n".join([
                     f"{'[DIR]' if e['is_dir'] else '[FILE]'} {e['name']}"
-                    for e in entries
+                    for e in displayed_entries
                 ])
+
+                if truncated:
+                    listing += f"\n\n... ({len(entries) - MAX_ENTRIES} more items not shown)\n"
+                    listing += f"Total: {len(entries)} items in {path}\n"
+                    listing += f"💡 Tip: Use filters or patterns to narrow down results"
 
                 return {
                     "path": str(path_obj),
                     "listing": listing,
-                    "entries": entries
+                    "entries": displayed_entries,
+                    "truncated": truncated,
+                    "total_items": len(entries)
                 }
 
         except Exception as e:

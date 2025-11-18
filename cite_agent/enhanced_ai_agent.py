@@ -1623,17 +1623,52 @@ class EnhancedNocturnalAgent:
 
         # CRITICAL FIX: Remove multi-line JSON blocks (tool call leakage)
         # The LLM outputs things like {"type": "search", "query": "..."}
+        # Also outputs {"command": "..."} and internal reasoning
         # We need to strip these aggressively
 
         # Match any JSON object - use [\s\S] to match any character including newlines
         # This is more reliable than . with DOTALL
-        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results']
+        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results', 'command', 'action']
 
         for keyword in tool_keywords:
             # Match: { anything "keyword" anything }
             # Using [\s\S]*? for non-greedy match that includes newlines
             pattern = r'\{[\s\S]*?"' + keyword + r'"[\s\S]*?\}'
             cleaned = re.sub(pattern, '', cleaned)
+
+        # ENHANCED FIX: Remove internal reasoning chains that leak from LLM
+        # Examples: "We need to...", "Probably need to...", "Let's try:", "Will run:"
+        # IMPORTANT: Only remove at START of response (first 300 chars) to avoid removing legitimate content
+        
+        # Check if response starts with reasoning/planning text (first 300 chars)
+        prefix = cleaned[:300]
+        
+        # Patterns that indicate internal planning (only remove from START)
+        start_reasoning_patterns = [
+            r'^[\s]*We need to [^.]*?\.[\s]*',  # Start: "We need to run a command."
+            r'^[\s]*I need to [^.]*?\.[\s]*',   # Start: "I need to check..."
+            r'^[\s]*Probably [^.]*?\.[\s]*',     # Start: "Probably need to use the tool."
+            r"^[\s]*Let's try:[\s\S]*?(?=\n\n|\Z)",  # Start: "Let's try: ..."
+            r"^[\s]*Let me try[\s\S]*?(?=\n\n|\Z)",  # Start: "Let me try..."
+            r'^[\s]*Will run:[\s\S]*?(?=\n\n|\Z)',   # Start: "Will run: `command`"
+            r'^[\s]*According to system[^.]*?\.[\s]*',     # Start: "According to system..."
+            r'^[\s]*The system expects[^.]*?\.[\s]*',
+            r'^[\s]*The platform expects[^.]*?\.[\s]*',
+        ]
+        
+        # Only clean these patterns from the beginning
+        for pattern in start_reasoning_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+        
+        # Patterns that can appear anywhere (more specific, less likely to be legitimate)
+        anywhere_patterns = [
+            r'We need to actually execute[^.]*?\.[\s]*',    # Very specific
+            r'But the format is not specified[^.]*?\.[\s]*',  # Meta-reasoning
+            r'According to the system instructions[^.]*?\.[\s]*',  # Meta
+        ]
+        
+        for pattern in anywhere_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
 
         # Also remove common tool planning text that precedes JSON
         planning_phrases = [
@@ -1676,7 +1711,17 @@ class EnhancedNocturnalAgent:
                 print(f"❌ [CLEANING] JSON STILL PRESENT after cleaning!")
                 print(f"   First 200 chars: {cleaned[:200]}")
 
-        return cleaned.strip()
+        cleaned_final = cleaned.strip()
+        
+        # CRITICAL FIX: Prevent blank responses from over-aggressive cleaning
+        # If cleaning removed everything, return a fallback message
+        if not cleaned_final or len(cleaned_final) < 3:
+            if debug_mode:
+                print(f"⚠️ [CLEANING] Over-cleaned! Returning fallback message")
+                print(f"   Original: {response_text[:200]}")
+            return "I encountered an issue processing your request. Please try rephrasing or simplifying your question."
+        
+        return cleaned_final
 
     def _select_model(
         self,
@@ -2434,7 +2479,7 @@ class EnhancedNocturnalAgent:
                     # Backend AI service temporarily unavailable (Cerebras/Groq rate limited)
                     # Auto-retry silently with exponential backoff
 
-                    print("\n💭 Thinking... (backend is busy, retrying automatically)")
+                    print("\n💭 Thinking... (backend experiencing high traffic, retrying automatically)")
 
                     retry_delays = [5, 15, 30]  # Exponential backoff
                     
@@ -2472,14 +2517,21 @@ class EnhancedNocturnalAgent:
                                     timestamp=data.get('timestamp', datetime.now(timezone.utc).isoformat()),
                                     api_results=api_results
                                 )
+                            elif retry_response.status == 429:
+                                # Rate limit hit
+                                print("\n⚠️ Rate limit exceeded, waiting longer...")
+                            elif retry_response.status >= 500:
+                                # Server error
+                                print(f"\n❌ Backend server error (HTTP {retry_response.status})")
+                                break
                             elif retry_response.status != 503:
                                 # Different error, stop retrying
                                 break
                     
-                    # All retries exhausted
+                    # All retries exhausted - provide specific error message
                     return ChatResponse(
-                        response="❌ Service unavailable. Please try again in a few minutes.",
-                        error_message="Service unavailable after retries"
+                        response="🔴 LLM model is down at the moment. The backend service is experiencing issues. Sorry for the inconvenience. Try again later.",
+                        error_message="Backend service unavailable after retries (503)"
                     )
                 
                 elif response.status == 200:
@@ -2514,19 +2566,38 @@ class EnhancedNocturnalAgent:
                 
                 else:
                     error_text = await response.text()
+                    # Provide specific error messages based on HTTP status
+                    if response.status == 400:
+                        error_msg = "⚠️ Invalid request. Your query couldn't be processed. Please try rephrasing."
+                    elif response.status == 429:
+                        error_msg = "⚠️ Rate limit exceeded. Too many requests. Please wait a moment and try again."
+                    elif response.status >= 500:
+                        error_msg = f"🔴 Backend server error (HTTP {response.status}). The service is experiencing technical difficulties. Sorry for the inconvenience."
+                    else:
+                        error_msg = f"❌ Backend error (HTTP {response.status}): {error_text[:200]}"
+                    
                     return ChatResponse(
-                        response=f"❌ Backend error (HTTP {response.status}): {error_text}",
+                        response=error_msg,
                         error_message=f"HTTP {response.status}"
                     )
         
         except asyncio.TimeoutError:
             return ChatResponse(
-                response="❌ Request timeout. Please try again.",
+                response="⏱️ Request timeout. The backend did not respond in time. Please try again.",
                 error_message="Timeout"
             )
         except Exception as e:
+            error_str = str(e).lower()
+            # Provide specific error message based on exception type
+            if "connection" in error_str or "network" in error_str:
+                error_msg = "🔴 Connection error. Unable to reach the backend service. Please check your internet connection."
+            elif "ssl" in error_str or "certificate" in error_str:
+                error_msg = "🔒 SSL/Certificate error. There's a security issue connecting to the backend."
+            else:
+                error_msg = f"❌ Error calling backend: {type(e).__name__} - {str(e)[:200]}"
+            
             return ChatResponse(
-                response=f"❌ Error calling backend: {str(e)}",
+                response=error_msg,
                 error_message=str(e)
             )
     
@@ -4594,10 +4665,11 @@ Concise query (max {max_length} chars):"""
                 f"- Multi-step tasks: Execute one tool, see result, then decide next action\n"
                 f"- Use relative paths from current directory (no absolute paths needed)\n\n"
                 f"RESPONSE STYLE:\n"
-                f"- Be direct and natural - no 'Let me...', 'I will...' preambles\n"
+                f"- Be direct and natural - no 'Let me...', 'I will...', 'We need to...' preambles\n"
                 f"- After executing commands, report results concisely\n"
                 f"- For file system operations, show actual outputs\n"
-                f"- No JSON in responses - only natural language\n"
+                f"- Write in natural language - no JSON markup or tool syntax in your responses\n"
+                f"- Exception: If user explicitly asks for JSON data, provide it cleanly formatted\n"
             )
 
             # Build conversation context
