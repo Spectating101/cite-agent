@@ -42,9 +42,12 @@ from .request_queue import IntelligentRequestQueue, RequestPriority
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Removed: No direct Groq import in production
-# All LLM calls go through backend API for monetization
-# Backend has the API keys, not the client
+# Groq import with graceful fallback (API keys unavailable/banned)
+# Used only in local mode fallback scenarios
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None  # Graceful fallback - will log error if needed
 
 @dataclass
 class ChatRequest:
@@ -85,6 +88,9 @@ class EnhancedNocturnalAgent:
         self.daily_limit = 100000
         self.daily_query_limit = self._resolve_daily_query_limit()
         self.per_user_query_limit = self.daily_query_limit
+        
+        # Cache debug mode at initialization (performance optimization)
+        self.debug_mode = self.debug_mode
         
         # Initialize web search for fallback
         self.web_search = None
@@ -205,7 +211,7 @@ class EnhancedNocturnalAgent:
             max_concurrent_per_user=5
         )
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             logger.info("Infrastructure initialized: Observability, Circuit Breakers, Request Queue")
 
@@ -231,7 +237,7 @@ class EnhancedNocturnalAgent:
         """Load authentication from session file"""
         use_local_keys = os.getenv("USE_LOCAL_KEYS", "false").lower() == "true"
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 _load_authentication: USE_LOCAL_KEYS={os.getenv('USE_LOCAL_KEYS')}, use_local_keys={use_local_keys}")
 
@@ -429,7 +435,7 @@ class EnhancedNocturnalAgent:
             self._update_service_roots()
             
             # Only show init messages in debug mode
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 if self.api_key == "demo-key-123":
                     print("⚠️ Using demo API key")
@@ -1611,7 +1617,7 @@ class EnhancedNocturnalAgent:
         FIXED: Preserve LaTeX for math formulas - do NOT strip LaTeX!
         FIXED: Remove multi-line JSON blocks that leak from LLM
         """
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         has_json_before = '{' in response_text and '"type"' in response_text
         if debug_mode and has_json_before:
             print(f"🧹 [CLEANING] Input has JSON, cleaning...")
@@ -1812,8 +1818,14 @@ class EnhancedNocturnalAgent:
                         base_url="https://api.cerebras.ai/v1",
                         http_client=http_client
                     )
-                else:
+                elif self.llm_provider == "groq":
+                    if Groq is None:
+                        logger.error("Groq provider requested but groq library not available (API keys unavailable/banned)")
+                        return False
                     self.client = Groq(api_key=key)
+                else:
+                    logger.error(f"Unknown LLM provider: {self.llm_provider}")
+                    return False
                 self.current_api_key = key
                 return True
             except Exception as e:
@@ -1854,8 +1866,14 @@ class EnhancedNocturnalAgent:
                         base_url="https://api.cerebras.ai/v1",
                         http_client=http_client
                     )
-                else:
+                elif self.llm_provider == "groq":
+                    if Groq is None:
+                        logger.error("Groq provider requested but groq library not available (API keys unavailable/banned)")
+                        return False
                     self.client = Groq(api_key=key)
+                else:
+                    logger.error(f"Unknown LLM provider: {self.llm_provider}")
+                    return False
                 self.current_api_key = key
                 return True
             except Exception as e:
@@ -2163,7 +2181,7 @@ class EnhancedNocturnalAgent:
                 self.temp_api_key = temp_api_key_from_session
                 self.temp_key_provider = temp_key_provider_from_session
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"✅ Using temporary local key for fast mode!")
             elif use_local_keys_env == "false":
@@ -2177,7 +2195,7 @@ class EnhancedNocturnalAgent:
                 use_local_keys = False
 
             if not use_local_keys:
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 DEBUG: Taking BACKEND MODE path (use_local_keys=False)")
                 self.api_keys = []  # Empty - keys stay on server
@@ -2209,7 +2227,7 @@ class EnhancedNocturnalAgent:
                     self.user_id = None
 
                 # Suppress messages in production (only show in debug mode)
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     if self.auth_token:
                         print(f"✅ Enhanced Nocturnal Agent Ready! (Authenticated)")
@@ -2217,7 +2235,7 @@ class EnhancedNocturnalAgent:
                         print("⚠️ Not authenticated. Please log in to use the agent.")
             else:
                 # Local keys mode - use temporary key if available, otherwise load from env
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 DEBUG: Taking LOCAL MODE path (use_local_keys=True)")
 
@@ -2226,7 +2244,7 @@ class EnhancedNocturnalAgent:
                     # Use temporary key provided by backend
                     self.api_keys = [self.temp_api_key]
                     self.llm_provider = getattr(self, 'temp_key_provider', 'cerebras')
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    debug_mode = self.debug_mode
                     if debug_mode:
                         print(f"🔍 Using temp API key: {self.temp_api_key[:10]}... (provider: {self.llm_provider})")
                 else:
@@ -2251,7 +2269,7 @@ class EnhancedNocturnalAgent:
                 else:
                     self.llm_provider = "cerebras"
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if not self.api_keys:
                     if debug_mode:
                         print("⚠️ No LLM API keys found. Set CEREBRAS_API_KEY or GROQ_API_KEY")
@@ -2412,7 +2430,7 @@ class EnhancedNocturnalAgent:
         Includes API results (Archive, FinSight) in context for better responses
         """
         # DEBUG: Print auth status
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
         
@@ -2677,7 +2695,7 @@ class EnhancedNocturnalAgent:
                 if self.auth_token:
                     headers["Authorization"] = f"Bearer {self.auth_token}"
                 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 Archive headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
                     print(f"🔍 Archive URL: {url}")
@@ -2768,7 +2786,7 @@ class EnhancedNocturnalAgent:
                 if self.auth_token:
                     headers["Authorization"] = f"Bearer {self.auth_token}"
 
-                debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                debug_mode = self.debug_mode
                 if debug_mode:
                     print(f"🔍 FinSight headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
                     print(f"🔍 FinSight URL: {url}")
@@ -2871,7 +2889,7 @@ Concise query (max {max_length} chars):"""
 
                 # Validate
                 if len(extracted) <= max_length and len(extracted) > 5:
-                    debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+                    debug_mode = self.debug_mode
                     if debug_mode:
                         print(f"🔍 Extracted query: '{user_question[:80]}...' → '{extracted}'")
                     return extracted
@@ -2897,7 +2915,7 @@ Concise query (max {max_length} chars):"""
         result = ' '.join(keywords[:15])  # Max 15 words
         result = result[:max_length]  # Hard limit
 
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
         if debug_mode:
             print(f"🔍 Heuristic extracted: '{user_question[:80]}...' → '{result}'")
 
@@ -2925,7 +2943,7 @@ Concise query (max {max_length} chars):"""
             result = await self._call_archive_api("search", data)
 
             # DEBUG: Log actual API response
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
                 if "error" in result:
@@ -3097,7 +3115,7 @@ Concise query (max {max_length} chars):"""
                     break
             
             output = '\n'.join(output_lines).strip()
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             
             # Log execution details in debug mode
             if debug_mode:
@@ -3108,7 +3126,7 @@ Concise query (max {max_length} chars):"""
             return output if output else "Command executed (no output)"
 
         except Exception as e:
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"❌ Command failed: {command}")
                 print(f"❌ Error: {e}")
@@ -3652,6 +3670,17 @@ Concise query (max {max_length} chars):"""
         for pattern in nuclear_patterns:
             if pattern in cmd_lower:
                 return 'BLOCKED'
+        
+        # DANGEROUS: SQL destructive operations
+        sql_destructive_patterns = [
+            'drop table',
+            'drop database',
+            'truncate table',
+            'delete from',
+        ]
+        for pattern in sql_destructive_patterns:
+            if pattern in cmd_lower:
+                return 'DANGEROUS'
         
         # SAFE: Read-only commands
         safe_commands = {
@@ -4613,7 +4642,7 @@ Concise query (max {max_length} chars):"""
         3. Execute requested tools
         4. Get final response from LLM with tool results
         """
-        debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+        debug_mode = self.debug_mode
 
         try:
             # Check workflow commands first
@@ -4681,6 +4710,10 @@ Concise query (max {max_length} chars):"""
             last_assistant_message = None
 
             for iteration in range(MAX_ITERATIONS):
+                # Progress indicator for multi-step queries (user-facing)
+                if iteration > 0:
+                    print(f"💭 Processing step {iteration + 1}/{MAX_ITERATIONS}...")
+                
                 if debug_mode:
                     print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
 
@@ -4734,6 +4767,20 @@ Concise query (max {max_length} chars):"""
 
                 iteration_results = {}
                 for tool_call in fc_response.tool_calls:
+                    # Progress indicator: Show which tool is being executed (user-facing)
+                    tool_display_names = {
+                        "search_papers": "searching papers",
+                        "get_financial_data": "fetching financial data",
+                        "list_directory": "listing directory",
+                        "read_file": "reading file",
+                        "execute_shell_command": "executing command",
+                        "web_search": "searching web",
+                        "load_dataset": "loading dataset",
+                        "analyze_data": "analyzing data"
+                    }
+                    display_name = tool_display_names.get(tool_call.name, tool_call.name)
+                    print(f"🔧 {display_name}...")
+                    
                     result = await self._tool_executor.execute_tool(
                         tool_name=tool_call.name,
                         arguments=tool_call.arguments
@@ -5045,7 +5092,7 @@ Concise query (max {max_length} chars):"""
             # - Stable financial calculations
             # - No TLS/proxy issues in container environments
 
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             use_function_calling = os.getenv("NOCTURNAL_FUNCTION_CALLING", "").lower() in ("1", "true", "yes")
 
             if debug_mode and self.client is not None:
@@ -5069,7 +5116,7 @@ Concise query (max {max_length} chars):"""
             # Initialize
             api_results = {}
             tools_used = []
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
 
             if self._is_generic_test_prompt(request.question):
                 return self._quick_reply(
@@ -5342,17 +5389,43 @@ JSON:"""
                                 print(f"🔍 Command: {command}")
                                 print(f"🔍 Safety: {safety_level}")
                             
-                            if safety_level in ('BLOCKED', 'DANGEROUS'):
-                                reason = (
-                                    "Command classified as destructive; requires manual confirmation"
-                                    if safety_level == 'DANGEROUS'
-                                    else "This command could cause system damage"
-                                )
+                            # Determine if command should be executed
+                            should_execute = False
+                            
+                            if safety_level == 'BLOCKED':
+                                # BLOCKED commands (catastrophic) - never allow
                                 api_results["shell_info"] = {
                                     "error": f"Command blocked for safety: {command}",
-                                    "reason": reason
+                                    "reason": "This command could cause irreversible system damage"
                                 }
+                            elif safety_level == 'DANGEROUS':
+                                # DANGEROUS commands - require interactive confirmation
+                                print(f"\n⚠️  DESTRUCTIVE COMMAND DETECTED:")
+                                print(f"   Command: {command}")
+                                print(f"   This command will modify or delete files/directories.")
+                                
+                                try:
+                                    confirmation = input("\n   Type 'yes' to proceed, or anything else to cancel: ").strip().lower()
+                                    if confirmation == 'yes':
+                                        should_execute = True
+                                        if debug_mode:
+                                            print("✅ User confirmed destructive command")
+                                    else:
+                                        api_results["shell_info"] = {
+                                            "error": f"Command cancelled by user: {command}",
+                                            "reason": "User declined to confirm destructive command"
+                                        }
+                                except (EOFError, KeyboardInterrupt):
+                                    # Non-interactive mode or interrupted
+                                    api_results["shell_info"] = {
+                                        "error": f"Command blocked for safety: {command}",
+                                        "reason": "Destructive command requires interactive confirmation (non-interactive mode detected)"
+                                    }
                             else:
+                                # SAFE or WRITE commands - proceed
+                                should_execute = True
+                            
+                            if should_execute:
                                 # ========================================
                                 # COMMAND INTERCEPTOR: Translate shell commands to file operations
                                 # (Claude Code / Cursor parity)
@@ -6104,7 +6177,7 @@ JSON:"""
 
             # LOCAL MODE: Direct LLM calls using temp key or dev keys
             # Executes when self.client is NOT None (temp key loaded or USE_LOCAL_KEYS=true)
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
 
@@ -6601,7 +6674,7 @@ JSON:"""
         except Exception as e:
             import traceback
             details = str(e)
-            debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+            debug_mode = self.debug_mode
             if debug_mode:
                 print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()

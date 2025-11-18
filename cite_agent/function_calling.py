@@ -18,7 +18,16 @@ from .function_tools import TOOLS, validate_tool_call
 
 @dataclass
 class ToolCall:
-    """Represents a tool call from the LLM"""
+    """Represents a too                if tool_name == "chat":
+                    if self.debug_mode:
+                        print(f"🔍 [Function Calling] Skipping synthesis for simple chat (token optimization)")
+                    return FunctionCallingResponse(
+                        response=result["message"],
+                        tool_calls=tool_calls,
+                        tool_results=tool_execution_results,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
+                        model=self.model
+                    )m the LLM"""
     id: str
     name: str
     arguments: Dict[str, Any]
@@ -486,7 +495,7 @@ class FunctionCallingAgent:
                     response=f"Contents of {path}:\n\n{listing}",
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
-                    tokens_used=0,
+                    tokens_used=tokens_used,  # Include initial LLM call tokens
                     model=self.model
                 )
 
@@ -500,7 +509,7 @@ class FunctionCallingAgent:
                     response=f"Contents of {file_path}:\n\n{content}",
                     tool_calls=tool_calls,
                     tool_results=tool_execution_results,
-                    tokens_used=0,
+                    tokens_used=tokens_used,  # Include initial LLM call tokens
                     model=self.model
                 )
 
@@ -521,7 +530,7 @@ class FunctionCallingAgent:
                         response=f"Changed to {new_dir}",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
                 elif any(command.strip().startswith(cmd) for cmd in ["ls", "find", "grep", "cat", "head", "tail", "pwd"]):
@@ -530,7 +539,7 @@ class FunctionCallingAgent:
                         response=output if output else "(no output)",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
                 else:
@@ -539,7 +548,7 @@ class FunctionCallingAgent:
                         response=f"$ {command}\n{output}" if output else f"$ {command}\n(completed)",
                         tool_calls=tool_calls,
                         tool_results=tool_execution_results,
-                        tokens_used=0,
+                        tokens_used=tokens_used,  # Include initial LLM call tokens
                         model=self.model
                     )
 
