@@ -1138,6 +1138,20 @@ class EnhancedNocturnalAgent:
         analysis_mode = request_analysis.get("analysis_mode", "quantitative")
         dev_mode = self.client is not None
 
+        # Check language preference
+        language = getattr(self, 'language_preference', 'en')
+
+        # CRITICAL: Add language enforcement at the very top if Chinese detected
+        if language == 'zh-TW':
+            language_enforcement = (
+                "🚨 CRITICAL LANGUAGE REQUIREMENT 🚨\n"
+                "You MUST respond ENTIRELY in Traditional Chinese (繁體中文).\n"
+                "Use Chinese characters (漢字) ONLY - NO English, NO pinyin romanization.\n"
+                "ALL explanations, descriptions, and responses must be in Chinese characters.\n"
+                "This is MANDATORY and NON-NEGOTIABLE.\n\n"
+            )
+            sections.append(language_enforcement)
+
         # Identity and capabilities
         intro = (
             "You are Cite Agent, a research and analysis assistant with access to:\n"
@@ -1623,8 +1637,11 @@ class EnhancedNocturnalAgent:
                 # Session exists but no temp key → use backend mode
                 use_local_keys = False
             else:
-                # No session, no explicit setting → default to backend
-                use_local_keys = False
+                # No session, no explicit setting → check if local API keys are available
+                # If GROQ_API_KEY or CEREBRAS_API_KEY is set, use local mode for testing
+                has_groq_key = bool(os.getenv("GROQ_API_KEY"))
+                has_cerebras_key = bool(os.getenv("CEREBRAS_API_KEY"))
+                use_local_keys = has_groq_key or has_cerebras_key
 
             if not use_local_keys:
                 self.api_keys = []  # Empty - keys stay on server
@@ -4198,18 +4215,24 @@ JSON:"""
                                 print(f"🔍 READING FILE: {file_path}")
                             
                             # Read file content (first 100 lines to detect structure)
-                            cat_output = self.execute_command(f"head -100 {file_path}")
-                            
+                            # Quote the file path to handle spaces and special characters
+                            quoted_path = file_path if ' ' not in file_path else f'"{file_path}"'
+                            cat_output = self.execute_command(f"head -100 {quoted_path}")
+
                             if not cat_output.startswith("ERROR"):
                                 # Detect file type and extract structure
-                                file_ext = file_path.split('.')[-1].lower()
-                                
+                                file_ext = file_path.split('.')[-1].lower() if '.' in file_path else ""
+
                                 # Extract column/variable info based on file type
                                 columns_info = ""
                                 if file_ext in ['csv', 'tsv']:
                                     # CSV: first line is usually headers
-                                    first_line = cat_output.split('\n')[0] if cat_output else ""
-                                    columns_info = f"CSV columns: {first_line}"
+                                    lines = cat_output.split('\n')
+                                    first_line = lines[0] if lines and len(lines[0].strip()) > 0 else ""
+                                    if first_line:
+                                        columns_info = f"CSV columns: {first_line}"
+                                    else:
+                                        columns_info = "CSV file (empty or no headers detected)"
                                 elif file_ext in ['r', 'rmd']:
                                     # R script: look for dataframe column references (df$columnname)
                                     column_refs = re.findall(r'\$(\w+)', cat_output)
