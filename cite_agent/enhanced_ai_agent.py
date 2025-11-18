@@ -260,7 +260,7 @@ class EnhancedNocturnalAgent:
                     temp_key_expires = session_data.get('temp_key_expires')
 
                     if temp_key and temp_key_expires:
-                        from datetime import datetime, timezone
+                        # datetime and timezone already imported at module level
                         try:
                             expires_at = datetime.fromisoformat(temp_key_expires.replace('Z', '+00:00'))
                             now = datetime.now(timezone.utc)
