@@ -168,7 +168,7 @@ class PrometheusMetrics:
             registry=self.registry
         )
         self.info.info({
-            'version': '1.4.9',
+            'version': '1.4.10',
             'name': 'cite-agent'
         })
 

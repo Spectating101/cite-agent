@@ -5,6 +5,29 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.10] - 2025-11-18
+
+### 🔧 Critical Fix
+
+**Fixed broken PyPI v1.4.9 release** - The v1.4.9 package was missing critical CLI files, making the `cite-agent` command non-functional.
+
+### 🐛 Fixed
+
+- **Recovered missing CLI module** (`cite_agent/cli.py`) - 1,343 lines of CLI interface code
+- **Recovered session manager** (`cite_agent/session_manager.py`) - 243 lines of session management
+- **CLI now fully functional** - `cite-agent --help`, `cite-agent --version`, and all commands work
+- **Entry points working** - Both `cite-agent` and `nocturnal` commands functional
+
+### 📝 Notes
+
+This is a critical bugfix release. v1.4.9 on PyPI was broken due to missing files during the merge process. All users should upgrade immediately:
+
+```bash
+pip install --upgrade cite-agent
+```
+
+---
+
 ## [1.4.9] - 2025-11-18
 
 ### 🎉 Major Release: Production Ready
