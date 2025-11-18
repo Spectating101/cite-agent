@@ -1,6 +1,6 @@
 # Cite-Agent: AI Research Assistant
 
-[![Version](https://img.shields.io/badge/version-1.2.6-blue.svg)](https://pypi.org/project/cite-agent/)
+[![Version](https://img.shields.io/badge/version-1.4.9-blue.svg)](https://pypi.org/project/cite-agent/)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 

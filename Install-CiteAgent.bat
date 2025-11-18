@@ -9,7 +9,7 @@ color 0B
 
 echo.
 echo ========================================================================
-echo    CITE-AGENT INSTALLER v1.4.8
+echo    CITE-AGENT INSTALLER v1.4.9
 echo    AI Research Assistant for Windows
 echo ========================================================================
 echo.
@@ -17,7 +17,7 @@ echo This will install Cite-Agent on your computer.
 echo.
 echo What will be installed:
 echo   - Python 3.11.9 (if you don't have it)
-echo   - Cite-Agent v1.4.8
+echo   - Cite-Agent v1.4.9
 echo   - Desktop shortcut
 echo   - Start Menu entry
 echo.
