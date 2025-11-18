@@ -137,7 +137,7 @@ class EnhancedNocturnalAgent:
             'last_directory': None,      # Last directory mentioned/navigated
             'recent_files': [],          # Last 5 files (for "those files")
             'recent_dirs': [],           # Last 5 directories
-            'current_cwd': None,         # Track shell's current directory
+            'current_cwd': os.getcwd(),  # Track shell's current directory (start with actual cwd)
         }
         self._is_windows = os.name == "nt"
         try:
