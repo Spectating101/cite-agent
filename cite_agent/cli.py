@@ -50,6 +50,15 @@ PRESET_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
 }
 
+# Check if terminal supports unicode/emojis (handles cp950 and other limited encodings)
+# Define at module level for use in error handlers
+try:
+    import sys
+    encoding = sys.stdout.encoding or 'utf-8'
+    SUPPORTS_EMOJI = encoding.lower() not in ['cp950', 'cp936', 'gbk', 'gb2312', 'ascii']
+except:
+    SUPPORTS_EMOJI = True
+
 
 class NocturnalCLI:
     """Command Line Interface for Cite Agent"""
@@ -61,13 +70,8 @@ class NocturnalCLI:
         self.workflow = WorkflowManager()
         self.workflow_cli = WorkflowCLI()
         
-        # Check if terminal supports unicode/emojis (handles cp950 and other limited encodings)
-        try:
-            import sys
-            encoding = sys.stdout.encoding or 'utf-8'
-            self.supports_emoji = encoding.lower() not in ['cp950', 'cp936', 'gbk', 'gb2312', 'ascii']
-        except:
-            self.supports_emoji = True
+        # Use module-level emoji support detection
+        self.supports_emoji = SUPPORTS_EMOJI
         
         self.console = Console(
             theme=Theme({
@@ -1367,9 +1371,13 @@ Examples:
     try:
         asyncio.run(run_cli())
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
+        # Use ASCII for cp950 compatibility
+        goodbye_msg = "Goodbye!" if SUPPORTS_EMOJI else "[Exit] Goodbye!"
+        print(f"\n{goodbye_msg}")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        # Use ASCII for cp950 compatibility
+        error_prefix = "❌" if SUPPORTS_EMOJI else "[ERROR]"
+        print(f"{error_prefix} Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
