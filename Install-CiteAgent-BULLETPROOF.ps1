@@ -622,55 +622,39 @@ function Install-CiteAgent {
 # ============================================================================
 # PHASE 5: SHORTCUTS AND PATH
 # ============================================================================
-function New-Shortcut {
-    param(
-        [string]$ShortcutPath,
-        [string]$TargetPath,
-        [string]$Arguments = "",
-        [string]$WorkingDirectory = "",
-        [string]$Description = "",
-        [string]$IconLocation = ""
-    )
-
+function Install-DesktopShortcutBAT {
+    # Create a simple BAT file on desktop that launches cite-agent
+    # This avoids COM object issues entirely
+    
     try {
-        Write-Host "  [→] Creating shortcut: $([System.IO.Path]::GetFileName($ShortcutPath))" -ForegroundColor Gray
+        $desktopPath = [Environment]::GetFolderPath("Desktop")
+        $batPath = Join-Path $desktopPath "Cite-Agent.bat"
+        $citeAgentExe = Join-Path $VENV_PATH "Scripts\cite-agent.exe"
         
-        # Use a job with timeout to prevent hanging
-        $job = Start-Job -ScriptBlock {
-            param($path, $target, $args, $wd, $desc, $icon)
-            $shell = New-Object -ComObject WScript.Shell
-            $shortcut = $shell.CreateShortcut($path)
-            $shortcut.TargetPath = $target
-            if ($args) { $shortcut.Arguments = $args }
-            if ($wd) { $shortcut.WorkingDirectory = $wd }
-            if ($desc) { $shortcut.Description = $desc }
-            if ($icon) { $shortcut.IconLocation = $icon }
-            $shortcut.Save()
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shortcut) | Out-Null
-            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
-            return "OK"
-        } -ArgumentList $ShortcutPath, $TargetPath, $Arguments, $WorkingDirectory, $Description, $IconLocation
+        Write-Host "  [→] Creating desktop shortcut..." -ForegroundColor Gray
         
-        # Wait up to 15 seconds for shortcut creation (increased timeout)
-        $completed = Wait-Job $job -Timeout 15
-        if ($completed) {
-            $result = Receive-Job $job
-            Remove-Job $job -Force
-            if ($result -eq "OK") {
-                Write-Host "  [✓] Shortcut created!" -ForegroundColor Green
-                Write-Log "Created shortcut: $ShortcutPath" -Level "SUCCESS"
-                return $true
-            }
-        } else {
-            Write-Host "  [!] Shortcut creation timed out (15s), skipping..." -ForegroundColor Yellow
-            Stop-Job $job -ErrorAction SilentlyContinue
-            Remove-Job $job -Force -ErrorAction SilentlyContinue
-            Write-Log "Shortcut creation timed out: $ShortcutPath" -Level "WARNING"
-            return $false
-        }
+        # Create BAT file content
+        $batContent = @"
+@echo off
+title Cite-Agent
+cd /d "%USERPROFILE%"
+chcp 65001 >nul
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+"$citeAgentExe"
+pause
+"@
+        
+        # Write BAT file (simple file write - no COM needed!)
+        $batContent | Out-File -FilePath $batPath -Encoding ASCII -Force
+        
+        Write-Host "  [✓] Desktop shortcut created!" -ForegroundColor Green
+        Write-Log "Created desktop shortcut: $batPath" -Level "SUCCESS"
+        return $true
+        
     } catch {
-        Write-Host "  [✗] Failed: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Log "Failed to create shortcut: $($_.Exception.Message)" -Level "ERROR"
+        Write-Host "  [✗] Failed to create shortcut: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Log "Failed to create desktop shortcut: $($_.Exception.Message)" -Level "ERROR"
         return $false
     }
 }
@@ -701,56 +685,6 @@ function Install-PathOnly {
     } else {
         Write-Host "  [OK] cite-agent already in PATH" -ForegroundColor Cyan
         Write-Log "cite-agent already in PATH" -Level "INFO"
-    }
-}
-
-function Install-DesktopShortcut {
-    # Create shortcuts AFTER everything is installed and verified
-    # This is done at the end so shortcut creation doesn't block installation
-    # Shortcuts are OPTIONAL - if they fail, installation still succeeds
-    Write-Host ""
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
-    Write-Host "  Creating Desktop Shortcut (Optional)" -ForegroundColor Yellow
-    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
-    Write-Host ""
-    
-    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 95 -Status "Creating desktop shortcut..."
-    
-    try {
-        $venvPython = "$VENV_PATH\Scripts\python.exe"
-        $desktopPath = [Environment]::GetFolderPath("Desktop")
-        
-        # Create launcher script (BAT file for reliability)
-        $launcherScript = "$INSTALL_ROOT\launch-cite-agent.bat"
-        @"
-@echo off
-cd /d "%USERPROFILE%"
-"$venvPython" -m cite_agent.cli %*
-"@ | Out-File $launcherScript -Encoding ASCII
-        Write-Log "Created launcher script: $launcherScript" -Level "SUCCESS"
-
-        # Desktop shortcut - with timeout protection
-        $desktopShortcut = "$desktopPath\Cite-Agent.lnk"
-        Write-Host "  [->] Attempting to create desktop shortcut (15s timeout)..." -ForegroundColor Gray
-        Write-Log "Attempting shortcut creation with timeout" -Level "INFO"
-        
-        $desktopSuccess = New-Shortcut `
-            -ShortcutPath $desktopShortcut `
-            -TargetPath $launcherScript `
-            -WorkingDirectory "$env:USERPROFILE" `
-            -Description "Cite-Agent AI Research Assistant" `
-            -IconLocation "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe,0"
-        
-        if ($desktopSuccess) {
-            Write-Host "  [OK] Desktop shortcut created!" -ForegroundColor Green
-            Write-Log "Desktop shortcut created successfully" -Level "SUCCESS"
-        } else {
-            Write-Host "  [!] Shortcut creation skipped (cite-agent works via PATH)" -ForegroundColor Yellow
-            Write-Log "Shortcut creation skipped (non-critical)" -Level "WARNING"
-        }
-    } catch {
-        Write-Host "  [!] Shortcut creation failed (cite-agent still works via PATH)" -ForegroundColor Yellow
-        Write-Log "Shortcut creation error (non-critical): $($_.Exception.Message)" -Level "WARNING"
     }
 }
 
@@ -801,8 +735,8 @@ function Test-Installation {
         Write-Log "WARNING: CLI executable not found (will use python -m cite_agent.cli)" -Level "WARNING"
     }
 
-    # Test 5: Shortcuts exist
-    $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Cite-Agent.lnk"
+    # Test 5: Desktop shortcut exists (BAT file)
+    $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Cite-Agent.bat"
     if (Test-Path $desktopShortcut) {
         Write-Log "✓ Desktop shortcut created" -Level "SUCCESS"
     } else {
@@ -859,16 +793,21 @@ function Start-Installation {
         # PHASE 5: Add to PATH (critical for command-line access)
         Install-PathOnly
 
-        # PHASE 6: Verify installation
+        # PHASE 6: Create desktop shortcut (BAT file approach - no COM objects!)
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
+        Write-Host "  Creating Desktop Shortcut" -ForegroundColor Yellow
+        Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
+        Write-Host ""
+        Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 85 -Status "Creating desktop shortcut..."
+        Install-DesktopShortcutBAT
+
+        # PHASE 7: Verify installation
         $verified = Test-Installation
 
         if (-not $verified) {
             throw "Installation verification failed - see log for details"
         }
-
-        # PHASE 7: Skip shortcut creation (COM objects unreliable on some Windows builds)
-        # Users can access cite-agent via PATH or create shortcuts manually
-        Write-Log "Skipping desktop shortcut creation (COM unreliable)" -Level "INFO"
 
         # Complete
         Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 100 -Status "Installation complete!"
@@ -883,10 +822,9 @@ function Start-Installation {
         Write-Host ""
         Write-Host "Cite-Agent v$CITE_AGENT_VERSION is now installed!" -ForegroundColor Green
         Write-Host ""
-        Write-Host "To start:" -ForegroundColor Cyan
-        Write-Host "  • Double-click the 'Cite-Agent' icon on your desktop" -ForegroundColor White
-        Write-Host "  • Or search for 'Cite-Agent' in the Start menu" -ForegroundColor White
-        Write-Host "  • Or open PowerShell and run: cite-agent" -ForegroundColor White
+        Write-Host "To start cite-agent:" -ForegroundColor Cyan
+        Write-Host "  • Double-click the 'Cite-Agent' shortcut on your desktop" -ForegroundColor White
+        Write-Host "  • OR type 'cite-agent' in any terminal" -ForegroundColor White
         Write-Host ""
         Write-Host "Installation log: $LOG_FILE" -ForegroundColor Gray
         Write-Host ""
