@@ -248,20 +248,32 @@ class FunctionCallingAgent:
 
         # ENHANCEMENT: Detect data file patterns and force correct tool selection
         # This works around gpt-oss-120b's tendency to choose list_directory over load_dataset
+        # ⚠️ CRITICAL: Only check on first call! Tool forcing blocks multi-step workflows on iterations 2+
         import re
         force_tool = None
-        data_file_pattern = r'\b\w+\.(csv|xlsx|xls|tsv)\b'
-        data_keywords = ['load', 'dataset', 'mean', 'average', 'std', 'statistics', 'analyze data', 'calculate']
         
-        # Check if query mentions a data file OR data analysis keywords
-        has_data_file = re.search(data_file_pattern, query, re.IGNORECASE)
-        has_data_keyword = any(keyword in query.lower() for keyword in data_keywords)
+        # Only force tools if this is NOT a follow-up question about tool results
+        # Follow-up questions contain phrases like "Based on the tool results" or "IMPORTANT: The original query"
+        is_followup = ("tool results" in query.lower() or 
+                      "original query" in query.lower() or
+                      "additional tool" in query.lower())
         
-        if has_data_file or (has_data_keyword and any(ext in query.lower() for ext in ['.csv', '.xlsx', '.xls', '.tsv'])):
-            # Force load_dataset tool for data files
-            force_tool = {"type": "function", "function": {"name": "load_dataset"}}
+        if not is_followup:
+            data_file_pattern = r'\b\w+\.(csv|xlsx|xls|tsv)\b'
+            data_keywords = ['load', 'dataset', 'mean', 'average', 'std', 'statistics', 'analyze data', 'calculate']
+            
+            # Check if query mentions a data file OR data analysis keywords
+            has_data_file = re.search(data_file_pattern, query, re.IGNORECASE)
+            has_data_keyword = any(keyword in query.lower() for keyword in data_keywords)
+            
+            if has_data_file or (has_data_keyword and any(ext in query.lower() for ext in ['.csv', '.xlsx', '.xls', '.tsv'])):
+                # Force load_dataset tool for data files
+                force_tool = {"type": "function", "function": {"name": "load_dataset"}}
+                if self.debug_mode:
+                    print(f"🎯 [Function Calling] Data file/analysis detected, forcing load_dataset tool")
+        else:
             if self.debug_mode:
-                print(f"🎯 [Function Calling] Data file/analysis detected, forcing load_dataset tool")
+                print(f"🎯 [Function Calling] Follow-up query detected, NOT forcing any tool (LLM chooses)")
 
         # Build messages
         messages = []

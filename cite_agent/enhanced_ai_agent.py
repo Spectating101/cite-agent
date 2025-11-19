@@ -4930,13 +4930,35 @@ Concise query (max {max_length} chars):"""
                 needs_analysis = any(keyword in original_query_lower for keyword in analysis_keywords)
                 
                 if dataset_loaded and needs_analysis and iteration == 0:
-                    # Explicitly remind LLM about the second part of the query
-                    current_query = (
-                        f"⚠️ IMPORTANT: The original query was '{request.question}'. "
-                        f"You've loaded the dataset, but haven't completed the analysis/visualization yet. "
-                        f"Based on the original query, what ADDITIONAL tool do you need to call? "
-                        f"(e.g., plot_data, run_pca, scan_data_quality, run_mediation, etc.)"
-                    )
+                    # Explicitly remind LLM about the second part of the query AND suggest the specific tool
+                    # Parse which tool is needed from the original query
+                    suggested_tool = None
+                    if any(kw in original_query_lower for kw in ["plot", "visualize", "chart", "graph", "scatter", "histogram", "bar"]):
+                        suggested_tool = "plot_data"
+                    elif "pca" in original_query_lower:
+                        suggested_tool = "run_pca"
+                    elif "mediation" in original_query_lower or "mediates" in original_query_lower:
+                        suggested_tool = "run_mediation"
+                    elif "moderation" in original_query_lower or "moderates" in original_query_lower:
+                        suggested_tool = "run_moderation"
+                    elif any(kw in original_query_lower for kw in ["scan", "clean", "quality"]):
+                        suggested_tool = "scan_data_quality"
+                    elif "factor analysis" in original_query_lower:
+                        suggested_tool = "run_factor_analysis"
+                    
+                    if suggested_tool:
+                        current_query = (
+                            f"⚠️ CRITICAL INSTRUCTION: The dataset is loaded. The original query '{request.question}' "
+                            f"requires you to NOW call the '{suggested_tool}' tool to complete the task. "
+                            f"Call that tool NOW with appropriate parameters from the loaded dataset."
+                        )
+                    else:
+                        current_query = (
+                            f"⚠️ IMPORTANT: The original query was '{request.question}'. "
+                            f"You've loaded the dataset, but haven't completed the analysis/visualization yet. "
+                            f"Based on the original query, what ADDITIONAL tool do you need to call? "
+                            f"(e.g., plot_data, run_pca, scan_data_quality, run_mediation, etc.)"
+                        )
                 else:
                     current_query = "Based on the tool results, do you need to call more tools, or are you ready to provide the final response?"
 
