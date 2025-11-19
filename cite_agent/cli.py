@@ -109,10 +109,22 @@ class NocturnalCLI:
         self._default_artifacts = Path("artifacts_autonomy.json")
     
     def _safe_text(self, text: str) -> str:
-        """Replace emojis with ASCII alternatives for terminals that don't support them"""
+        """Replace emojis and problematic Unicode with ASCII alternatives for terminals that don't support them"""
         if not self.supports_emoji:
+            # First, replace known emojis
             for emoji, replacement in self.emoji_map.items():
                 text = text.replace(emoji, replacement)
+            
+            # Then, replace any remaining problematic Unicode characters
+            # Use 'replace' error handler to avoid UnicodeEncodeError
+            try:
+                # Get the encoding of stdout
+                encoding = sys.stdout.encoding or 'utf-8'
+                # Try to encode, replacing problematic characters
+                text = text.encode(encoding, errors='replace').decode(encoding)
+            except:
+                # Fallback: remove all non-ASCII characters
+                text = text.encode('ascii', errors='replace').decode('ascii')
         return text
 
     def _record_session_event(self, success: bool) -> None:
