@@ -1,6 +1,6 @@
 # Cite-Agent Installation Guide
 
-**Version:** 1.4.0
+**Version:** 1.5.2
 **Platform:** Windows 10/11 (64-bit)
 **Requirements:** None - installer handles everything automatically
 
@@ -8,17 +8,17 @@
 
 ## 🚀 Quick Install (Recommended)
 
-### Method 1: One-Line Web Installer (Easiest)
+### Method 1: One-Line Web Installer (Easiest) ⭐
 
 Open **PowerShell** and paste this command:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/Spectating101/cite-agent/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/Spectating101/cite-agent/main/Install-CiteAgent-BULLETPROOF.ps1 | iex
 ```
 
 **Alternative syntax:**
 ```powershell
-irm https://raw.githubusercontent.com/Spectating101/cite-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spectating101/cite-agent/main/Install-CiteAgent-BULLETPROOF.ps1 | iex
 ```
 
 **What it does:**
@@ -33,22 +33,30 @@ irm https://raw.githubusercontent.com/Spectating101/cite-agent/main/install.ps1 
 
 ---
 
-### Method 2: GUI Installer (Traditional)
+### Method 2: Download ZIP Installer (Offline-Friendly) 📦
 
-1. **Download installer:**
-   - [Cite-Agent-Installer-v2.1.exe](https://github.com/Spectating101/cite-agent/releases/latest) (Per-User - Recommended)
-   - Or [Cite-Agent-Installer-v2.1-Admin.exe](https://github.com/Spectating101/cite-agent/releases/latest) (Requires admin)
+Perfect if you need to install on multiple machines or prefer offline installation.
 
-2. **Run installer:**
-   - Double-click the `.exe` file
-   - Click "Next → Next → Install"
-   - Wait ~2 minutes
-   - Done!
+1. **Download the ZIP:**
+   - [cite-agent-windows-installer.zip](https://github.com/Spectating101/cite-agent/releases/download/v1.5.2/cite-agent-windows-installer.zip)
 
-3. **Launch Cite-Agent:**
-   - Desktop icon: Double-click "Cite-Agent"
-   - Start Menu: Search "Cite-Agent"
+2. **Extract the ZIP:**
+   - Right-click → "Extract All..."
+   - Choose any location (e.g., Downloads folder)
+
+3. **Run the installer:**
+   - Open the extracted folder
+   - **Right-click** on `Install-CiteAgent-BULLETPROOF.ps1`
+   - Select **"Run with PowerShell"** ✅
+   - Wait ~2 minutes for installation
+
+4. **Launch Cite-Agent:**
+   - Desktop shortcut: `Cite-Agent.bat` (double-click this) ✅
    - Terminal: Type `cite-agent`
+
+**📝 Note:** The ZIP contains:
+- ✅ `Install-CiteAgent-BULLETPROOF.ps1` - **RIGHT-CLICK → Run with PowerShell**
+- 📄 `INSTALL.md` - This installation guide (for reference)
 
 ---
 
