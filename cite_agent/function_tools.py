@@ -463,11 +463,12 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "plot_data",
             "description": (
-                "Create ASCII plots (scatter, bar, histogram) for data visualization in terminal. "
+                "⚠️ REQUIRES LOADED DATASET. Create ASCII plots (scatter, bar, histogram) for data visualization in terminal. "
                 "Use when user wants: plot data, visualize relationship, show distribution, "
                 "create chart, graph variables. "
                 "Examples: 'plot hours vs scores', 'show histogram of ages', "
-                "'create bar chart of categories'"
+                "'create bar chart of categories'. "
+                "IMPORTANT: Must call load_dataset FIRST before using this tool!"
             ),
             "parameters": {
                 "type": "object",
@@ -853,7 +854,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "scan_data_quality",
-            "description": "Automatically scan dataset for quality issues: missing values, outliers, duplicates, type mismatches, distribution problems. Use before data analysis.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Automatically scan dataset for quality issues: missing values, outliers, duplicates, type mismatches, distribution problems. Use before data analysis. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -864,7 +865,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "auto_clean_data",
-            "description": "Automatically fix data quality issues found by scan_data_quality. One-click cleaning for common problems.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Automatically fix data quality issues found by scan_data_quality. One-click cleaning for common problems. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -881,7 +882,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "handle_missing_values",
-            "description": "Handle missing values in specific column with chosen strategy (median, mean, mode, forward_fill, knn).",
+            "description": "⚠️ REQUIRES LOADED DATASET. Handle missing values in specific column with chosen strategy (median, mean, mode, forward_fill, knn). IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -907,7 +908,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_pca",
-            "description": "Run Principal Component Analysis for dimensionality reduction. Use when user has many correlated variables and wants to reduce them.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run Principal Component Analysis for dimensionality reduction. Use when user has many correlated variables and wants to reduce them. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -932,7 +933,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_factor_analysis",
-            "description": "Run Exploratory Factor Analysis to identify latent factors. Use when user wants to find underlying constructs in survey/scale data.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run Exploratory Factor Analysis to identify latent factors. Use when user wants to find underlying constructs in survey/scale data. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -958,7 +959,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_mediation",
-            "description": "Run mediation analysis to test if M mediates X → Y relationship (Baron & Kenny approach with bootstrap CI). Use for testing indirect effects.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run mediation analysis to test if M mediates X → Y relationship (Baron & Kenny approach with bootstrap CI). Use for testing indirect effects. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -987,7 +988,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_moderation",
-            "description": "Run moderation analysis to test if W moderates X → Y relationship (interaction effect). Use to test conditional effects.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run moderation analysis to test if W moderates X → Y relationship (interaction effect). Use to test conditional effects. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {

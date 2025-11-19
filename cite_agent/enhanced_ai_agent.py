@@ -4920,7 +4920,25 @@ Concise query (max {max_length} chars):"""
                     })
 
                 # Update query for next iteration (ask if more tools needed)
-                current_query = "Based on the tool results, do you need to call more tools, or are you ready to provide the final response?"
+                # 🔧 MULTI-STEP WORKFLOW ENHANCEMENT: Detect if dataset was loaded and original query requested analysis
+                dataset_loaded = any(tc.name == "load_dataset" for tc in fc_response.tool_calls)
+                original_query_lower = request.question.lower()
+                
+                # Check for multi-step keywords in original query
+                analysis_keywords = ["plot", "visualize", "chart", "graph", "pca", "mediation", "moderation", 
+                                    "clean", "scan", "quality", "analyze", "histogram", "scatter", "bar chart"]
+                needs_analysis = any(keyword in original_query_lower for keyword in analysis_keywords)
+                
+                if dataset_loaded and needs_analysis and iteration == 0:
+                    # Explicitly remind LLM about the second part of the query
+                    current_query = (
+                        f"⚠️ IMPORTANT: The original query was '{request.question}'. "
+                        f"You've loaded the dataset, but haven't completed the analysis/visualization yet. "
+                        f"Based on the original query, what ADDITIONAL tool do you need to call? "
+                        f"(e.g., plot_data, run_pca, scan_data_quality, run_mediation, etc.)"
+                    )
+                else:
+                    current_query = "Based on the tool results, do you need to call more tools, or are you ready to provide the final response?"
 
             # Step 3: Get final response from LLM with all tool results
             if debug_mode:
