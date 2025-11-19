@@ -1274,6 +1274,10 @@ def validate_tool_call(tool_name: str, arguments: Dict[str, Any]) -> tuple[bool,
         if param not in properties:
             return False, f"Unknown parameter: {param}"
 
+        # Allow None for optional parameters (not in required list)
+        if value is None and param not in required:
+            continue
+
         expected_type = properties[param].get("type")
         if expected_type == "string" and not isinstance(value, str):
             return False, f"Parameter {param} must be a string"

@@ -87,6 +87,53 @@ class ToolExecutor:
                 return self._execute_detect_project(arguments)
             elif tool_name == "check_assumptions":
                 return self._execute_check_assumptions(arguments)
+            # Qualitative Coding Tools
+            elif tool_name == "create_code":
+                return self._execute_create_code(arguments)
+            elif tool_name == "load_transcript":
+                return self._execute_load_transcript(arguments)
+            elif tool_name == "code_segment":
+                return self._execute_code_segment(arguments)
+            elif tool_name == "list_codes":
+                return self._execute_list_codes(arguments)
+            elif tool_name == "extract_themes":
+                return self._execute_extract_themes(arguments)
+            elif tool_name == "generate_codebook":
+                return self._execute_generate_codebook(arguments)
+            # Data Cleaning Tools
+            elif tool_name == "scan_data_quality":
+                return self._execute_scan_data_quality(arguments)
+            elif tool_name == "auto_clean_data":
+                return self._execute_auto_clean_data(arguments)
+            elif tool_name == "handle_missing_values":
+                return self._execute_handle_missing_values(arguments)
+            # Advanced Statistics Tools
+            elif tool_name == "run_pca":
+                return self._execute_run_pca(arguments)
+            elif tool_name == "run_factor_analysis":
+                return self._execute_run_factor_analysis(arguments)
+            elif tool_name == "run_mediation":
+                return self._execute_run_mediation(arguments)
+            elif tool_name == "run_moderation":
+                return self._execute_run_moderation(arguments)
+            # Power Analysis Tools
+            elif tool_name == "calculate_sample_size":
+                return self._execute_calculate_sample_size(arguments)
+            elif tool_name == "calculate_power":
+                return self._execute_calculate_power(arguments)
+            elif tool_name == "calculate_mde":
+                return self._execute_calculate_mde(arguments)
+            # Literature Synthesis Tools
+            elif tool_name == "add_paper":
+                return self._execute_add_paper(arguments)
+            elif tool_name == "extract_lit_themes":
+                return self._execute_extract_lit_themes(arguments)
+            elif tool_name == "find_research_gaps":
+                return self._execute_find_research_gaps(arguments)
+            elif tool_name == "synthesize_literature":
+                return self._execute_synthesize_literature(arguments)
+            elif tool_name == "export_lit_review":
+                return self._execute_export_lit_review(arguments)
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
 

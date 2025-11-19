@@ -4925,8 +4925,9 @@ Concise query (max {max_length} chars):"""
                 original_query_lower = request.question.lower()
                 
                 # Check for multi-step keywords in original query
-                analysis_keywords = ["plot", "visualize", "chart", "graph", "pca", "mediation", "moderation", 
-                                    "clean", "scan", "quality", "analyze", "histogram", "scatter", "bar chart"]
+                analysis_keywords = ["plot", "visualize", "chart", "graph", "pca", "mediation", "mediates", "mediator",
+                                    "moderation", "moderates", "moderator", "clean", "scan", "quality", "analyze", 
+                                    "histogram", "scatter", "bar chart", "factor analysis"]
                 needs_analysis = any(keyword in original_query_lower for keyword in analysis_keywords)
                 
                 if dataset_loaded and needs_analysis and iteration == 0:
