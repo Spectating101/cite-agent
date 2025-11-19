@@ -633,93 +633,124 @@ function New-Shortcut {
     )
 
     try {
-        $WScriptShell = New-Object -ComObject WScript.Shell
-        $Shortcut = $WScriptShell.CreateShortcut($ShortcutPath)
-        $Shortcut.TargetPath = $TargetPath
-        $Shortcut.Arguments = $Arguments
-        if ($WorkingDirectory) { $Shortcut.WorkingDirectory = $WorkingDirectory }
-        if ($Description) { $Shortcut.Description = $Description }
-        if ($IconLocation) { $Shortcut.IconLocation = $IconLocation }
-        $Shortcut.Save()
-        Write-Log "Created shortcut: $ShortcutPath" -Level "SUCCESS"
-        return $true
+        Write-Host "  [→] Creating shortcut: $([System.IO.Path]::GetFileName($ShortcutPath))" -ForegroundColor Gray
+        
+        # Use a job with timeout to prevent hanging
+        $job = Start-Job -ScriptBlock {
+            param($path, $target, $args, $wd, $desc, $icon)
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($path)
+            $shortcut.TargetPath = $target
+            if ($args) { $shortcut.Arguments = $args }
+            if ($wd) { $shortcut.WorkingDirectory = $wd }
+            if ($desc) { $shortcut.Description = $desc }
+            if ($icon) { $shortcut.IconLocation = $icon }
+            $shortcut.Save()
+            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shortcut) | Out-Null
+            [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
+            return "OK"
+        } -ArgumentList $ShortcutPath, $TargetPath, $Arguments, $WorkingDirectory, $Description, $IconLocation
+        
+        # Wait up to 15 seconds for shortcut creation (increased timeout)
+        $completed = Wait-Job $job -Timeout 15
+        if ($completed) {
+            $result = Receive-Job $job
+            Remove-Job $job -Force
+            if ($result -eq "OK") {
+                Write-Host "  [✓] Shortcut created!" -ForegroundColor Green
+                Write-Log "Created shortcut: $ShortcutPath" -Level "SUCCESS"
+                return $true
+            }
+        } else {
+            Write-Host "  [!] Shortcut creation timed out (15s), skipping..." -ForegroundColor Yellow
+            Stop-Job $job -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            Write-Log "Shortcut creation timed out: $ShortcutPath" -Level "WARNING"
+            return $false
+        }
     } catch {
+        Write-Host "  [✗] Failed: $($_.Exception.Message)" -ForegroundColor Red
         Write-Log "Failed to create shortcut: $($_.Exception.Message)" -Level "ERROR"
         return $false
     }
 }
 
-function Install-Shortcuts {
-    if ($NoShortcuts) {
-        Write-Log "Skipping shortcuts (--NoShortcuts flag)" -Level "INFO"
-        return
+function Install-PathOnly {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
+    Write-Host "  Adding cite-agent to PATH" -ForegroundColor Yellow
+    Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
+    Write-Host ""
+
+    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 70 -Status "Adding to PATH..."
+    
+    # Add to PATH first (critical for command-line access)
+    Write-Host "  [->] Adding cite-agent to PATH..." -ForegroundColor Gray
+    Write-Log "Adding cite-agent to PATH..." -Level "INFO"
+    $scriptsPath = "$VENV_PATH\Scripts"
+    Write-Host "  [->] Reading current PATH environment variable..." -ForegroundColor Gray
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+    if ($currentPath -notlike "*$scriptsPath*") {
+        Write-Host "  [->] Updating PATH with: $scriptsPath" -ForegroundColor Gray
+        $newPath = "$currentPath;$scriptsPath"
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+        $env:Path = "$env:Path;$scriptsPath"
+        Write-Host "  [OK] cite-agent added to PATH successfully!" -ForegroundColor Green
+        Write-Log "cite-agent added to PATH: $scriptsPath" -Level "SUCCESS"
+    } else {
+        Write-Host "  [OK] cite-agent already in PATH" -ForegroundColor Cyan
+        Write-Log "cite-agent already in PATH" -Level "INFO"
     }
+}
 
+function Install-DesktopShortcut {
+    # Create shortcuts AFTER everything is installed and verified
+    # This is done at the end so shortcut creation doesn't block installation
+    # Shortcuts are OPTIONAL - if they fail, installation still succeeds
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
-    Write-Host "  Creating Shortcuts" -ForegroundColor Yellow
+    Write-Host "  Creating Desktop Shortcut (Optional)" -ForegroundColor Yellow
     Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Yellow
     Write-Host ""
-
-    Write-Log "Creating shortcuts..." -Level "INFO"
-    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 80 -Status "Creating shortcuts..."
-
-    $venvPython = "$VENV_PATH\Scripts\python.exe"
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    $startMenuPath = [Environment]::GetFolderPath("Programs")
-
-    # Create launcher script (BAT file for reliability)
-    $launcherScript = "$INSTALL_ROOT\launch-cite-agent.bat"
-    @"
+    
+    Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 95 -Status "Creating desktop shortcut..."
+    
+    try {
+        $venvPython = "$VENV_PATH\Scripts\python.exe"
+        $desktopPath = [Environment]::GetFolderPath("Desktop")
+        
+        # Create launcher script (BAT file for reliability)
+        $launcherScript = "$INSTALL_ROOT\launch-cite-agent.bat"
+        @"
 @echo off
 cd /d "%USERPROFILE%"
 "$venvPython" -m cite_agent.cli %*
 "@ | Out-File $launcherScript -Encoding ASCII
-    Write-Log "Created launcher script: $launcherScript" -Level "SUCCESS"
+        Write-Log "Created launcher script: $launcherScript" -Level "SUCCESS"
 
-    # Desktop shortcut
-    $desktopShortcut = "$desktopPath\Cite-Agent.lnk"
-    $desktopSuccess = New-Shortcut `
-        -ShortcutPath $desktopShortcut `
-        -TargetPath $launcherScript `
-        -WorkingDirectory "$env:USERPROFILE" `
-        -Description "Cite-Agent AI Research Assistant" `
-        -IconLocation "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe,0"
-
-    # Start Menu folder
-    $startMenuFolder = "$startMenuPath\Cite-Agent"
-    if (-not (Test-Path $startMenuFolder)) {
-        New-Item -ItemType Directory -Path $startMenuFolder -Force | Out-Null
-        Write-Log "Created Start Menu folder: $startMenuFolder" -Level "SUCCESS"
-    }
-
-    # Start Menu shortcut
-    $startMenuShortcut = "$startMenuFolder\Cite-Agent.lnk"
-    $startSuccess = New-Shortcut `
-        -ShortcutPath $startMenuShortcut `
-        -TargetPath $launcherScript `
-        -WorkingDirectory "$env:USERPROFILE" `
-        -Description "Cite-Agent AI Research Assistant" `
-        -IconLocation "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe,0"
-
-    # Add to PATH
-    Write-Log "Adding cite-agent to PATH..." -Level "INFO"
-    $scriptsPath = "$VENV_PATH\Scripts"
-    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-
-    if ($currentPath -notlike "*$scriptsPath*") {
-        $newPath = "$currentPath;$scriptsPath"
-        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-        $env:Path = "$env:Path;$scriptsPath"
-        Write-Log "cite-agent added to PATH: $scriptsPath" -Level "SUCCESS"
-    } else {
-        Write-Log "cite-agent already in PATH" -Level "INFO"
-    }
-
-    if ($desktopSuccess -and $startSuccess) {
-        Write-Log "All shortcuts created successfully!" -Level "SUCCESS"
-    } else {
-        Write-Log "Some shortcuts failed (non-critical)" -Level "WARNING"
+        # Desktop shortcut - with timeout protection
+        $desktopShortcut = "$desktopPath\Cite-Agent.lnk"
+        Write-Host "  [->] Attempting to create desktop shortcut (15s timeout)..." -ForegroundColor Gray
+        Write-Log "Attempting shortcut creation with timeout" -Level "INFO"
+        
+        $desktopSuccess = New-Shortcut `
+            -ShortcutPath $desktopShortcut `
+            -TargetPath $launcherScript `
+            -WorkingDirectory "$env:USERPROFILE" `
+            -Description "Cite-Agent AI Research Assistant" `
+            -IconLocation "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe,0"
+        
+        if ($desktopSuccess) {
+            Write-Host "  [OK] Desktop shortcut created!" -ForegroundColor Green
+            Write-Log "Desktop shortcut created successfully" -Level "SUCCESS"
+        } else {
+            Write-Host "  [!] Shortcut creation skipped (cite-agent works via PATH)" -ForegroundColor Yellow
+            Write-Log "Shortcut creation skipped (non-critical)" -Level "WARNING"
+        }
+    } catch {
+        Write-Host "  [!] Shortcut creation failed (cite-agent still works via PATH)" -ForegroundColor Yellow
+        Write-Log "Shortcut creation error (non-critical): $($_.Exception.Message)" -Level "WARNING"
     }
 }
 
@@ -825,8 +856,8 @@ function Start-Installation {
         # PHASE 4: Install cite-agent
         Install-CiteAgent -VenvPython $venvPython
 
-        # PHASE 5: Create shortcuts and add to PATH
-        Install-Shortcuts
+        # PHASE 5: Add to PATH (critical for command-line access)
+        Install-PathOnly
 
         # PHASE 6: Verify installation
         $verified = Test-Installation
@@ -834,6 +865,10 @@ function Start-Installation {
         if (-not $verified) {
             throw "Installation verification failed - see log for details"
         }
+
+        # PHASE 7: Skip shortcut creation (COM objects unreliable on some Windows builds)
+        # Users can access cite-agent via PATH or create shortcuts manually
+        Write-Log "Skipping desktop shortcut creation (COM unreliable)" -Level "INFO"
 
         # Complete
         Show-Progress -Activity "Installing Cite-Agent" -PercentComplete 100 -Status "Installation complete!"

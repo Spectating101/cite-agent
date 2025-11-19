@@ -60,12 +60,38 @@ class NocturnalCLI:
         self.telemetry = None
         self.workflow = WorkflowManager()
         self.workflow_cli = WorkflowCLI()
-        self.console = Console(theme=Theme({
-            "banner": "bold magenta",
-            "success": "bold green",
-            "warning": "bold yellow",
-            "error": "bold red",
-        }))
+        
+        # Check if terminal supports unicode/emojis (handles cp950 and other limited encodings)
+        try:
+            import sys
+            encoding = sys.stdout.encoding or 'utf-8'
+            self.supports_emoji = encoding.lower() not in ['cp950', 'cp936', 'gbk', 'gb2312', 'ascii']
+        except:
+            self.supports_emoji = True
+        
+        self.console = Console(
+            theme=Theme({
+                "banner": "bold magenta",
+                "success": "bold green",
+                "warning": "bold yellow",
+                "error": "bold red",
+            }),
+            legacy_windows=(not self.supports_emoji)  # Use legacy mode for problematic encodings
+        )
+        
+        # Emoji replacements for terminals that don't support unicode
+        self.emoji_map = {
+            '📝': '[Note]',
+            '📊': '[Stats]',
+            '⚙️': '[Config]',
+            '❌': '[X]',
+            '✓': '[OK]',
+            '👋': '[Hi]',
+            '💡': '[Tip]',
+            '🔍': '[Search]',
+            '🗃️': '[File]',
+        }
+        
         self._tips = [
             "Use [bold]nocturnal --setup[/] to rerun the onboarding wizard anytime.",
             "Run [bold]nocturnal tips[/] when you need a refresher on power moves.",
@@ -77,6 +103,13 @@ class NocturnalCLI:
             "If you see an auto-update notice, the CLI will restart itself to load the latest build.",
         ]
         self._default_artifacts = Path("artifacts_autonomy.json")
+    
+    def _safe_text(self, text: str) -> str:
+        """Replace emojis with ASCII alternatives for terminals that don't support them"""
+        if not self.supports_emoji:
+            for emoji, replacement in self.emoji_map.items():
+                text = text.replace(emoji, replacement)
+        return text
 
     def _record_session_event(self, success: bool) -> None:
         try:
@@ -619,16 +652,16 @@ class NocturnalCLI:
                 
                 response = await self.agent.process_request(request)
             
-            self.console.print(f"\n📝 [bold]Response[/]:\n{response.response}")
+            self.console.print(self._safe_text(f"\n📝 [bold]Response[/]:\n{response.response}"))
             
             # Tools used removed for cleaner output
             
             if response.tokens_used > 0:
                 stats = self.agent.get_usage_stats()
-                self.console.print(
+                self.console.print(self._safe_text(
                     f"\n📊 Tokens used: {response.tokens_used} "
                     f"(Daily usage: {stats['usage_percentage']:.1f}%)"
-                )
+                ))
         
         finally:
             if self.agent:
