@@ -15,7 +15,7 @@ param(
 # Configuration
 # ============================================================================
 $ErrorActionPreference = "Stop"
-$CITE_AGENT_VERSION = "1.5.1"
+$CITE_AGENT_VERSION = "1.5.2"
 $MIN_PYTHON_VERSION = [version]"3.10.0"
 $MAX_PYTHON_VERSION = [version]"3.13.99"
 $PYTHON_DOWNLOAD_VERSION = "3.11.9"
