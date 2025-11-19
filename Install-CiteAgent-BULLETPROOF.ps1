@@ -1,4 +1,4 @@
-﻿# Cite-Agent BULLETPROOF Installer v1.5.1
+﻿# Cite-Agent BULLETPROOF Installer v1.5.2
 # Works on ANY Windows machine - even without Python
 # Right-click → Run with PowerShell (or use one-liner)
 # One-liner: iwr -useb https://raw.githubusercontent.com/Spectating101/cite-agent/main/Install-CiteAgent-BULLETPROOF.ps1 | iex
