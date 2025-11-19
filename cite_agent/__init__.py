@@ -11,7 +11,7 @@ from .enhanced_ai_agent import EnhancedNocturnalAgent, ChatRequest, ChatResponse
 Cite-Agent: Terminal AI Assistant for Academic Research
 """
 
-__version__ = "1.4.13"
+__version__ = "1.5.0"
 __author__ = "Cite Agent Team"
 __email__ = "contact@citeagent.dev"
 

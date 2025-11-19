@@ -318,6 +318,86 @@ class DataCleaningWizard:
             "cleaned_dataframe": self.df
         }
 
+    def handle_missing_values(self, column: str, method: str = "median") -> Dict[str, Any]:
+        """
+        Handle missing values in a specific column with specified method
+        
+        Args:
+            column: Column name to handle missing values
+            method: Imputation method ('median', 'mean', 'mode', 'drop', 'forward_fill', 'backward_fill')
+        
+        Returns:
+            Report of missing value handling
+        """
+        if column not in self.df.columns:
+            return {"error": f"Column '{column}' not found in dataframe"}
+        
+        missing_count = self.df[column].isna().sum()
+        if missing_count == 0:
+            return {
+                "success": True,
+                "column": column,
+                "missing_handled": 0,
+                "message": "No missing values found"
+            }
+        
+        try:
+            if method == "median":
+                if pd.api.types.is_numeric_dtype(self.df[column]):
+                    fill_value = self.df[column].median()
+                    self.df[column] = self.df[column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot use median for non-numeric column '{column}'"}
+            
+            elif method == "mean":
+                if pd.api.types.is_numeric_dtype(self.df[column]):
+                    fill_value = self.df[column].mean()
+                    self.df[column] = self.df[column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot use mean for non-numeric column '{column}'"}
+            
+            elif method == "mode":
+                mode_values = self.df[column].mode()
+                if len(mode_values) > 0:
+                    fill_value = mode_values[0]
+                    self.df[column] = self.df[column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot compute mode for column '{column}'"}
+            
+            elif method == "drop":
+                before = len(self.df)
+                self.df = self.df.dropna(subset=[column])
+                after = len(self.df)
+                return {
+                    "success": True,
+                    "column": column,
+                    "rows_dropped": before - after,
+                    "method": "drop",
+                    "message": f"Dropped {before - after} rows with missing values"
+                }
+            
+            elif method == "forward_fill":
+                self.df[column] = self.df[column].fillna(method='ffill')
+                fill_value = "previous value"
+            
+            elif method == "backward_fill":
+                self.df[column] = self.df[column].fillna(method='bfill')
+                fill_value = "next value"
+            
+            else:
+                return {"error": f"Unknown method: {method}"}
+            
+            return {
+                "success": True,
+                "column": column,
+                "missing_handled": int(missing_count),
+                "method": method,
+                "fill_value": str(fill_value) if method not in ["forward_fill", "backward_fill", "drop"] else fill_value
+            }
+        
+        except Exception as e:
+            return {"error": f"Failed to handle missing values: {str(e)}"}
+
     def impute_missing_advanced(
         self,
         column: str,

@@ -1639,13 +1639,28 @@ class EnhancedNocturnalAgent:
 
         # Match any JSON object - use [\s\S] to match any character including newlines
         # This is more reliable than . with DOTALL
-        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results', 'command', 'action']
+        tool_keywords = ['type', 'tool', 'query', 'sources', 'arguments', 'function', 'results', 'command', 'action', 
+                         'analysis_type', 'var1', 'var2', 'method', 'filepath', 'x_var', 'y_var', 'plot_type']
 
         for keyword in tool_keywords:
             # Match: { anything "keyword" anything }
             # Using [\s\S]*? for non-greedy match that includes newlines
             pattern = r'\{[\s\S]*?"' + keyword + r'"[\s\S]*?\}'
             cleaned = re.sub(pattern, '', cleaned)
+        
+        # ENHANCED: Remove repeated JSON objects (sometimes LLM outputs same JSON 2-4 times)
+        # Match duplicates of the same JSON pattern and keep only the last content after them
+        seen_json = set()
+        lines_filtered = []
+        for line in cleaned.split('\n'):
+            if line.strip().startswith('{') and line.strip().endswith('}'):
+                # It's a JSON line
+                if line.strip() in seen_json:
+                    continue  # Skip duplicate JSON
+                seen_json.add(line.strip())
+                continue  # Remove JSON line entirely
+            lines_filtered.append(line)
+        cleaned = '\n'.join(lines_filtered)
 
         # ENHANCED FIX: Remove internal reasoning chains that leak from LLM
         # Examples: "We need to...", "Probably need to...", "Let's try:", "Will run:"
@@ -4927,7 +4942,9 @@ Concise query (max {max_length} chars):"""
                 # Check for multi-step keywords in original query
                 analysis_keywords = ["plot", "visualize", "chart", "graph", "pca", "mediation", "mediates", "mediator",
                                     "moderation", "moderates", "moderator", "clean", "scan", "quality", "analyze", 
-                                    "histogram", "scatter", "bar chart", "factor analysis"]
+                                    "histogram", "scatter", "bar chart", "factor analysis", "correlation", "correlate", 
+                                    "correlated", "regression", "regress", "anova", "t-test", "ttest", "chi-square", 
+                                    "chi square", "mann-whitney", "wilcoxon", "kruskal"]
                 needs_analysis = any(keyword in original_query_lower for keyword in analysis_keywords)
                 
                 if dataset_loaded and needs_analysis and iteration == 0:
@@ -4946,6 +4963,8 @@ Concise query (max {max_length} chars):"""
                         suggested_tool = "scan_data_quality"
                     elif "factor analysis" in original_query_lower:
                         suggested_tool = "run_factor_analysis"
+                    elif any(kw in original_query_lower for kw in ["correlation", "correlate", "correlated", "regression", "regress", "anova", "t-test", "ttest", "chi-square", "chi square", "mann-whitney", "wilcoxon", "kruskal"]):
+                        suggested_tool = "analyze_data"
                     
                     if suggested_tool:
                         current_query = (

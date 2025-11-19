@@ -206,12 +206,13 @@ class DataAnalyzer:
             direction = "positive" if r > 0 else "negative"
 
             return {
+                "correlation": float(r),
                 "correlation_coefficient": float(r),
                 "p_value": float(p),
                 "method": method_name,
                 "n_observations": len(data),
                 "interpretation": f"{strength} {direction} correlation",
-                "significant": p < 0.05
+                "significant": bool(p < 0.05)
             }
 
         except Exception as e:
@@ -303,11 +304,12 @@ class DataAnalyzer:
                         normality_results[col] = {
                             "statistic": float(stat),
                             "p_value": float(p),
-                            "normal": p > 0.05
+                            "normal": bool(p > 0.05)
                         }
 
                 return {
                     "test_type": test_type,
+                    "assumptions": normality_results,
                     "assumptions_checked": ["normality"],
                     "normality_tests": normality_results,
                     "guidance": "p > 0.05 suggests data is normally distributed"

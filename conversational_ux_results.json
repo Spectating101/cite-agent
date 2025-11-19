@@ -1,0 +1,57 @@
+{
+  "scenarios_tested": 10,
+  "passed": 0,
+  "failed": 10,
+  "details": [
+    {
+      "scenario": "Quick Data Question",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Multi-Step Analysis",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Ambiguous Request",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Data Visualization",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Complex Workflow",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Implicit Multi-Tool",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Qualitative Coding",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Literature Review",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Power Analysis",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    },
+    {
+      "scenario": "Casual Conversation",
+      "error": "'EnhancedNocturnalAgent' object has no attribute 'process_message'",
+      "passed": false
+    }
+  ]
+}

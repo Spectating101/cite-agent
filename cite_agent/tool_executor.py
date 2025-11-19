@@ -1010,9 +1010,11 @@ class ToolExecutor:
                 plot = self._ascii_plotter.plot_bar(categories, values, title)
 
             elif plot_type == "histogram":
-                if x_data is None:
-                    return {"error": "Missing x_data for histogram"}
-                plot = self._ascii_plotter.plot_histogram(x_data, bins, title)
+                # Histogram can use either x_data or values parameter
+                hist_data = x_data if x_data is not None else values
+                if hist_data is None:
+                    return {"error": "Missing x_data or values for histogram"}
+                plot = self._ascii_plotter.plot_histogram(hist_data, bins, title)
 
             else:
                 return {"error": f"Unknown plot type: {plot_type}"}
@@ -1334,6 +1336,10 @@ class ToolExecutor:
         if not doc_id or line_start is None or line_end is None or not codes:
             return {"error": "Missing required parameters: doc_id, line_start, line_end, codes"}
 
+        # Convert from 1-indexed (API) to 0-indexed (internal)
+        line_start_internal = line_start - 1
+        line_end_internal = line_end - 1
+
         if self.debug_mode:
             print(f"📝 [Qual Coding] Coding lines {line_start}-{line_end} in {doc_id}")
 
@@ -1341,7 +1347,7 @@ class ToolExecutor:
             if not hasattr(self, '_qual_coder'):
                 self._qual_coder = QualitativeCodingAssistant()
 
-            result = self._qual_coder.code_segment(doc_id, line_start, line_end, codes)
+            result = self._qual_coder.code_segment(doc_id, line_start_internal, line_end_internal, codes)
             return result
 
         except Exception as e:
@@ -1412,6 +1418,68 @@ class ToolExecutor:
         except Exception as e:
             return {"error": f"Failed to calculate kappa: {str(e)}"}
 
+    def _execute_list_codes(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """List all qualitative codes in the codebook"""
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Listing all codes")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            codes_list = []
+            for code_name, code_obj in self._qual_coder.codebook.items():
+                codes_list.append({
+                    "name": code_name,
+                    "description": code_obj.description,
+                    "parent_code": code_obj.parent_code,
+                    "examples_count": len(code_obj.examples)
+                })
+
+            return {
+                "success": True,
+                "codes": codes_list,
+                "total": len(codes_list)
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to list codes: {str(e)}"}
+
+    def _execute_extract_themes(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract themes from coded transcripts"""
+        doc_ids = args.get("doc_ids")
+        min_frequency = args.get("min_frequency", 3)
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Extracting themes (min_freq={min_frequency})")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.auto_extract_themes(doc_ids, min_frequency)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to extract themes: {str(e)}"}
+
+    def _execute_generate_codebook(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a formatted codebook"""
+        format_type = args.get("format", "markdown")
+
+        if self.debug_mode:
+            print(f"📝 [Qual Coding] Generating codebook ({format_type})")
+
+        try:
+            if not hasattr(self, '_qual_coder'):
+                self._qual_coder = QualitativeCodingAssistant()
+
+            result = self._qual_coder.export_codebook(format_type)
+            return result
+
+        except Exception as e:
+            return {"error": f"Failed to generate codebook: {str(e)}"}
+
     # ---------------------------------------------------------------------
     # Data Cleaning Magic - Automated data quality
     # ---------------------------------------------------------------------
@@ -1450,8 +1518,8 @@ class ToolExecutor:
 
             result = self._data_wizard.auto_fix_issues(fix_types)
 
-            # Update the main dataframe
-            self._data_analyzer.df = self._data_wizard.df
+            # Update the main dataframe (use current_dataset, not df property)
+            self._data_analyzer.current_dataset = self._data_wizard.df
 
             return result
 
@@ -1478,8 +1546,8 @@ class ToolExecutor:
 
             result = self._data_wizard.handle_missing_values(column, method)
 
-            # Update the main dataframe
-            self._data_analyzer.df = self._data_wizard.df
+            # Update the main dataframe (use current_dataset, not df property)
+            self._data_analyzer.current_dataset = self._data_wizard.df
 
             return result
 
@@ -1786,3 +1854,94 @@ class ToolExecutor:
 
         except Exception as e:
             return {"error": f"Failed to find contradictions: {str(e)}"}
+
+    def _execute_synthesize_literature(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Synthesize literature on a specific topic"""
+        topic = args.get("topic", "")
+
+        if not topic:
+            return {"error": "Missing required parameter: topic"}
+
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Synthesizing literature on: {topic}")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            # Get all papers and create synthesis
+            papers = self._lit_synth.papers
+            
+            # Create synthesis summary
+            themes = self._lit_synth.extract_common_themes(min_papers=1, theme_length=(2, 4))
+            gaps = self._lit_synth.identify_research_gaps()
+            
+            synthesis = {
+                "success": True,
+                "topic": topic,
+                "papers_analyzed": len(papers),
+                "common_themes": themes.get("themes", [])[:5],  # Top 5 themes
+                "research_gaps": gaps.get("gaps", [])[:3],  # Top 3 gaps
+                "summary": f"Synthesized {len(papers)} papers on {topic}. "
+                          f"Found {len(themes.get('themes', []))} common themes and "
+                          f"{len(gaps.get('gaps', []))} research gaps.",
+                "synthesis": f"Literature synthesis on {topic} covering {len(papers)} papers."
+            }
+
+            return synthesis
+
+        except Exception as e:
+            return {"error": f"Failed to synthesize literature: {str(e)}"}
+
+    def _execute_export_lit_review(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Export literature review in specified format"""
+        format_type = args.get("format", "markdown")
+
+        if self.debug_mode:
+            print(f"📚 [Lit Synthesis] Exporting review as {format_type}")
+
+        try:
+            if not hasattr(self, '_lit_synth'):
+                return {"error": "No papers loaded. Use add_paper first."}
+
+            papers = self._lit_synth.papers
+            themes = self._lit_synth.extract_common_themes(min_papers=1, theme_length=(2, 4))
+            gaps = self._lit_synth.identify_research_gaps()
+
+            if format_type == "markdown":
+                content = "# Literature Review\n\n"
+                content += f"## Papers Analyzed ({len(papers)})\n\n"
+                for paper in papers[:10]:  # First 10 papers
+                    # Handle both dict and object formats
+                    title = paper.get("title") if isinstance(paper, dict) else paper.title
+                    year = paper.get("year") if isinstance(paper, dict) else paper.year
+                    authors = paper.get("authors", []) if isinstance(paper, dict) else paper.authors
+                    findings = paper.get("findings") if isinstance(paper, dict) else getattr(paper, "key_findings", None)
+                    
+                    content += f"- **{title}** ({year})\n"
+                    if authors:
+                        content += f"  *Authors:* {', '.join(authors) if isinstance(authors, list) else authors}\n"
+                    if findings:
+                        content += f"  *Key Findings:* {findings}\n"
+                    content += "\n"
+                
+                content += "\n## Common Themes\n\n"
+                for theme in themes.get("themes", [])[:5]:
+                    content += f"- {theme.get('theme', '')}: {theme.get('count', 0)} papers\n"
+                
+                content += "\n## Research Gaps\n\n"
+                for gap in gaps.get("gaps", []):
+                    content += f"- {gap.get('gap_description', '')}\n"
+                
+                return {
+                    "success": True,
+                    "format": format_type,
+                    "content": content,
+                    "length": len(content)
+                }
+            
+            else:
+                return {"error": f"Unsupported format: {format_type}"}
+
+        except Exception as e:
+            return {"error": f"Failed to export review: {str(e)}"}
