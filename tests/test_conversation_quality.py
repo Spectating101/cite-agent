@@ -35,6 +35,7 @@ class ConversationTester:
         """Initialize agent with test credentials"""
         # Set up test environment
         os.environ["USE_LOCAL_KEYS"] = "true"
+        os.environ["NOCTURNAL_FUNCTION_CALLING"] = "1"  # Enable function calling mode
 
         self.agent = EnhancedNocturnalAgent()
         success = await self.agent.initialize()
