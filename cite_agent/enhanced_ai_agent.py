@@ -1133,6 +1133,7 @@ class EnhancedNocturnalAgent:
         Format ONLY raw Python execution output numbers.
         
         Use case: When Python prints "28095000000.0000", format to "28.1B"
+        Also: Clean up .0000 from integers like "120.0000" → "120"
         
         BUT: Don't touch LLM-generated text! LLM already formats numbers well:
         - "250 k" (good!)
@@ -1143,8 +1144,11 @@ class EnhancedNocturnalAgent:
         """
         import re
         
-        # Only format numbers that look like raw Python output
-        # These are numbers with many digits and unnecessary decimal places
+        # First: Remove .0000 from numbers that are actually integers
+        # Match patterns like "120.0000" or "3628800.0000" or even "35.00"
+        text = re.sub(r'\b(\d+)\.0+\b', r'\1', text)  # More aggressive: any .00+ becomes integer
+        
+        # Second: Format truly large unformatted numbers
         def format_number(match):
             num_str = match.group(0)
             try:
