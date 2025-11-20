@@ -2459,6 +2459,27 @@ class EnhancedNocturnalAgent:
         - Adapts to natural language variations
         """
         
+        # CRITICAL: Detect explicit multi-step keywords BEFORE LLM planning
+        # This prevents LLM from incorrectly classifying obvious multi-step queries
+        multi_step_keywords = [
+            'then', 'after that', 'next', 'and then', 'followed by',
+            'first.*then', 'step 1', 'step 2', 'finally',
+            ', then', ';.*then'
+        ]
+        
+        # Check if query explicitly mentions multiple steps
+        query_lower = query.lower()
+        has_explicit_steps = any(
+            re.search(keyword, query_lower) for keyword in multi_step_keywords
+        )
+        
+        # Count commas and semicolons as step separators in context
+        step_separators = query.count(',') + query.count(';') + query.count('.')
+        has_many_steps = step_separators >= 3  # 3+ separators suggests multi-step
+        
+        if self.debug_mode and (has_explicit_steps or has_many_steps):
+            self._safe_print(f"🔍 Multi-step query detected: explicit_keywords={has_explicit_steps}, separators={step_separators}")
+        
         planning_prompt = f"""You are an AI workflow planner. Analyze this query and determine what tools are needed.
 
 Query: "{query}"
@@ -2485,7 +2506,10 @@ Your task:
 2. Identify which tools are needed and in what order
 3. Explain your reasoning
 
-CRITICAL RULES:
+CRITICAL RULES FOR MULTI-STEP DETECTION:
+- If query contains "then", "after that", "next", "and then" → MUST BE SEQUENCING!
+- Words like "first...then", "step 1...step 2" → MUST BE SEQUENCING!
+- Multiple distinct actions separated by commas/semicolons → likely SEQUENCING
 - If query mentions BOTH a financial metric AND a dataset calculation → needs SEQUENCING
 - "Calculate [financial metric like profit margin]" → use 'financial' tool (needs real company data)
 - "Calculate [statistic] from [dataset/csv]" → use 'analysis' tool
@@ -2493,6 +2517,8 @@ CRITICAL RULES:
 - "Find" with ".csv" or "data" → analysis (find value in dataset)
 - "Find" with "paper" or "research" → research (search papers)
 - If financial data is mentioned alongside calculations → must get financial data FIRST, then calculate
+- Factorials, long calculations, conditional logic (if/else) → likely SEQUENCING
+- Any query with 4+ distinct operations → MUST BE SEQUENCING!
 
 Output JSON in this exact format:
 
@@ -2529,11 +2555,11 @@ Output ONLY valid JSON, no other text:"""
             planning_response = self.client.chat.completions.create(
                 model="llama-3.3-70b",  # Use best available model
                 messages=[
-                    {"role": "system", "content": "You are a precise workflow planner. Output only valid JSON."},
+                    {"role": "system", "content": "You are a precise workflow planner. When you see explicit step indicators like 'then', 'next', 'after that', you MUST set needs_sequencing to true. Output only valid JSON."},
                     {"role": "user", "content": planning_prompt}
                 ],
-                temperature=0.1,  # Low temp for consistency
-                max_tokens=800
+                temperature=0.3 if has_explicit_steps or has_many_steps else 0.1,  # Higher temp for multi-step queries
+                max_tokens=1000  # More tokens for complex plans
             )
             
             plan_text = planning_response.choices[0].message.content.strip()
@@ -2545,6 +2571,7 @@ Output ONLY valid JSON, no other text:"""
                 plan_text = plan_text.split('```')[1].split('```')[0].strip()
             
             plan = json.loads(plan_text)
+            plan = self._maybe_force_plan(query, plan)
             
             if self.debug_mode:
                 self._safe_print(f"\n🧠 LLM Planning Result:")
@@ -2567,7 +2594,7 @@ Output ONLY valid JSON, no other text:"""
             sequential_tasks = self._decompose_sequential_query(query)
             
             if len(sequential_tasks) > 1:
-                return {
+                plan = {
                     "needs_sequencing": True,
                     "steps": [
                         {
@@ -2578,12 +2605,103 @@ Output ONLY valid JSON, no other text:"""
                         for task in sequential_tasks
                     ]
                 }
+                return self._maybe_force_plan(query, plan)
             else:
-                return {
+                plan = {
                     "needs_sequencing": False,
                     "tool": self._classify_query_type(query),
                     "reason": "Fallback heuristic classification"
                 }
+                return self._maybe_force_plan(query, plan)
+    def _maybe_force_plan(self, query: str, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Override the LLM plan when heuristics detect required multi-step dataset workflows.
+        """
+        if plan.get("needs_sequencing"):
+            return plan
+        
+        dataset_plan = self._build_dataset_plan(query)
+        if dataset_plan:
+            if self.debug_mode:
+                self._safe_print("🔁 Forcing dataset workflow sequencing (load → analyze)")
+            return dataset_plan
+        
+        math_plan = self._build_math_sequence_plan(query)
+        if math_plan:
+            if self.debug_mode:
+                self._safe_print("🔁 Forcing multi-step math workflow sequencing")
+            return math_plan
+        
+        return plan
+    
+    def _build_dataset_plan(self, query: str) -> Optional[Dict[str, Any]]:
+        """Ensure dataset questions load files before running calculations."""
+        q_lower = query.lower()
+        file_tokens = ['.csv', '.txt', ' dataset', 'data file', 'numbers.txt', 'numbers file']
+        analysis_tokens = [
+            'mean', 'median', 'std', 'standard deviation', 'variance',
+            'regression', 'analyze', 'analyse', 'predict', 'forecast',
+            'trend', 'percentage', 'percent', 'ratio', 'compare', 'difference'
+        ]
+        has_file = any(token in q_lower for token in file_tokens)
+        has_analysis = any(token in q_lower for token in analysis_tokens)
+        has_sequence_word = any(token in q_lower for token in [' then ', ' and then ', ' after that ', ' afterwards '])
+        
+        if not (has_file and (has_analysis or has_sequence_word)):
+            return None
+        
+        file_reference = self._extract_file_reference(query) or "the referenced dataset"
+        
+        return {
+            "needs_sequencing": True,
+            "steps": [
+                {
+                    "tool": "file",
+                    "query": f"Read {file_reference}",
+                    "reason": "Load the referenced dataset prior to analysis."
+                },
+                {
+                    "tool": "analysis",
+                    "query": query,
+                    "reason": "Run the requested statistical analysis once the data is loaded."
+                }
+            ]
+        }
+    
+    def _build_math_sequence_plan(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Build a plan for chained math operations ("do X, then Y, then Z").
+        """
+        q_lower = query.lower()
+        if "then" not in q_lower:
+            return None
+        
+        math_keywords = ["calculate", "add", "subtract", "multiply", "divide", "factorial",
+                         "square", "cube", "power", "percentage", "percent"]
+        if not any(keyword in q_lower for keyword in math_keywords):
+            return None
+        
+        parts = re.split(r'\b(?:then|and then|after that|afterwards)\b', query, flags=re.IGNORECASE)
+        parts = [part.strip(" ,.;") for part in parts if part.strip(" ,.;")]
+        if len(parts) < 2:
+            return None
+        
+        steps = []
+        for idx, part in enumerate(parts, 1):
+            if idx == 1:
+                step_query = part
+            else:
+                step_query = f"{part} using the previous step's result"
+            steps.append({
+                "tool": "analysis",
+                "query": step_query,
+                "reason": "Carry out the next arithmetic transformation."
+            })
+        
+        return {
+            "needs_sequencing": True,
+            "steps": steps
+        }
     
     async def _execute_plan_from_llm(self, plan: Dict, original_request: ChatRequest) -> ChatResponse:
         """
@@ -2756,42 +2874,85 @@ Output ONLY valid JSON, no other text:"""
         return [{'type': task_type, 'query': query, 'step': 1}]
     
     def _classify_query_type(self, query: str) -> str:
-        """Classify query into tool categories"""
+        """
+        Classify query into tool categories.
+        
+        CRITICAL: This is fallback only - LLM planning is primary.
+        Be CONSERVATIVE - don't default to 'financial' unless explicit company/ticker mentioned.
+        """
         query_lower = query.lower()
+        
+        # Math/counting keywords (NEW - catch simple math queries)
+        math_keywords = ['count to', 'factorial', 'fibonacci', 'prime', 'even', 'odd',
+                        'divisible', 'multiply', 'divide', 'subtract', 'add']
         
         # Analysis keywords (CHECK FIRST - most specific)
         analysis_keywords = ['calculate', 'compute', 'correlation', 'regression',
                             'mean', 'average', 'median', 'std', 'variance', 
                             'analyze', 'analyse', 'statistics', 'test', 'sum',
-                            'count', 'histogram', 'plot']
+                            'histogram', 'plot', 'sample size', 'power', 'mde']
         
         # Research keywords  
         research_keywords = ['paper', 'research', 'study', 'publication', 'arxiv',
-                            'journal', 'cite', 'citation', 'author', 'abstract']
+                            'journal', 'cite', 'citation', 'author', 'abstract',
+                            'literature', 'scholar', 'doi', 'pubmed']
         
-        # Financial keywords (but not if analysis is present)
+        # Financial keywords - MUST have company context
         financial_keywords = ['revenue', 'profit', 'earnings', 'stock price', 
                              'margin', 'eps', 'market cap', 'financial', 'nasdaq',
-                             'ticker', 'shares', 'dividend']
+                             'ticker', 'shares', 'dividend', 'p/e ratio', 'valuation']
+        
+        # Company/ticker indicators (required for financial)
+        company_indicators = ['apple', 'microsoft', 'google', 'tesla', 'amazon', 
+                             'aapl', 'msft', 'googl', 'tsla', 'amzn', 'nio',
+                             'company', 'corporation', 'inc', 'stock']
         
         # File operation keywords
         file_keywords = ['read', 'write', 'file', 'list', 'directory', 'show',
-                        'display', 'open', 'save']
+                        'display', 'open', 'save', '.txt', '.csv', '.json']
         
-        # Check in priority order (analysis first to avoid confusion)
+        # Web search keywords
+        web_keywords = ['search web', 'find online', 'google', 'search for', 'look up',
+                       'find information about', 'what is', 'who is', 'when', 'where']
+        
+        # Check in priority order
+        
+        # 1. Simple math queries → analysis (not financial!)
+        if any(kw in query_lower for kw in math_keywords):
+            return 'analysis'
+        
+        # 2. Analysis keywords
         if any(kw in query_lower for kw in analysis_keywords):
-            # But if it's about financial metrics, classify as financial
-            if any(kw in query_lower for kw in financial_keywords) and not any(ext in query_lower for ext in ['.csv', '.txt', 'data']):
+            # Only route to financial if BOTH financial keyword AND company context
+            has_financial = any(kw in query_lower for kw in financial_keywords)
+            has_company = any(kw in query_lower for kw in company_indicators)
+            if has_financial and has_company and not any(ext in query_lower for ext in ['.csv', '.txt', 'data', 'dataset']):
                 return 'financial'
             return 'analysis'
-        elif any(kw in query_lower for kw in research_keywords):
+        
+        # 3. Research keywords → research (not financial!)
+        if any(kw in query_lower for kw in research_keywords):
             return 'research'
-        elif any(kw in query_lower for kw in financial_keywords):
-            return 'financial'
-        elif any(kw in query_lower for kw in file_keywords):
+        
+        # 4. Web search keywords
+        if any(kw in query_lower for kw in web_keywords):
+            return 'web'
+        
+        # 5. Financial - ONLY if has both financial keyword AND company
+        if any(kw in query_lower for kw in financial_keywords):
+            has_company = any(kw in query_lower for kw in company_indicators)
+            if has_company:
+                return 'financial'
+            else:
+                # Financial keyword but no company → probably analysis
+                return 'analysis'
+        
+        # 6. File operations
+        if any(kw in query_lower for kw in file_keywords):
             return 'file'
-        else:
-            return 'general'
+        
+        # 7. Default to 'general' (NOT financial!)
+        return 'general'
     
     async def _execute_sequential_workflow(
         self, 
@@ -5477,6 +5638,19 @@ Concise query (max {max_length} chars):"""
                 "apis": [],
                 "confidence": 0.7,
                 "analysis_mode": "conversational"
+            }
+
+        # Fast-path: simple math/counting commands should use analysis tools
+        simple_math_triggers = [
+            "count to ", "count from ", "count down", "factorial", "permutation",
+            "combination", "simple math", "basic math", "list numbers"
+        ]
+        if any(trigger in question_lower for trigger in simple_math_triggers):
+            return {
+                "type": "analysis",
+                "apis": ["data_analysis"],
+                "confidence": 0.9,
+                "analysis_mode": "quantitative"
             }
 
         # Financial indicators - COMPREHENSIVE list to ensure FinSight is used

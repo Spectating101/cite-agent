@@ -1,12 +1,12 @@
 {
   "test_suite": "Real Tool Sequencing v1.5.6",
-  "timestamp": "2025-11-20T13:34:59.637519",
+  "timestamp": "2025-11-20T13:41:33.531739",
   "tests": [
     {
       "name": "Tesla_Revenue_Analysis",
       "status": "\u2705 PASS",
       "query": "Analyze Tesla's revenue for the last 2 years. Get the financial data, then calculate the growth rate.",
-      "elapsed": 9.91,
+      "elapsed": 8.36,
       "expected_steps": 2,
       "actual_steps": 2,
       "expected_tools": [
@@ -20,13 +20,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 4138
+      "output_length": 4175
     },
     {
       "name": "Apple_PE_Ratio_Deep_Analysis",
       "status": "\u2705 PASS",
       "query": "Get Apple's current P/E ratio, then compare it to the tech industry average, and tell me if it's overvalued or undervalued.",
-      "elapsed": 35.26,
+      "elapsed": 23.1,
       "expected_steps": 3,
       "actual_steps": 3,
       "expected_tools": [
@@ -40,13 +40,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 5694
+      "output_length": 5591
     },
     {
       "name": "Microsoft_5Year_Revenue_Trend",
       "status": "\u274c FAIL",
       "query": "Analyze Microsoft's revenue trend over the last 5 years. Fetch the data, calculate year-over-year growth rates, and identify any patterns.",
-      "elapsed": 7.69,
+      "elapsed": 5.22,
       "expected_steps": 3,
       "actual_steps": 2,
       "expected_tools": [
@@ -60,13 +60,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 4481
+      "output_length": 4488
     },
     {
       "name": "CSV_File_Statistical_Analysis",
       "status": "\u274c FAIL",
       "query": "Load the file 'sample_data.csv', analyze the descriptive statistics, and tell me the mean and standard deviation of all numeric columns.",
-      "elapsed": 6.64,
+      "elapsed": 3.45,
       "expected_steps": 2,
       "actual_steps": 0,
       "expected_tools": [
@@ -80,15 +80,15 @@
         "execute_shell_command",
         "read_file"
       ],
-      "validation": "\u274c FAIL",
+      "validation": "\u2705 PASS",
       "has_synthesis": false,
-      "output_length": 3430
+      "output_length": 3607
     },
     {
       "name": "Exam_Data_Regression_Analysis",
       "status": "\u274c FAIL",
       "query": "Load 'exam_data.csv' and run a regression to predict final_score from study_hours. Then tell me how much each additional study hour improves the score.",
-      "elapsed": 25.99,
+      "elapsed": 10.64,
       "expected_steps": 3,
       "actual_steps": 0,
       "expected_tools": [
@@ -104,13 +104,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": false,
-      "output_length": 6163
+      "output_length": 6106
     },
     {
       "name": "Read_Numbers_Calculate_Stats",
       "status": "\u274c FAIL",
       "query": "Read the file 'numbers.txt', extract all the numbers from it, calculate their mean, median, and standard deviation.",
-      "elapsed": 4.34,
+      "elapsed": 3.73,
       "expected_steps": 3,
       "actual_steps": 2,
       "expected_tools": [
@@ -125,13 +125,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 3727
+      "output_length": 4046
     },
     {
       "name": "Shell_File_Count_Analysis",
       "status": "\u274c FAIL",
       "query": "Count how many Python files are in the current directory using shell command, then calculate what percentage they represent of all files.",
-      "elapsed": 1.76,
+      "elapsed": 1.75,
       "expected_steps": 3,
       "actual_steps": 0,
       "expected_tools": [
@@ -150,7 +150,7 @@
       "name": "Factorial_Chain_Complex",
       "status": "\u274c FAIL",
       "query": "Calculate 10 factorial, then divide that result by 5, then multiply by 2, then check if the final result is prime.",
-      "elapsed": 13.76,
+      "elapsed": 6.72,
       "expected_steps": 4,
       "actual_steps": 3,
       "expected_tools": [
@@ -163,13 +163,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 4578
+      "output_length": 4507
     },
     {
       "name": "Statistical_Computation_Chain",
       "status": "\u2705 PASS",
       "query": "Calculate the mean of [10, 20, 30, 40, 50], then calculate the variance, then the standard deviation, then the coefficient of variation.",
-      "elapsed": 9.93,
+      "elapsed": 6.0,
       "expected_steps": 4,
       "actual_steps": 4,
       "expected_tools": [
@@ -182,13 +182,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 5004
+      "output_length": 4981
     },
     {
       "name": "Financial_Data_To_File_Analysis",
       "status": "\u2705 PASS",
       "query": "Get Tesla's revenue data, then save it to a file called 'tesla_revenue.txt', then read the file back and calculate the average.",
-      "elapsed": 6.99,
+      "elapsed": 6.2,
       "expected_steps": 4,
       "actual_steps": 4,
       "expected_tools": [
@@ -204,13 +204,13 @@
       ],
       "validation": "\u2705 PASS",
       "has_synthesis": true,
-      "output_length": 5064
+      "output_length": 5118
     },
     {
       "name": "Shell_Count_Then_Math",
       "status": "\u274c FAIL",
       "query": "Use shell to count the total number of files in the current directory, then calculate the factorial of that number.",
-      "elapsed": 1.83,
+      "elapsed": 1.88,
       "expected_steps": 2,
       "actual_steps": 0,
       "expected_tools": [
