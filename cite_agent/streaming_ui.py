@@ -118,7 +118,7 @@ class StreamingChatUI:
             stop_listener.set()
         
         self.console.print()  # Newline after response
-        self.show_footer()  # Show footer hint bar after response
+        self.console.print()  # Extra space for readability
         
         return buffer
     
