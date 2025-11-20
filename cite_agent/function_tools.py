@@ -136,10 +136,10 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "list_directory",
             "description": (
-                "List files and folders in a directory. "
-                "Use when user asks: 'what folders are here', 'list files', 'show directory contents', "
-                "'what's in this folder', 'ls'. "
-                "DO NOT use for conversational questions about the agent itself."
+                "List files and folders in a directory (BROWSING only). "
+                "Use ONLY when user wants to SEE what files exist: 'what files are here?', 'list files', 'show directory', 'ls'. "
+                "⚠️ DO NOT use if user mentions a SPECIFIC file by name (use read_file or load_dataset instead). "
+                "⚠️ DO NOT use for .csv/.xlsx files or data analysis (use load_dataset instead)."
             ),
             "parameters": {
                 "type": "object",
@@ -153,6 +153,17 @@ TOOLS: List[Dict[str, Any]] = [
                         "type": "boolean",
                         "description": "Include hidden files (default: false)",
                         "default": False
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of files to show (e.g., 5 for '5 most recent')",
+                        "default": null
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "description": "Sort order: 'recent' (newest first), 'name', 'size'",
+                        "enum": ["recent", "name", "size"],
+                        "default": null
                     }
                 },
                 "required": []
@@ -334,12 +345,11 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "load_dataset",
             "description": (
-                "Load a dataset from CSV or Excel file and AUTOMATICALLY compute statistics (mean, std, min, max, median). "
-                "ALWAYS use this tool (not read_file) when user asks for: mean, average, standard deviation, min, max, median, statistics, "
-                "calculate, compute, analyze data, load CSV/Excel, work with datasets. "
-                "This tool returns pre-computed statistics so you can answer statistical questions immediately. "
-                "Examples: 'load data.csv and calculate mean', 'analyze this Excel file', "
-                "'what is the average in my dataset', 'compute standard deviation'"
+                "🎯 PRIMARY TOOL for CSV/Excel files! Loads dataset and AUTOMATICALLY computes ALL statistics in ONE call. "
+                "⚠️ ALWAYS use this (NEVER use list_directory or read_file) when user mentions: "
+                "ANY .csv/.xlsx/.xls/.tsv file by name, OR words: load, dataset, data, mean, average, std, statistics, analyze data, calculate. "
+                "This tool does EVERYTHING: loads file + computes statistics (mean/std/min/max/median) + returns preview. "
+                "Examples: 'load data.csv', 'analyze sample.xlsx', 'calculate mean in dataset.csv', 'what's the average in data.csv'"
             ),
             "parameters": {
                 "type": "object",
@@ -464,11 +474,12 @@ TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "plot_data",
             "description": (
-                "Create ASCII plots (scatter, bar, histogram) for data visualization in terminal. "
+                "⚠️ REQUIRES LOADED DATASET. Create ASCII plots (scatter, bar, histogram) for data visualization in terminal. "
                 "Use when user wants: plot data, visualize relationship, show distribution, "
                 "create chart, graph variables. "
                 "Examples: 'plot hours vs scores', 'show histogram of ages', "
-                "'create bar chart of categories'"
+                "'create bar chart of categories'. "
+                "IMPORTANT: Must call load_dataset FIRST before using this tool!"
             ),
             "parameters": {
                 "type": "object",
@@ -854,7 +865,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "scan_data_quality",
-            "description": "Automatically scan dataset for quality issues: missing values, outliers, duplicates, type mismatches, distribution problems. Use before data analysis.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Automatically scan dataset for quality issues: missing values, outliers, duplicates, type mismatches, distribution problems. Use before data analysis. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {}
@@ -865,7 +876,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "auto_clean_data",
-            "description": "Automatically fix data quality issues found by scan_data_quality. One-click cleaning for common problems.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Automatically fix data quality issues found by scan_data_quality. One-click cleaning for common problems. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -882,7 +893,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "handle_missing_values",
-            "description": "Handle missing values in specific column with chosen strategy (median, mean, mode, forward_fill, knn).",
+            "description": "⚠️ REQUIRES LOADED DATASET. Handle missing values in specific column with chosen strategy (median, mean, mode, forward_fill, knn). IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -908,7 +919,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_pca",
-            "description": "Run Principal Component Analysis for dimensionality reduction. Use when user has many correlated variables and wants to reduce them.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run Principal Component Analysis for dimensionality reduction. Use when user has many correlated variables and wants to reduce them. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -933,7 +944,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_factor_analysis",
-            "description": "Run Exploratory Factor Analysis to identify latent factors. Use when user wants to find underlying constructs in survey/scale data.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run Exploratory Factor Analysis to identify latent factors. Use when user wants to find underlying constructs in survey/scale data. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -959,7 +970,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_mediation",
-            "description": "Run mediation analysis to test if M mediates X → Y relationship (Baron & Kenny approach with bootstrap CI). Use for testing indirect effects.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run mediation analysis to test if M mediates X → Y relationship (Baron & Kenny approach with bootstrap CI). Use for testing indirect effects. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -988,7 +999,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_moderation",
-            "description": "Run moderation analysis to test if W moderates X → Y relationship (interaction effect). Use to test conditional effects.",
+            "description": "⚠️ REQUIRES LOADED DATASET. Run moderation analysis to test if W moderates X → Y relationship (interaction effect). Use to test conditional effects. IMPORTANT: Must call load_dataset FIRST before using this tool!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1273,6 +1284,10 @@ def validate_tool_call(tool_name: str, arguments: Dict[str, Any]) -> tuple[bool,
     for param, value in arguments.items():
         if param not in properties:
             return False, f"Unknown parameter: {param}"
+
+        # Allow None for optional parameters (not in required list)
+        if value is None and param not in required:
+            continue
 
         expected_type = properties[param].get("type")
         if expected_type == "string" and not isinstance(value, str):

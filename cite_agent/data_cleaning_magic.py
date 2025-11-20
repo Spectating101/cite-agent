@@ -39,6 +39,23 @@ class DataCleaningWizard:
         self.original_df = df.copy()
         self.issues: List[DataQualityIssue] = []
 
+    def _find_column_case_insensitive(self, column_name: str) -> str:
+        """
+        Find column name case-insensitively.
+        Returns actual column name from dataframe, or None if not found.
+        """
+        # First try exact match
+        if column_name in self.df.columns:
+            return column_name
+
+        # Try case-insensitive match
+        column_lower = column_name.lower()
+        for col in self.df.columns:
+            if col.lower() == column_lower:
+                return col
+
+        return None
+
     def scan_all_issues(self) -> Dict[str, Any]:
         """
         Comprehensive scan for all data quality issues
@@ -318,6 +335,88 @@ class DataCleaningWizard:
             "cleaned_dataframe": self.df
         }
 
+    def handle_missing_values(self, column: str, method: str = "median") -> Dict[str, Any]:
+        """
+        Handle missing values in a specific column with specified method
+
+        Args:
+            column: Column name to handle missing values
+            method: Imputation method ('median', 'mean', 'mode', 'drop', 'forward_fill', 'backward_fill')
+
+        Returns:
+            Report of missing value handling
+        """
+        # Case-insensitive column lookup
+        actual_column = self._find_column_case_insensitive(column)
+        if actual_column is None:
+            return {"error": f"Column '{column}' not found in dataframe"}
+
+        missing_count = self.df[actual_column].isna().sum()
+        if missing_count == 0:
+            return {
+                "success": True,
+                "column": actual_column,
+                "missing_handled": 0,
+                "message": "No missing values found"
+            }
+
+        try:
+            if method == "median":
+                if pd.api.types.is_numeric_dtype(self.df[actual_column]):
+                    fill_value = self.df[actual_column].median()
+                    self.df[actual_column] = self.df[actual_column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot use median for non-numeric column '{actual_column}'"}
+
+            elif method == "mean":
+                if pd.api.types.is_numeric_dtype(self.df[actual_column]):
+                    fill_value = self.df[actual_column].mean()
+                    self.df[actual_column] = self.df[actual_column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot use mean for non-numeric column '{actual_column}'"}
+
+            elif method == "mode":
+                mode_values = self.df[actual_column].mode()
+                if len(mode_values) > 0:
+                    fill_value = mode_values[0]
+                    self.df[actual_column] = self.df[actual_column].fillna(fill_value)
+                else:
+                    return {"error": f"Cannot compute mode for column '{actual_column}'"}
+
+            elif method == "drop":
+                before = len(self.df)
+                self.df = self.df.dropna(subset=[actual_column])
+                after = len(self.df)
+                return {
+                    "success": True,
+                    "column": actual_column,
+                    "rows_dropped": before - after,
+                    "method": "drop",
+                    "message": f"Dropped {before - after} rows with missing values"
+                }
+
+            elif method == "forward_fill":
+                self.df[actual_column] = self.df[actual_column].fillna(method='ffill')
+                fill_value = "previous value"
+
+            elif method == "backward_fill":
+                self.df[actual_column] = self.df[actual_column].fillna(method='bfill')
+                fill_value = "next value"
+            
+            else:
+                return {"error": f"Unknown method: {method}"}
+
+            return {
+                "success": True,
+                "column": actual_column,
+                "missing_handled": int(missing_count),
+                "method": method,
+                "fill_value": str(fill_value) if method not in ["forward_fill", "backward_fill", "drop"] else fill_value
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to handle missing values: {str(e)}"}
+
     def impute_missing_advanced(
         self,
         column: str,
@@ -337,19 +436,21 @@ class DataCleaningWizard:
         """
         from sklearn.impute import KNNImputer
 
-        if column not in self.df.columns:
+        # Case-insensitive column lookup
+        actual_column = self._find_column_case_insensitive(column)
+        if actual_column is None:
             return {"error": f"Column '{column}' not found"}
 
-        missing_before = self.df[column].isna().sum()
+        missing_before = self.df[actual_column].isna().sum()
 
         if missing_before == 0:
-            return {"error": f"No missing values in column '{column}'"}
+            return {"error": f"No missing values in column '{actual_column}'"}
 
         if method == "knn":
             # Use KNN imputer on numeric columns only
             numeric_cols = self.df.select_dtypes(include=[np.number]).columns.tolist()
 
-            if column not in numeric_cols:
+            if actual_column not in numeric_cols:
                 return {"error": "KNN imputation only works for numeric columns"}
 
             imputer = KNNImputer(n_neighbors=n_neighbors)
@@ -358,36 +459,36 @@ class DataCleaningWizard:
             return {
                 "success": True,
                 "method": "KNN",
-                "column": column,
+                "column": actual_column,
                 "values_imputed": missing_before,
                 "n_neighbors": n_neighbors
             }
 
         elif method in ["mean", "median", "mode"]:
             if method == "mean":
-                fill_value = self.df[column].mean()
+                fill_value = self.df[actual_column].mean()
             elif method == "median":
-                fill_value = self.df[column].median()
+                fill_value = self.df[actual_column].median()
             else:  # mode
-                fill_value = self.df[column].mode()[0]
+                fill_value = self.df[actual_column].mode()[0]
 
-            self.df[column] = self.df[column].fillna(fill_value)
+            self.df[actual_column] = self.df[actual_column].fillna(fill_value)
 
             return {
                 "success": True,
                 "method": method,
-                "column": column,
+                "column": actual_column,
                 "fill_value": fill_value,
                 "values_imputed": missing_before
             }
 
         elif method == "forward_fill":
-            self.df[column] = self.df[column].fillna(method='ffill')
+            self.df[actual_column] = self.df[actual_column].fillna(method='ffill')
 
             return {
                 "success": True,
                 "method": "forward_fill",
-                "column": column,
+                "column": actual_column,
                 "values_imputed": missing_before
             }
 
@@ -411,13 +512,15 @@ class DataCleaningWizard:
         Returns:
             Outlier removal report
         """
-        if column not in self.df.columns:
+        # Case-insensitive column lookup
+        actual_column = self._find_column_case_insensitive(column)
+        if actual_column is None:
             return {"error": f"Column '{column}' not found"}
 
-        if not pd.api.types.is_numeric_dtype(self.df[column]):
-            return {"error": f"Column '{column}' must be numeric"}
+        if not pd.api.types.is_numeric_dtype(self.df[actual_column]):
+            return {"error": f"Column '{actual_column}' must be numeric"}
 
-        data = self.df[column].dropna()
+        data = self.df[actual_column].dropna()
         before_count = len(self.df)
 
         if method == "iqr":
@@ -427,17 +530,17 @@ class DataCleaningWizard:
             lower_bound = Q1 - threshold * IQR
             upper_bound = Q3 + threshold * IQR
 
-            self.df = self.df[(self.df[column] >= lower_bound) & (self.df[column] <= upper_bound)]
+            self.df = self.df[(self.df[actual_column] >= lower_bound) & (self.df[actual_column] <= upper_bound)]
 
         elif method == "zscore":
             z_scores = np.abs(stats.zscore(data))
-            self.df = self.df[np.abs(stats.zscore(self.df[column])) <= threshold]
+            self.df = self.df[np.abs(stats.zscore(self.df[actual_column])) <= threshold]
 
         elif method == "winsorize":
             # Cap at percentiles instead of removing
-            lower = self.df[column].quantile(0.05)
-            upper = self.df[column].quantile(0.95)
-            self.df[column] = self.df[column].clip(lower, upper)
+            lower = self.df[actual_column].quantile(0.05)
+            upper = self.df[actual_column].quantile(0.95)
+            self.df[actual_column] = self.df[actual_column].clip(lower, upper)
 
         else:
             return {"error": f"Unknown method: {method}"}
@@ -448,7 +551,7 @@ class DataCleaningWizard:
         return {
             "success": True,
             "method": method,
-            "column": column,
+            "column": actual_column,
             "rows_removed": removed,
             "outliers_pct": (removed / before_count) * 100,
             "remaining_rows": after_count

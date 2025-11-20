@@ -206,12 +206,13 @@ class DataAnalyzer:
             direction = "positive" if r > 0 else "negative"
 
             return {
+                "correlation": float(r),
                 "correlation_coefficient": float(r),
                 "p_value": float(p),
                 "method": method_name,
                 "n_observations": len(data),
                 "interpretation": f"{strength} {direction} correlation",
-                "significant": p < 0.05
+                "significant": bool(p < 0.05)
             }
 
         except Exception as e:
@@ -303,11 +304,12 @@ class DataAnalyzer:
                         normality_results[col] = {
                             "statistic": float(stat),
                             "p_value": float(p),
-                            "normal": p > 0.05
+                            "normal": bool(p > 0.05)
                         }
 
                 return {
                     "test_type": test_type,
+                    "assumptions": normality_results,
                     "assumptions_checked": ["normality"],
                     "normality_tests": normality_results,
                     "guidance": "p > 0.05 suggests data is normally distributed"
@@ -568,12 +570,12 @@ class ProjectDetector:
                 "name": rproj_files[0].stem,
                 "path": str(self.working_dir),
                 "project_file": str(rproj_files[0]),
-                "r_files": len(list(self.working_dir.glob('*.R'))),
-                "rmd_files": len(list(self.working_dir.glob('*.Rmd')))
+                "r_files": len(list(self.working_dir.glob('**/*.R'))),  # FIXED: Recursive search
+                "rmd_files": len(list(self.working_dir.glob('**/*.Rmd')))  # FIXED: Recursive search
             }
 
         # Check for Jupyter notebooks
-        ipynb_files = list(self.working_dir.glob('*.ipynb'))
+        ipynb_files = list(self.working_dir.glob('**/*.ipynb'))  # FIXED: Recursive search
         if ipynb_files:
             return {
                 "type": "jupyter_project",
@@ -586,7 +588,7 @@ class ProjectDetector:
             return {
                 "type": "python_project",
                 "path": str(self.working_dir),
-                "py_files": len(list(self.working_dir.glob('*.py')))
+                "py_files": len(list(self.working_dir.glob('**/*.py')))  # FIXED: Recursive search
             }
 
         return None
