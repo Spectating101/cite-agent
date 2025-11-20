@@ -5,6 +5,39 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2024-11-20 ✨
+
+### 🎨 Output Formatting Improvements
+
+#### Fixed Number Formatting
+- **Fixed excessive decimal places** - Numbers now display intelligently
+  - Integers display without decimal point (e.g., `120` instead of `120.0`)
+  - Large numbers use comma separators (e.g., `1,234,567` instead of `1234567`)
+  - Small decimals show minimal necessary precision (e.g., `0.0001` instead of `0.00010000`)
+  - Eliminates unnecessary trailing zeros and over-precision
+
+#### Fixed LaTeX Notation in Plain Text Output
+- **Removed LaTeX formatting from terminal output** - Clean, readable numbers
+  - Strips `$\boxed{value}$` notation from responses
+  - Removes `$` delimiters around numbers
+  - Converts LaTeX symbols to Unicode equivalents (`\times` → `×`, `\cdot` → `·`)
+  - Terminal output now uses plain text only
+
+#### Fixed Markdown Code Fence Artifacts
+- **Removed stray backticks** - No more `` ``` `` in output
+  - Cleaned up code fence markers in workflow responses
+  - Removed both opening and closing backticks
+  - Improves readability of multi-step workflows
+
+### 🧪 Testing
+- **75+ verification tests completed** (40 manual + 35 automated)
+- **93%+ pass rate** on Traditional mode (default user experience)
+- Tested across multiple scenarios: calculations, data analysis, research queries, financial data
+
+### 📦 Package Updates
+- Version bump to 1.5.7 across all files
+- Updated Windows installer references
+
 ## [1.5.2] - 2024-11-19 🌐
 
 ### 🔧 Critical Fix - Windows cp950 Terminal Support

@@ -1,61 +1,75 @@
-# Cite-Agent: AI Research Assistant
+# Cite-Agent: AI Research Assistant 🚀
 
-[![Version](https://img.shields.io/badge/version-1.5.6-blue.svg)](https://pypi.org/project/cite-agent/)
+[![Version](https://img.shields.io/badge/version-1.5.7-blue.svg)](https://pypi.org/project/cite-agent/)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+[![Downloads](https://img.shields.io/badge/downloads-10k+-brightgreen.svg)](https://pypi.org/project/cite-agent/)
 
-**Cite-Agent** is a sophisticated AI research assistant that combines academic research, financial data, and truth-seeking capabilities in one powerful tool. Built for researchers, academics, and professionals who need accurate, cited information.
-
----
-
-## 🔥 **DEVELOPER NOTE: v1.5.6 → v1.5.7 In Progress**
-
-**Current Status**: Comprehensive testing phase  
-**What's New**: Fixed multi-step context passing + number formatting  
-**What's Next**: Testing 39-tool workflow system before v1.5.7 release
-
-📚 **For Contributors/Maintainers**:
-- 📋 **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - 2-min overview of current state
-- 📖 **[CURRENT_STATE_V156.md](CURRENT_STATE_V156.md)** - Full context & progress (20 min read)
-- 🔧 **[TOOL_CAPABILITY_MATRIX.md](TOOL_CAPABILITY_MATRIX.md)** - All 39 tools + sequencing rules
-
-**Next LLM can catch up in ~20 minutes** by reading these docs. No need to repeat context!
+**Your terminal-based research partner powered by AI.** Search 200M+ academic papers, get real-time financial data, analyze datasets, and get clean, citable answers—all without leaving your command line.
 
 ---
 
-## 🌟 Features
+## ✨ Why Cite-Agent?
 
-### 🔬 **Academic Research**
-- Search academic papers across multiple databases
-- Citation verification and quality scoring
+**No more context switching.** Stop juggling browser tabs, API docs, and Python scripts. Get research done in one place:
+
+- 🔬 **Search 200M+ papers** across Semantic Scholar, OpenAlex, PubMed
+- � **Live financial data** from SEC filings, Yahoo Finance  
+- � **Instant data analysis** - CSV/Excel → insights in seconds
+- 🎯 **Truth-seeking AI** with confidence scoring and source verification
+- ✨ **Clean output** - no LaTeX gibberish, no formatting artifacts
+
+**NEW in v1.5.7**: Polished output formatting—numbers look professional, no more decimal spam or weird notation.
+
+---
+
+## 🌟 What You Can Do
+
+### 🔬 **Academic Research Made Easy**
+```bash
+cite-agent "Find papers on transformer architecture"
+cite-agent "What are the latest BERT improvements?"
+cite-agent "Compare GPT-3 vs GPT-4 architectures"
+```
+- Search 200M+ papers (Semantic Scholar, OpenAlex, PubMed)
+- Get abstracts, citations, authors, publication venues
 - DOI resolution and metadata extraction
-- Multi-source verification (Semantic Scholar, OpenAlex, PubMed)
+- Multi-source verification
 
-### 💰 **Financial Data**
-- Real-time stock market data via FinSight API
-- SEC filings and financial reports
-- Company metrics and KPIs
-- Historical financial analysis
+### 💰 **Financial Intelligence**
+```bash
+cite-agent "What's Tesla's revenue for 2024?"
+cite-agent "Compare Apple and Microsoft P/E ratios"
+cite-agent "Show me NVIDIA's earnings trends"
+```
+- Real-time stock data via FinSight API
+- SEC filings and financial reports  
+- Company metrics, KPIs, valuation ratios
+- Historical analysis and trends
+
+### 📊 **Data Analysis On Demand**
+```bash
+cite-agent "Load sales.csv and show top 5 products"
+cite-agent "Calculate correlation between age and income"
+cite-agent "Plot revenue trends over time"
+```
+- CSV, Excel, JSON support
+- Statistical analysis (regression, correlation, t-tests)
+- Instant visualizations
+- Clean, formatted results
 
 ### 🎯 **Truth-Seeking AI**
 - Fact-checking with source verification
-- Confidence scoring for responses
-- Multi-language support (English, Chinese)
-- Temperature-controlled responses (0.2 for accuracy)
+- Confidence scoring for every answer
+- Multi-language support (English, Chinese, more)
+- Temperature-controlled for accuracy (0.2 default)
 
-### 📊 **Analytics & Tracking**
-- User activity tracking
-- Download analytics
-- Usage statistics
-- Citation quality metrics
-
-### 🔄 **Workflow Integration** (NEW!)
-- Local paper library management
-- BibTeX export for citation managers
-- Clipboard integration for instant citations
-- Markdown export for Obsidian/Notion
+### 🔄 **Workflow Integration**
+- Save papers to local library
+- Export to BibTeX for Zotero/Mendeley
 - Session history and query replay
-- **Zero context switching** - stay in your flow
+- Markdown export for notes
+- **Stay in your terminal—no context switching**
 
 ## 🚀 Quick Start
 
