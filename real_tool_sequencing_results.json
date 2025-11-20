@@ -1,0 +1,235 @@
+{
+  "test_suite": "Real Tool Sequencing v1.5.6",
+  "timestamp": "2025-11-20T12:35:29.841002",
+  "tests": [
+    {
+      "name": "Tesla_Revenue_Analysis",
+      "status": "\u2705 PASS",
+      "query": "Analyze Tesla's revenue for the last 2 years. Get the financial data, then calculate the growth rate.",
+      "elapsed": 7.41,
+      "expected_steps": 2,
+      "actual_steps": 2,
+      "expected_tools": [
+        "get_financial_data",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 4115
+    },
+    {
+      "name": "Apple_PE_Ratio_Deep_Analysis",
+      "status": "\u2705 PASS",
+      "query": "Get Apple's current P/E ratio, then compare it to the tech industry average, and tell me if it's overvalued or undervalued.",
+      "elapsed": 17.02,
+      "expected_steps": 3,
+      "actual_steps": 3,
+      "expected_tools": [
+        "get_financial_data",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 5655
+    },
+    {
+      "name": "Microsoft_5Year_Revenue_Trend",
+      "status": "\u274c FAIL",
+      "query": "Analyze Microsoft's revenue trend over the last 5 years. Fetch the data, calculate year-over-year growth rates, and identify any patterns.",
+      "elapsed": 5.32,
+      "expected_steps": 3,
+      "actual_steps": 2,
+      "expected_tools": [
+        "get_financial_data",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 4378
+    },
+    {
+      "name": "CSV_File_Statistical_Analysis",
+      "status": "\u274c FAIL",
+      "query": "Load the file 'sample_data.csv', analyze the descriptive statistics, and tell me the mean and standard deviation of all numeric columns.",
+      "elapsed": 3.81,
+      "expected_steps": 2,
+      "actual_steps": 0,
+      "expected_tools": [
+        "load_dataset",
+        "analyze_data"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "analyze_data",
+        "execute_shell_command",
+        "read_file"
+      ],
+      "validation": "\u274c FAIL",
+      "has_synthesis": false,
+      "output_length": 3344
+    },
+    {
+      "name": "Exam_Data_Regression_Analysis",
+      "status": "\u274c FAIL",
+      "query": "Load 'exam_data.csv' and run a regression to predict final_score from study_hours. Then tell me how much each additional study hour improves the score.",
+      "elapsed": 12.11,
+      "expected_steps": 3,
+      "actual_steps": 0,
+      "expected_tools": [
+        "load_dataset",
+        "run_regression",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command",
+        "read_file"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": false,
+      "output_length": 6107
+    },
+    {
+      "name": "Read_Numbers_Calculate_Stats",
+      "status": "\u274c FAIL",
+      "query": "Read the file 'numbers.txt', extract all the numbers from it, calculate their mean, median, and standard deviation.",
+      "elapsed": 3.97,
+      "expected_steps": 3,
+      "actual_steps": 2,
+      "expected_tools": [
+        "read_file",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command",
+        "read_file"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 3671
+    },
+    {
+      "name": "Shell_File_Count_Analysis",
+      "status": "\u274c FAIL",
+      "query": "Count how many Python files are in the current directory using shell command, then calculate what percentage they represent of all files.",
+      "elapsed": 1.83,
+      "expected_steps": 3,
+      "actual_steps": 0,
+      "expected_tools": [
+        "execute_shell_command",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "execute_shell_command"
+      ],
+      "validation": "\u274c FAIL",
+      "has_synthesis": false,
+      "output_length": 2148
+    },
+    {
+      "name": "Factorial_Chain_Complex",
+      "status": "\u274c FAIL",
+      "query": "Calculate 10 factorial, then divide that result by 5, then multiply by 2, then check if the final result is prime.",
+      "elapsed": 4.83,
+      "expected_steps": 4,
+      "actual_steps": 3,
+      "expected_tools": [
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 4497
+    },
+    {
+      "name": "Statistical_Computation_Chain",
+      "status": "\u2705 PASS",
+      "query": "Calculate the mean of [10, 20, 30, 40, 50], then calculate the variance, then the standard deviation, then the coefficient of variation.",
+      "elapsed": 6.3,
+      "expected_steps": 4,
+      "actual_steps": 4,
+      "expected_tools": [
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 4925
+    },
+    {
+      "name": "Financial_Data_To_File_Analysis",
+      "status": "\u2705 PASS",
+      "query": "Get Tesla's revenue data, then save it to a file called 'tesla_revenue.txt', then read the file back and calculate the average.",
+      "elapsed": 5.1,
+      "expected_steps": 4,
+      "actual_steps": 4,
+      "expected_tools": [
+        "get_financial_data",
+        "write_file",
+        "read_file",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "run_python_code",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": true,
+      "output_length": 5008
+    },
+    {
+      "name": "Shell_Count_Then_Math",
+      "status": "\u274c FAIL",
+      "query": "Use shell to count the total number of files in the current directory, then calculate the factorial of that number.",
+      "elapsed": 1.8,
+      "expected_steps": 2,
+      "actual_steps": 0,
+      "expected_tools": [
+        "execute_shell_command",
+        "run_python_code"
+      ],
+      "actual_tools": [
+        "get_financial_data",
+        "execute_shell_command"
+      ],
+      "validation": "\u2705 PASS",
+      "has_synthesis": false,
+      "output_length": 2148
+    }
+  ],
+  "summary": {
+    "total_tests": 11,
+    "passed": 4,
+    "failed": 7,
+    "pass_rate": "36.4%"
+  }
+}
