@@ -16,6 +16,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
 
+# Load environment variables from .env.local if it exists (for local development)
+# This must happen BEFORE EnhancedNocturnalAgent is initialized
+try:
+    from dotenv import load_dotenv
+    env_file = Path(__file__).parent.parent / '.env.local'
+    if env_file.exists():
+        load_dotenv(env_file)
+except ImportError:
+    pass  # dotenv not available, skip
+
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -59,19 +69,41 @@ try:
 except:
     SUPPORTS_EMOJI = True
 
+def safe_print(text: str):
+    """Print text with emoji fallback for encodings that don't support them"""
+    if not SUPPORTS_EMOJI:
+        emoji_map = {'🤖': '[Agent]', '🔄': '[Update]', '✅': '[OK]', '❌': '[FAIL]'}
+        for emoji, replacement in emoji_map.items():
+            text = text.replace(emoji, replacement)
+    print(text)
+
 
 class NocturnalCLI:
     """Command Line Interface for Cite Agent"""
     
     def __init__(self):
         self.agent: Optional[EnhancedNocturnalAgent] = None
-        self.session_id = f"cli_{os.getpid()}"
+        
+        # Persistent session ID across CLI invocations
+        self.session_id = self._get_or_create_session_id()
+        
         self.telemetry = None
         self.workflow = WorkflowManager()
         self.workflow_cli = WorkflowCLI()
         
         # Use module-level emoji support detection
         self.supports_emoji = SUPPORTS_EMOJI
+        
+        # For problematic encodings (cp950, gbk), use the original encoding but ignore errors
+        # This preserves normal text while gracefully handling emoji/unicode
+        if not SUPPORTS_EMOJI:
+            try:
+                # Keep cp950 encoding but ignore unencodable characters instead of replacing with ?
+                current_encoding = sys.stdout.encoding or 'cp950'
+                sys.stdout.reconfigure(encoding=current_encoding, errors='ignore')
+                sys.stderr.reconfigure(encoding=current_encoding, errors='ignore')
+            except (AttributeError, OSError):
+                pass  # reconfigure not available or failed, continue anyway
         
         self.console = Console(
             theme=Theme({
@@ -94,7 +126,18 @@ class NocturnalCLI:
             '💡': '[Tip]',
             '🔍': '[Search]',
             '🗃️': '[File]',
+            '🤖': '[Agent]',
+            '🔄': '[Update]',
         }
+    
+    def _clean_emoji(self, text: str) -> str:
+        """Remove or replace emojis for terminals that don't support them"""
+        if self.supports_emoji:
+            return text
+        # Replace known emojis
+        for emoji, replacement in self.emoji_map.items():
+            text = text.replace(emoji, replacement)
+        return text
         
         self._tips = [
             "Use [bold]nocturnal --setup[/] to rerun the onboarding wizard anytime.",
@@ -107,6 +150,45 @@ class NocturnalCLI:
             "If you see an auto-update notice, the CLI will restart itself to load the latest build.",
         ]
         self._default_artifacts = Path("artifacts_autonomy.json")
+    
+    def _get_or_create_session_id(self) -> str:
+        """
+        Get or create persistent session ID for conversation continuity.
+        Stored in ~/.cite_agent/current_session.txt
+        This allows multiple CLI invocations to share the same conversation context.
+        """
+        import uuid
+        
+        session_file = Path.home() / ".cite_agent" / "current_session.txt"
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Check if session file exists and is recent (within 24 hours)
+        if session_file.exists():
+            try:
+                session_data = json.loads(session_file.read_text())
+                session_id = session_data.get("session_id")
+                created_at = session_data.get("created_at")
+                
+                # Parse timestamp
+                created_time = datetime.fromisoformat(created_at)
+                age_hours = (datetime.now() - datetime.fromisoformat(created_at)).total_seconds() / 3600
+                
+                # Use existing session if < 24 hours old
+                if age_hours < 24:
+                    return session_id
+            except (json.JSONDecodeError, KeyError, ValueError):
+                pass  # Create new session
+        
+        # Create new session
+        new_session_id = f"cli_{uuid.uuid4().hex[:8]}"
+        
+        session_data = {
+            "session_id": new_session_id,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        session_file.write_text(json.dumps(session_data, indent=2))
+        return new_session_id
     
     def _safe_text(self, text: str) -> str:
         """Replace emojis and problematic Unicode with ASCII alternatives for terminals that don't support them"""
@@ -265,7 +347,7 @@ class NocturnalCLI:
         )
         panel = Panel(
             message,
-            title="🤖  Initializing Cite Agent",
+            title=self._clean_emoji("🤖  Initializing Cite Agent"),
             border_style="magenta",
             padding=(1, 2),
             box=box.ROUNDED,
@@ -425,7 +507,7 @@ class NocturnalCLI:
             pass
     
     async def interactive_mode(self):
-        """Interactive chat mode"""
+        """Interactive chat mode with multi-line support"""
         if not await self.initialize():
             return
         
@@ -442,13 +524,39 @@ class NocturnalCLI:
         except:
             pass  # Silently skip if detection fails
         
-        self.console.print("\n[bold]🤖 Interactive Mode[/] — Type your questions or 'quit' to exit")
+        self.console.print(self._clean_emoji("\n[bold]🤖 Interactive Mode[/] — Multi-line input supported"))
+        self.console.print(self._clean_emoji("[dim]💡 Tip: Press Enter twice to submit, or 'quit' to exit[/dim]"))
         self.console.rule(style="magenta")
         
         try:
             while True:
                 try:
-                    user_input = self.console.input("\n[bold cyan]👤 You[/]: ").strip()
+                    # Multi-line input collection
+                    lines = []
+                    self.console.print("\n[bold cyan]👤 You[/]: ", end="")
+                    
+                    first_line = input().strip()
+                    if first_line.lower() in ['quit', 'exit', 'q']:
+                        break
+                    
+                    lines.append(first_line)
+                    
+                    # If first line is not empty, continue collecting lines
+                    if first_line:
+                        while True:
+                            self.console.print("[dim]... [/]", end="")
+                            line = input()
+                            
+                            # Empty line signals end of input
+                            if not line.strip():
+                                break
+                            
+                            lines.append(line)
+                    
+                    user_input = "\n".join(lines).strip()
+                    
+                    if not user_input:
+                        continue
                     
                     if user_input.lower() in ['quit', 'exit', 'q']:
                         break
@@ -512,7 +620,7 @@ class NocturnalCLI:
                         live.stop()
 
                     # Print response immediately (no artificial typing delay)
-                    self.console.print("[bold violet]🤖 Agent[/]: ", end="", highlight=False)
+                    self.console.print(self._clean_emoji("[bold violet]🤖 Agent[/]: "), end="", highlight=False)
                     self.console.print(response.response)
 
                     # Save to history automatically
@@ -670,14 +778,13 @@ class NocturnalCLI:
             
             self.console.print(self._safe_text(f"\n📝 [bold]Response[/]:\n{response.response}"))
             
-            # Tools used removed for cleaner output
-            
-            if response.tokens_used > 0:
-                stats = self.agent.get_usage_stats()
-                self.console.print(self._safe_text(
-                    f"\n📊 Tokens used: {response.tokens_used} "
-                    f"(Daily usage: {stats['usage_percentage']:.1f}%)"
-                ))
+            # Token usage stats removed - not useful for end users
+            # if response.tokens_used > 0:
+            #     stats = self.agent.get_usage_stats()
+            #     self.console.print(self._safe_text(
+            #         f"\n📊 Tokens used: {response.tokens_used} "
+            #         f"(Daily usage: {stats['usage_percentage']:.1f}%)"
+            #     ))
         
         finally:
             if self.agent:
@@ -850,7 +957,7 @@ class NocturnalCLI:
             return
         
         try:
-            self.console.print(f"🤖 [bold]Processing[/]: {question}")
+            self.console.print(self._clean_emoji(f"🤖 [bold]Processing[/]: {question}"))
             self.console.rule(style="magenta")
             
             request = ChatRequest(
@@ -865,12 +972,13 @@ class NocturnalCLI:
             
             # Tools used removed for cleaner output
             
-            if response.tokens_used > 0:
-                stats = self.agent.get_usage_stats()
-                self.console.print(
-                    f"\n📊 Tokens used: {response.tokens_used} "
-                    f"(Daily usage: {stats['usage_percentage']:.1f}%)"
-                )
+            # Token usage stats removed - not useful for end users
+            # if response.tokens_used > 0:
+            #     stats = self.agent.get_usage_stats()
+            #     self.console.print(
+            #         f"\n📊 Tokens used: {response.tokens_used} "
+            #         f"(Daily usage: {stats['usage_percentage']:.1f}%)"
+            #     )
             
             # Workflow integrations
             if copy_to_clipboard:
@@ -1242,8 +1350,22 @@ Examples:
                 # Check if user has any auth configured
                 has_auth = False
 
+                # Check for session.json (production auth)
+                session_file = Path.home() / ".nocturnal_archive" / "session.json"
+                if session_file.exists():
+                    try:
+                        import json
+                        with open(session_file, 'r') as f:
+                            session_data = json.load(f)
+                            if session_data.get('auth_token'):
+                                has_auth = True
+                                # Mark first run as complete since session exists
+                                first_run_marker.write_text(str(time.time()))
+                    except:
+                        pass
+
                 # Check environment variables
-                if os.getenv("NOCTURNAL_ACCOUNT_EMAIL") or os.getenv("ARCHIVE_API_KEY"):
+                if not has_auth and (os.getenv("NOCTURNAL_ACCOUNT_EMAIL") or os.getenv("ARCHIVE_API_KEY")):
                     has_auth = True
 
                 # Check keyring if available
@@ -1320,7 +1442,7 @@ Examples:
                 current = update_info["current"]
                 latest = update_info["latest"]
                 
-                print(f"\n🔄 Updating Cite Agent: v{current} → v{latest}...")
+                safe_print(f"\n🔄 Updating Cite Agent: v{current} → v{latest}...")
                 
                 # Detect if installed via pipx or pip
                 import shutil
@@ -1334,7 +1456,9 @@ Examples:
                     )
                     if result.returncode == 0:
                         print(f"✅ Updated to v{latest} (via pipx)")
-                        print("🔄 Restart cite-agent to use the new version\n")
+                        safe_print("🔄 Restarting cite-agent with new version...\n")
+                        # Auto-restart with new version
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
                         return
                 
                 # Fall back to pip install --user
@@ -1347,7 +1471,9 @@ Examples:
                 
                 if result.returncode == 0:
                     print(f"✅ Updated to v{latest}")
-                    print("🔄 Restart cite-agent to use the new version\n")
+                    safe_print("🔄 Restarting cite-agent with new version...\n")
+                    # Auto-restart with new version
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
                 else:
                     # Silent fail - don't show errors to users
                     pass

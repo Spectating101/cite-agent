@@ -217,6 +217,189 @@ class FunctionCallingAgent:
         self.model = model
         self.provider = provider
         self.debug_mode = os.getenv("NOCTURNAL_DEBUG", "").lower() == "1"
+    
+    def _apply_output_formatting(self, text: str) -> str:
+        """
+        Comprehensive markdown to ANSI conversion for rich terminal output.
+        
+        ANSI Escape Codes Reference:
+        - \033[0m  = Reset all
+        - \033[1m  = Bold
+        - \033[2m  = Dim
+        - \033[3m  = Italic
+        - \033[4m  = Underline
+        - \033[7m  = Inverse (swap fg/bg)
+        - \033[9m  = Strikethrough
+        - \033[30-37m = Foreground colors (black, red, green, yellow, blue, magenta, cyan, white)
+        - \033[40-47m = Background colors
+        - \033[90-97m = Bright foreground colors
+        - \033[1;36m = Bold cyan (headers)
+        - \033[1;32m = Bold green (success)
+        - \033[1;33m = Bold yellow (warning)
+        - \033[1;31m = Bold red (error)
+        
+        Markdown Conversions:
+        - # Header          -> Bold bright cyan + uppercase
+        - ## Header         -> Bold cyan
+        - ### Header        -> Bold white
+        - #### Header       -> Bold
+        - **bold**          -> Bold (preserves statistical **)
+        - *italic*          -> Italic (preserves bullets and statistical *)
+        - __underline__     -> Underline
+        - ~~strikethrough~~ -> Strikethrough
+        - `code`            -> Dim (inline code)
+        - > blockquote      -> Dim + italic
+        - [link](url)       -> Underline (just the text)
+        - ---/***/___ (hr)  -> Dim line
+        
+        Preserves:
+        - Statistical notation: p<0.01**, p<0.05*, R²=0.95**
+        - List bullets: *, -, +, 1., 2., etc.
+        - Emojis: 📊, ✅, ❌, etc. (pass through)
+        """
+        import re
+        
+        # Step 1: Remove problematic code fences
+        text = re.sub(r'```python\s*\n', '', text)
+        text = re.sub(r'```\s*\n```', '', text)
+        
+        # Step 2: Headers (process FIRST, from largest to smallest)
+        # # Header -> Bold bright cyan + UPPERCASE
+        text = re.sub(
+            r'^#\s+(.+)$',
+            lambda m: f'\033[1;96m{m.group(1).upper()}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        # ## Header -> Bold cyan
+        text = re.sub(
+            r'^##\s+(.+)$',
+            lambda m: f'\033[1;36m{m.group(1)}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        # ### Header -> Bold white
+        text = re.sub(
+            r'^###\s+(.+)$',
+            lambda m: f'\033[1;97m{m.group(1)}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        # #### Header -> Bold
+        text = re.sub(
+            r'^####\s+(.+)$',
+            lambda m: f'\033[1m{m.group(1)}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        
+        # Step 3: Horizontal rules (---, ***, ___)
+        text = re.sub(
+            r'^[\-\*_]{3,}$',
+            lambda m: f'\033[2m{m.group(0)}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        
+        # Step 4: Blockquotes (> text)
+        text = re.sub(
+            r'^>\s+(.+)$',
+            lambda m: f'\033[2;3m{m.group(1)}\033[0m',
+            text,
+            flags=re.MULTILINE
+        )
+        
+        # Step 5: Links [text](url) -> keep text, underline it
+        text = re.sub(
+            r'\[([^\]]+)\]\([^\)]+\)',
+            lambda m: f'\033[4m{m.group(1)}\033[0m',
+            text
+        )
+        
+        # Step 6: Inline code `text` -> dim
+        text = re.sub(
+            r'`([^`]+)`',
+            lambda m: f'\033[2m{m.group(1)}\033[0m',
+            text
+        )
+        
+        # Step 7: Strikethrough ~~text~~
+        text = re.sub(
+            r'~~([^~]+)~~',
+            lambda m: f'\033[9m{m.group(1)}\033[0m',
+            text
+        )
+        
+        # Step 8: Underline __text__
+        text = re.sub(
+            r'__([^_]+)__',
+            lambda m: f'\033[4m{m.group(1)}\033[0m',
+            text
+        )
+        
+        # Step 9: Bold **text** (preserve statistical notation)
+        def convert_bold(match):
+            full_match = match.group(0)
+            content = match.group(1)
+            
+            # Preserve if preceded by number/operator (statistical notation)
+            if match.start() > 0:
+                char_before = text[match.start() - 1]
+                if char_before in '0123456789<>=.,':
+                    return full_match
+            
+            # Preserve if followed by number (like **2.5 -> statistical)
+            if match.end() < len(text):
+                char_after = text[match.end()]
+                if char_after in '0123456789':
+                    return full_match
+            
+            return f'\033[1m{content}\033[0m'
+        
+        text = re.sub(r'\*\*([^*]+?)\*\*', convert_bold, text)
+        
+        # Step 10: Italic *text* (preserve statistical notation and bullets)
+        def convert_italic(match):
+            full_match = match.group(0)
+            content = match.group(1)
+            
+            # Don't convert if:
+            # 1. At start of line (list bullet)
+            if match.start() == 0 or (match.start() > 0 and text[match.start() - 1] in '\n\r'):
+                return full_match
+            
+            # 2. After number/operator (statistical notation like 2.5*)
+            if match.start() > 0:
+                char_before = text[match.start() - 1]
+                if char_before in '0123456789<>=.,':
+                    return full_match
+            
+            # 3. Single char (likely a bullet or notation)
+            if len(content) <= 1:
+                return full_match
+            
+            # 4. Followed by number (statistical notation)
+            if match.end() < len(text):
+                char_after = text[match.end()]
+                if char_after in '0123456789':
+                    return full_match
+            
+            return f'\033[3m{content}\033[0m'
+        
+        # Match *text* that's not at line start or after numbers
+        text = re.sub(r'\*([^*\s][^*]*?)\*', convert_italic, text)
+        
+        # Step 11: List items - add subtle color
+        # Numbered lists: 1. item -> keep as-is (already clear)
+        # Bullet lists: * item, - item, + item -> add dim color to bullet
+        text = re.sub(
+            r'^([\*\-\+])\s+',
+            lambda m: f'\033[2m{m.group(1)}\033[0m ',
+            text,
+            flags=re.MULTILINE
+        )
+        
+        return text
 
     async def process_query(
         self,
@@ -786,8 +969,11 @@ class FunctionCallingAgent:
             if self.debug_mode:
                 print(f"🔍 [Function Calling] Final response generated ({tokens_used} tokens)")
 
+            # Apply formatting: clean markdown, format numbers
+            formatted_response = self._apply_output_formatting(final_response)
+            
             return FunctionCallingResponse(
-                response=final_response,
+                response=formatted_response,
                 tool_calls=tool_calls,
                 tool_results=tool_execution_results,
                 tokens_used=tokens_used,

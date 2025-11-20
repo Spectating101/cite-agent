@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import tempfile
 import os
 import re
 import shlex
@@ -30,7 +31,6 @@ from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
 from .function_calling import FunctionCallingAgent
 from .tool_executor import ToolExecutor
-from .session_memory_manager import SessionMemoryManager
 from .timeout_retry_handler import TimeoutRetryHandler, RetryConfig
 
 # Infrastructure for production sophistication
@@ -79,6 +79,62 @@ class EnhancedNocturnalAgent:
     - Memory system for context retention
     """
     
+    # Check encoding support at class level
+    _encoding_supports_emoji = None
+    
+    @classmethod
+    def _check_emoji_support(cls):
+        """Check if terminal supports emoji (cached)"""
+        if cls._encoding_supports_emoji is None:
+            try:
+                import sys
+                encoding = sys.stdout.encoding or 'utf-8'
+                cls._encoding_supports_emoji = encoding.lower() not in ['cp950', 'cp936', 'gbk', 'gb2312', 'ascii']
+            except:
+                cls._encoding_supports_emoji = True
+        return cls._encoding_supports_emoji
+    
+    @staticmethod
+    def _safe_print(text: str):
+        """Print text with emoji fallback for encodings that don't support them"""
+        try:
+            if not EnhancedNocturnalAgent._check_emoji_support():
+                # Replace emojis with ASCII equivalents
+                emoji_map = {
+                    '🐛': '[DEBUG]',
+                    '🔍': '[SEARCH]',
+                    '🔴': '[ERROR]',
+                    '⚠️': '[WARNING]',
+                    '✅': '[OK]',
+                    '❌': '[FAIL]',
+                    '📝': '[NOTE]',
+                    '🤖': '[BOT]',
+                }
+                for emoji, replacement in emoji_map.items():
+                    text = text.replace(emoji, replacement)
+            print(text)
+        except UnicodeEncodeError:
+            # Last resort: remove all non-ASCII
+            print(text.encode('ascii', errors='replace').decode('ascii'))
+    
+    @staticmethod
+    def _clean_response_text(text: str) -> str:
+        """Clean response text for terminals that don't support emojis"""
+        if not EnhancedNocturnalAgent._check_emoji_support():
+            emoji_map = {
+                '🐛': '[DEBUG]',
+                '🔍': '[SEARCH]',
+                '🔴': '[ERROR]',
+                '⚠️': '[WARNING]',
+                '✅': '[OK]',
+                '❌': '[FAIL]',
+                '📝': '[NOTE]',
+                '🤖': '[BOT]',
+            }
+            for emoji, replacement in emoji_map.items():
+                text = text.replace(emoji, replacement)
+        return text
+    
     def __init__(self):
         self.client = None
         self.conversation_history = []
@@ -114,13 +170,10 @@ class EnhancedNocturnalAgent:
         self.workflow = WorkflowManager()
         self.last_paper_result = None  # Track last paper mentioned for "save that"
         self.archive = ConversationArchive()
-
-        # Session memory manager - prevents memory leaks in long conversations
-        self.memory_manager = SessionMemoryManager(
-            max_messages_in_memory=50,
-            archive_threshold_messages=100,
-            recent_context_window=10
-        )
+        
+        # CRITICAL: Persistent usage database for cross-process tracking
+        from .usage_database import get_usage_db
+        self.usage_db = get_usage_db()
 
         # Timeout retry handler - improves reliability for API calls
         self.retry_handler = TimeoutRetryHandler(
@@ -244,7 +297,7 @@ class EnhancedNocturnalAgent:
 
         debug_mode = self.debug_mode
         if debug_mode:
-            print(f"🔍 _load_authentication: USE_LOCAL_KEYS={os.getenv('USE_LOCAL_KEYS')}, use_local_keys={use_local_keys}")
+            self._safe_print(f"🔍 _load_authentication: USE_LOCAL_KEYS={os.getenv('USE_LOCAL_KEYS')}, use_local_keys={use_local_keys}")
 
         # Check for temp API key FIRST (before deciding on backend vs local mode)
         temp_api_key_available = False
@@ -272,8 +325,8 @@ class EnhancedNocturnalAgent:
                                 temp_api_key_available = True
                                 if debug_mode:
                                     time_left = (expires_at - now).total_seconds() / 3600
-                                    print(f"✅ Using temporary local key (expires in {time_left:.1f}h)")
-                                    print(f"🔍 Temp key OVERRIDES use_local_keys - switching to LOCAL MODE")
+                                    self._safe_print(f"✅ Using temporary local key (expires in {time_left:.1f}h)")
+                                    self._safe_print(f"🔍 Temp key OVERRIDES use_local_keys - switching to LOCAL MODE")
                             else:
                                 if debug_mode:
                                     print(f"⏰ Temporary key expired, using backend mode")
@@ -281,19 +334,19 @@ class EnhancedNocturnalAgent:
                                 self.temp_api_key = None
                         except Exception as e:
                             if debug_mode:
-                                print(f"⚠️ Error parsing temp key expiration: {e}")
+                                self._safe_print(f"⚠️ Error parsing temp key expiration: {e}")
                             self.temp_api_key = None
                     else:
                         self.temp_api_key = None
             except Exception as e:
                 if debug_mode:
-                    print(f"🔍 _load_authentication: ERROR loading temp key: {e}")
+                    self._safe_print(f"🔍 _load_authentication: ERROR loading temp key: {e}")
                 self.temp_api_key = None
 
         # HYBRID MODE: Load auth_token even when temp_api_key exists
         # This enables: temp keys for fast Archive/FinSight calls, backend for synthesis
         if debug_mode:
-            print(f"🔍 _load_authentication: session_file exists={session_file.exists()}")
+            self._safe_print(f"🔍 _load_authentication: session_file exists={session_file.exists()}")
 
         if session_file.exists():
             try:
@@ -304,12 +357,12 @@ class EnhancedNocturnalAgent:
                     self.user_id = session_data.get('account_id')
 
                     if debug_mode:
-                        print(f"🔍 _load_authentication: loaded auth_token={bool(self.auth_token)}, user_id={self.user_id}")
+                        self._safe_print(f"🔍 _load_authentication: loaded auth_token={bool(self.auth_token)}, user_id={self.user_id}")
                         if temp_api_key_available:
-                            print(f"🔍 HYBRID MODE: Have both temp_api_key + auth_token")
+                            self._safe_print(f"🔍 HYBRID MODE: Have both temp_api_key + auth_token")
             except Exception as e:
                 if debug_mode:
-                    print(f"🔍 _load_authentication: ERROR loading session: {e}")
+                    self._safe_print(f"🔍 _load_authentication: ERROR loading session: {e}")
                 self.auth_token = None
                 self.user_id = None
         else:
@@ -336,10 +389,10 @@ class EnhancedNocturnalAgent:
                     self.user_id = account_id
 
                     if debug_mode:
-                        print(f"🔍 _load_authentication: Auto-created session.json from config.env")
+                        self._safe_print(f"🔍 _load_authentication: Auto-created session.json from config.env")
                 except Exception as e:
                     if debug_mode:
-                        print(f"🔍 _load_authentication: Failed to auto-create session: {e}")
+                        self._safe_print(f"🔍 _load_authentication: Failed to auto-create session: {e}")
                     self.auth_token = None
                     self.user_id = None
             else:
@@ -443,11 +496,11 @@ class EnhancedNocturnalAgent:
             debug_mode = self.debug_mode
             if debug_mode:
                 if self.api_key == "demo-key-123":
-                    print("⚠️ Using demo API key")
-                print(f"✅ API clients initialized (Archive={self.archive_base_url}, FinSight={self.finsight_base_url})")
+                    self._safe_print("⚠️ Using demo API key")
+                self._safe_print(f"✅ API clients initialized (Archive={self.archive_base_url}, FinSight={self.finsight_base_url})")
             
         except Exception as e:
-            print(f"⚠️ API client initialization warning: {e}")
+            self._safe_print(f"⚠️ API client initialization warning: {e}")
 
     def _update_service_roots(self) -> None:
         roots = set()
@@ -563,11 +616,12 @@ class EnhancedNocturnalAgent:
 
         snippets: List[str] = []
         for item in self._recent_sources[:4]:
-            status = "ok" if item.get("success") else f"error ({item.get('detail')})" if item.get("detail") else "error"
-            snippets.append(f"{item.get('service')} {item.get('endpoint')} – {status}")
+            # Only show successful sources, hide error details from users
+            if item.get("success"):
+                snippets.append(f"{item.get('service')} {item.get('endpoint')} – ok")
         if len(self._recent_sources) > 4:
             snippets.append("…")
-        return "Data sources: " + "; ".join(snippets)
+        return "Data sources: " + "; ".join(snippets) if snippets else ""
 
     def _reset_data_sources(self) -> None:
         self._recent_sources = []
@@ -670,7 +724,7 @@ class EnhancedNocturnalAgent:
         except ImportError:
             pass
         except Exception as exc:
-            print(f"⚠️ Environment setup warning: {exc}")
+            self._safe_print(f"⚠️ Environment setup warning: {exc}")
 
         try:
             from dotenv import load_dotenv
@@ -759,8 +813,9 @@ class EnhancedNocturnalAgent:
 
         if note:
             message_parts.append(note)
-        if error:
-            message_parts.append(f"Workspace API warning: {error}")
+        # Don't expose internal API errors to users
+        # if error:
+        #     message_parts.append(f"Workspace API warning: {error}")
         if truncated_flag:
             message_parts.append("(Listing truncated by workspace service)")
 
@@ -1073,6 +1128,127 @@ class EnhancedNocturnalAgent:
             if not hasattr(self, 'language_preference'):
                 self.language_preference = 'en'
 
+    def _format_large_numbers(self, text: str) -> str:
+        """
+        Format ONLY raw Python execution output numbers.
+        
+        Use case: When Python prints "28095000000.0000", format to "28.1B"
+        
+        BUT: Don't touch LLM-generated text! LLM already formats numbers well:
+        - "250 k" (good!)
+        - "≈ 200 k" (good!)
+        - "$28.1B" (already formatted!)
+        
+        Only format if we see raw unformatted numbers from code execution.
+        """
+        import re
+        
+        # Only format numbers that look like raw Python output
+        # These are numbers with many digits and unnecessary decimal places
+        def format_number(match):
+            num_str = match.group(0)
+            try:
+                num = float(num_str)
+                
+                # Only format truly large unformatted numbers
+                # (More than 7 digits suggests raw output, not LLM formatting)
+                if abs(num) >= 10_000_000:  # 10 million+
+                    if abs(num) >= 1_000_000_000:
+                        return f"{num / 1_000_000_000:,.1f}B"
+                    else:
+                        return f"{num / 1_000_000:,.1f}M"
+                
+                return num_str
+            except (ValueError, OverflowError):
+                return num_str
+        
+        # Match numbers with 8+ digits (likely raw Python output)
+        result = re.sub(
+            r'\b\d{8,}\.?\d*\b',
+            format_number,
+            text
+        )
+        
+        return result
+    
+    def _clean_markdown_preserve_stats(self, text: str) -> str:
+        """
+        Convert markdown to ANSI for terminal rendering.
+        Uses same comprehensive conversion as function_calling.py.
+        
+        This preserves statistical notation while making markdown render properly.
+        """
+        # Import the shared formatting logic
+        # Note: This is the same implementation as function_calling.py
+        # Keeping it DRY by using the same approach
+        return self._markdown_to_ansi(text)
+    
+    def _markdown_to_ansi(self, text: str) -> str:
+        """
+        Shared markdown to ANSI conversion logic.
+        Supports all common markdown features while preserving statistical notation.
+        """
+        import re
+        
+        # Remove code fences
+        text = re.sub(r'```python\s*\n', '', text)
+        text = re.sub(r'```\s*\n```', '', text)
+        
+        # Headers (largest to smallest)
+        text = re.sub(r'^#\s+(.+)$', lambda m: f'\033[1;96m{m.group(1).upper()}\033[0m', text, flags=re.MULTILINE)
+        text = re.sub(r'^##\s+(.+)$', lambda m: f'\033[1;36m{m.group(1)}\033[0m', text, flags=re.MULTILINE)
+        text = re.sub(r'^###\s+(.+)$', lambda m: f'\033[1;97m{m.group(1)}\033[0m', text, flags=re.MULTILINE)
+        text = re.sub(r'^####\s+(.+)$', lambda m: f'\033[1m{m.group(1)}\033[0m', text, flags=re.MULTILINE)
+        
+        # Horizontal rules
+        text = re.sub(r'^[\-\*_]{3,}$', lambda m: f'\033[2m{m.group(0)}\033[0m', text, flags=re.MULTILINE)
+        
+        # Blockquotes
+        text = re.sub(r'^>\s+(.+)$', lambda m: f'\033[2;3m{m.group(1)}\033[0m', text, flags=re.MULTILINE)
+        
+        # Links [text](url)
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', lambda m: f'\033[4m{m.group(1)}\033[0m', text)
+        
+        # Inline code `text`
+        text = re.sub(r'`([^`]+)`', lambda m: f'\033[2m{m.group(1)}\033[0m', text)
+        
+        # Strikethrough ~~text~~
+        text = re.sub(r'~~([^~]+)~~', lambda m: f'\033[9m{m.group(1)}\033[0m', text)
+        
+        # Underline __text__
+        text = re.sub(r'__([^_]+)__', lambda m: f'\033[4m{m.group(1)}\033[0m', text)
+        
+        # Bold **text** (preserve statistical notation)
+        def convert_bold(match):
+            full_match = match.group(0)
+            content = match.group(1)
+            if match.start() > 0 and text[match.start() - 1] in '0123456789<>=.,':
+                return full_match
+            if match.end() < len(text) and text[match.end()] in '0123456789':
+                return full_match
+            return f'\033[1m{content}\033[0m'
+        text = re.sub(r'\*\*([^*]+?)\*\*', convert_bold, text)
+        
+        # Italic *text* (preserve statistical notation and bullets)
+        def convert_italic(match):
+            full_match = match.group(0)
+            content = match.group(1)
+            if match.start() == 0 or (match.start() > 0 and text[match.start() - 1] in '\n\r'):
+                return full_match
+            if match.start() > 0 and text[match.start() - 1] in '0123456789<>=.,':
+                return full_match
+            if len(content) <= 1:
+                return full_match
+            if match.end() < len(text) and text[match.end()] in '0123456789':
+                return full_match
+            return f'\033[3m{content}\033[0m'
+        text = re.sub(r'\*([^*\s][^*]*?)\*', convert_italic, text)
+        
+        # List bullets (dim color)
+        text = re.sub(r'^([\*\-\+])\s+', lambda m: f'\033[2m{m.group(1)}\033[0m ', text, flags=re.MULTILINE)
+        
+        return text
+
     def _is_generic_test_prompt(self, text: str) -> bool:
         """Detect simple 'test' style probes that don't need full analysis."""
         normalized = re.sub(r"[^a-z0-9\s]", " ", text.lower())
@@ -1256,6 +1432,43 @@ class EnhancedNocturnalAgent:
 
         return serialized
 
+    async def _call_llm_for_code_fix(self, fix_prompt: str, original_request: ChatRequest) -> str:
+        """
+        Quick LLM call to fix broken code. Used by auto-execute feature.
+        Returns the LLM's response as a string (should contain fixed code).
+        """
+        try:
+            # Use the same LLM provider
+            messages = [
+                {"role": "system", "content": "You are a Python code debugging assistant. Fix the given code and return ONLY the corrected Python code in a ```python``` code block. No explanations."},
+                {"role": "user", "content": fix_prompt}
+            ]
+            
+            if self.client:
+                # Local mode - direct API call
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=2000
+                )
+                return response.choices[0].message.content
+            else:
+                # Production mode - use backend
+                fix_request = ChatRequest(
+                    question=fix_prompt,
+                    user_id=original_request.user_id,
+                    conversation_id=original_request.conversation_id,
+                    session_id=original_request.session_id
+                )
+                # Simple backend call without full processing
+                response = await self._call_backend_with_retry(fix_request)
+                return response.get('response', '')
+                
+        except Exception as e:
+            logger.warning(f"Code fix LLM call failed: {e}")
+            return ""
+
     def _build_system_prompt(
         self,
         request_analysis: Dict[str, Any],
@@ -1331,9 +1544,30 @@ class EnhancedNocturnalAgent:
             "- If asked to reply in chinese, you MUST reply in Traditional Chinese (繁體中文).",
             "- You MUST use Chinese characters (漢字), NOT pinyin romanization.",
             "",
+            "🚀 CRITICAL - AUTO-EXECUTE FOR ANALYSIS QUERIES:",
+            "• If user asks to: solve, analyze, calculate, estimate, predict, test, find answer, homework, correlation",
+            "• YOU MUST write actual executable Python code wrapped in ```python ``` markdown blocks",
+            "• The code will be AUTOMATICALLY EXECUTED by the system - results appended to response",
+            "• DO NOT talk about 'tools' or 'load_dataset' or 'analyze_data' - those don't exist",
+            "• DO NOT output JSON like {\"tool\": \"analyze\"} - that's forbidden",
+            "• DO NOT simulate results like 'The correlation is 0.84' - write code that calculates it",
+            "• DO NOT say 'Result when run: X' - the auto-executor will provide real output",
+            "• Example CORRECT response:",
+            "  Let me calculate the correlation:",
+            "  ```python",
+            "  import pandas as pd",
+            "  df = pd.read_csv('collegetown.csv')",
+            "  correlation = df['price'].corr(df['sqft'])",
+            "  print(f'Correlation: {correlation}')",
+            "  ```",
+            "• Example WRONG: 'The correlation is 0.84' (fake answer)",
+            "• Example WRONG: {\"tool\": \"analyze_data\", \"method\": \"correlation\"} (forbidden JSON)",
+            "• Use standard libraries when possible (pandas for CSV, numpy for math)",
+            "• Code must be complete, self-contained, and runnable",
+            "",
             "CONCISE RESPONSE STYLE:",
             "• Direct answers - state result, minimal elaboration",
-            "• NO code blocks showing bash/python commands unless explicitly asked",
+            "• NO code blocks showing bash/python commands EXCEPT for analysis queries (solve/analyze/calculate/correlation)",
             "• File listings: Max 5-10 items (filtered to query)",
             "• Balance: complete but concise"
         ]
@@ -1662,53 +1896,84 @@ class EnhancedNocturnalAgent:
             lines_filtered.append(line)
         cleaned = '\n'.join(lines_filtered)
 
-        # ENHANCED FIX: Remove internal reasoning chains that leak from LLM
-        # Examples: "We need to...", "Probably need to...", "Let's try:", "Will run:"
-        # IMPORTANT: Only remove at START of response (first 300 chars) to avoid removing legitimate content
+        # INTELLIGENT REASONING DETECTION
+        # Instead of hardcoding 100+ patterns, detect if response is MOSTLY internal reasoning
+        # using keyword density analysis
         
-        # Check if response starts with reasoning/planning text (first 300 chars)
-        prefix = cleaned[:300]
-        
-        # Patterns that indicate internal planning (only remove from START)
-        start_reasoning_patterns = [
-            r'^[\s]*We need to [^.]*?\.[\s]*',  # Start: "We need to run a command."
-            r'^[\s]*I need to [^.]*?\.[\s]*',   # Start: "I need to check..."
-            r'^[\s]*Probably [^.]*?\.[\s]*',     # Start: "Probably need to use the tool."
-            r"^[\s]*Let's try:[\s\S]*?(?=\n\n|\Z)",  # Start: "Let's try: ..."
-            r"^[\s]*Let me try[\s\S]*?(?=\n\n|\Z)",  # Start: "Let me try..."
-            r'^[\s]*Will run:[\s\S]*?(?=\n\n|\Z)',   # Start: "Will run: `command`"
-            r'^[\s]*According to system[^.]*?\.[\s]*',     # Start: "According to system..."
-            r'^[\s]*The system expects[^.]*?\.[\s]*',
-            r'^[\s]*The platform expects[^.]*?\.[\s]*',
+        reasoning_keywords = [
+            'we need to', 'i need to', 'we should', 'i should', 'probably', 
+            'let me try', "let's try", 'will run', 'will execute', 'now i will',
+            'according to', 'the system', 'the platform', 'however', 'but we',
+            'okay,', 'proceed', 'attempting', 'we cannot', 'we can run',
+            'output a', 'produce a', 'issue a', 'simulate'
         ]
         
-        # Only clean these patterns from the beginning
-        for pattern in start_reasoning_patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+        cleaned_lower = cleaned.lower()
+        keyword_count = sum(cleaned_lower.count(kw) for kw in reasoning_keywords)
+        word_count = len(cleaned.split())
         
-        # Patterns that can appear anywhere (more specific, less likely to be legitimate)
-        anywhere_patterns = [
-            r'We need to actually execute[^.]*?\.[\s]*',    # Very specific
-            r'But the format is not specified[^.]*?\.[\s]*',  # Meta-reasoning
-            r'According to the system instructions[^.]*?\.[\s]*',  # Meta
-        ]
+        # If >40% of words are reasoning keywords, it's stuck in reasoning loop
+        if word_count > 0:
+            reasoning_density = keyword_count / word_count
+            
+            # Also check if response STARTS with reasoning (first 200 chars)
+            starts_with_reasoning = any(
+                cleaned_lower[:200].startswith(kw) or f' {kw}' in cleaned_lower[:200]
+                for kw in ['we need', 'will run', 'running:', 'executing:', 'let me', "let's", 'probably']
+            )
+            
+            if reasoning_density > 0.15 or (starts_with_reasoning and reasoning_density > 0.08):
+                # Response is stuck in reasoning loop - return clean error
+                if debug_mode:
+                    self._safe_print(f"⚠️ [REASONING LOOP] Density: {reasoning_density:.2%}, Keywords: {keyword_count}/{word_count}")
+                return "I encountered an issue processing that request. The system may need additional resources. Please try a different approach or contact support."
         
-        for pattern in anywhere_patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+        # SURGICAL CLEANING: Only remove obvious reasoning at START (not hardcoded patterns)
+        # Remove up to 3 sentences if they're pure reasoning
+        sentences = cleaned.split('.')[:3]
+        cleaned_sentences = []
+        for sentence in sentences:
+            sentence_lower = sentence.lower().strip()
+            # Skip if sentence is >70% reasoning keywords
+            if sentence_lower:
+                sent_keywords = sum(sentence_lower.count(kw) for kw in reasoning_keywords)
+                sent_words = len(sentence.split())
+                if sent_words > 0 and (sent_keywords / sent_words) < 0.5:
+                    cleaned_sentences.append(sentence)
+        
+        if cleaned_sentences:
+            # Rejoin and add back the rest
+            rest = '.'.join(cleaned.split('.')[len(sentences):])
+            cleaned = '.'.join(cleaned_sentences) + ('.' if rest else '') + rest
+        
+        # No more hardcoded patterns everywhere - reasoning density detection above handles this intelligently
 
         # Also remove common tool planning text that precedes JSON
         planning_phrases = [
-            r"Okay, I'll search.*?(?=\n\n|\Z)",
-            r"I'll search for.*?(?=\n\n|\Z)",
-            r"Let me search.*?(?=\n\n|\Z)",
-            r"Searching for.*?(?=\n\n|\Z)",
+            r"Okay, I'll search.*?(?=\{|\n\n|\Z)",
+            r"I'll search for.*?(?=\{|\n\n|\Z)",
+            r"Let me search.*?(?=\{|\n\n|\Z)",
+            r"Searching for.*?(?=\{|\n\n|\Z)",
+            r"Search for [^{]*?(?=\{)",  # "Search for papers..." followed by JSON
         ]
 
+        for phrase in planning_phrases:
+            cleaned = re.sub(phrase, '', cleaned, flags=re.DOTALL)
+            
+        # Remove any remaining JSON artifacts (especially search results)
+        cleaned = re.sub(r'\{[\s]*"search_query"[^}]*\}', '', cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r'\{[\s]*"search_results"[\s\S]*?\][\s]*\}', '', cleaned, flags=re.DOTALL)
+        
+        # Original check
         for phrase in planning_phrases:
             # Only remove if followed by JSON or end of text
             if re.search(r'\{.*?"type".*?\}', cleaned, re.DOTALL):
                 cleaned = re.sub(phrase, '', cleaned, flags=re.DOTALL)
 
+        # Remove shell command JSON artifacts (backend tool calls leaking through)
+        # Pattern: {"cmd":["bash","-lc",...]} repeated multiple times
+        cleaned = re.sub(r'\{\"cmd\":\[.*?\]\}', '', cleaned)
+        
         # Only remove pure JSON lines (not LaTeX-containing lines)
         lines = cleaned.split('\n')
         filtered_lines = []
@@ -1732,20 +1997,74 @@ class EnhancedNocturnalAgent:
         if debug_mode:
             has_json_after = '{' in cleaned and '"type"' in cleaned
             if has_json_before and not has_json_after:
-                print(f"✅ [CLEANING] JSON successfully removed!")
+                self._safe_print(f"✅ [CLEANING] JSON successfully removed!")
             elif has_json_after:
-                print(f"❌ [CLEANING] JSON STILL PRESENT after cleaning!")
+                self._safe_print(f"❌ [CLEANING] JSON STILL PRESENT after cleaning!")
                 print(f"   First 200 chars: {cleaned[:200]}")
 
         cleaned_final = cleaned.strip()
         
-        # CRITICAL FIX: Prevent blank responses from over-aggressive cleaning
-        # If cleaning removed everything, return a fallback message
-        if not cleaned_final or len(cleaned_final) < 3:
+        # CRITICAL FIX: Detect backend LLM looping (when it can't execute tools)
+        # If response is just repetitive internal reasoning with no actual content, return error
+        loop_indicators = [
+            'Now I will', 'Now final', 'Okay, final', 'I will now', 
+            'Now produce', 'Now output', 'I think enough', 'Proceed',
+            'Now actually', 'Okay, Now', 'Now.Okay', "Okay, let's"
+        ]
+        loop_count = sum(cleaned_final.count(indicator) for indicator in loop_indicators)
+        
+        # Also check for very short responses that are just garbage
+        is_garbage = (
+            len(cleaned_final) < 50 and (
+                cleaned_final.count('.') > 3 or  # Fragmented
+                cleaned_final.strip() in ['}', '{', '{ }', '{}'] or  # Just JSON brackets
+                cleaned_final.count('}') > 2  # Multiple JSON artifacts
+            )
+        )
+        
+        if loop_count > 3 or is_garbage:  # More than 3 loop indicators or garbage = stuck
             if debug_mode:
-                print(f"⚠️ [CLEANING] Over-cleaned! Returning fallback message")
+                self._safe_print(f"⚠️ [CLEANING] Backend LLM looping detected ({loop_count} indicators, garbage={is_garbage})")
+            return "I encountered an issue accessing that resource. The feature may require additional infrastructure. Please try a different query or contact support if this persists."
+        
+        # CRITICAL FIX: Prevent blank responses from over-aggressive cleaning
+        # But allow short numeric answers (like "10", "42", etc.)
+        if not cleaned_final or len(cleaned_final) < 2:
+            if debug_mode:
+                self._safe_print(f"⚠️ [CLEANING] Over-cleaned! Returning fallback message")
                 print(f"   Original: {response_text[:200]}")
             return "I encountered an issue processing your request. Please try rephrasing or simplifying your question."
+        
+        # Normalize unicode characters that cp950/gbk can't handle
+        # Replace math symbols and special characters with ASCII equivalents
+        unicode_replacements = {
+            '×': ' x ',  # multiplication sign (with spaces)
+            '÷': ' / ',  # division sign
+            '−': '-',  # minus sign (not hyphen)
+            '≈': '~',  # approximately equal
+            '≠': '!=', # not equal
+            '≤': '<=', # less than or equal
+            '≥': '>=', # greater than or equal
+            '°': ' degrees',  # degree symbol
+            '\u00a0': ' ',  # non-breaking space
+            '\u2009': ' ',  # thin space
+            '\u200a': ' ',  # hair space
+            '\u202f': ' ',  # narrow no-break space
+            '\u2019': "'",  # right single quotation mark
+            '\u201c': '"',  # left double quotation mark
+            '\u201d': '"',  # right double quotation mark
+            '\u2013': '-',  # en dash
+            '\u2014': '--', # em dash
+        }
+        for unicode_char, ascii_replacement in unicode_replacements.items():
+            cleaned_final = cleaned_final.replace(unicode_char, ascii_replacement)
+        
+        # Also normalize any remaining non-ASCII characters to prevent encoding errors
+        # This catches any unicode we missed
+        try:
+            cleaned_final = cleaned_final.encode('ascii', errors='ignore').decode('ascii')
+        except:
+            pass
         
         return cleaned_final
 
@@ -2125,6 +2444,702 @@ class EnhancedNocturnalAgent:
 
         return deduped[:2], metrics_to_fetch
     
+    async def _create_execution_plan_with_llm(self, query: str) -> Dict:
+        """
+        Use LLM to analyze query and create execution plan.
+        
+        This is MUCH better than pattern matching because:
+        - Handles implicit sequencing ("Compare X with Y")
+        - Resolves tool ambiguity ("Calculate profit margin" → financial, not analysis)
+        - Explains reasoning
+        - Adapts to natural language variations
+        """
+        
+        planning_prompt = f"""You are an AI workflow planner. Analyze this query and determine what tools are needed.
+
+Query: "{query}"
+
+Available tools:
+1. **financial** - Get real-time stock data, revenue, earnings from SEC filings (FinSight API)
+   - Use for: stock prices, revenue, profit, margins, financial metrics of companies
+   - Example: "Get Apple's revenue", "What's Tesla's profit margin"
+
+2. **research** - Search 200M+ academic papers (Archive API)
+   - Use for: finding papers, citations, authors, research topics
+   - Example: "Find papers about quantum computing", "Who cited this paper"
+
+3. **analysis** - Execute Python code for data analysis (Auto-Execute)
+   - Use for: calculations on CSV files, statistics, correlations, regressions
+   - Example: "Calculate mean from data.csv", "Run regression on dataset"
+
+4. **file** - Read/write files, list directories
+   - Use for: file operations, viewing file contents
+   - Example: "Read config.txt", "List files in directory"
+
+Your task:
+1. Determine if this query needs MULTIPLE tools in SEQUENCE
+2. Identify which tools are needed and in what order
+3. Explain your reasoning
+
+CRITICAL RULES:
+- If query mentions BOTH a financial metric AND a dataset calculation → needs SEQUENCING
+- "Calculate [financial metric like profit margin]" → use 'financial' tool (needs real company data)
+- "Calculate [statistic] from [dataset/csv]" → use 'analysis' tool
+- "Compare X with Y" where X is financial and Y is from data → needs 2 steps!
+- "Find" with ".csv" or "data" → analysis (find value in dataset)
+- "Find" with "paper" or "research" → research (search papers)
+- If financial data is mentioned alongside calculations → must get financial data FIRST, then calculate
+
+Output JSON in this exact format:
+
+For SINGLE tool queries:
+{{
+  "needs_sequencing": false,
+  "tool": "analysis",
+  "reason": "Query only requires statistical calculation on existing data"
+}}
+
+For MULTI-STEP queries:
+{{
+  "needs_sequencing": true,
+  "steps": [
+    {{
+      "tool": "financial",
+      "query": "Get Apple's revenue",
+      "reason": "User wants Apple revenue from SEC filings (accurate financial data)"
+    }},
+    {{
+      "tool": "analysis", 
+      "query": "Calculate mean from collegetown.csv",
+      "reason": "Need to calculate dataset mean to compare with revenue"
+    }}
+  ]
+}}
+
+Now analyze: "{query}"
+
+Output ONLY valid JSON, no other text:"""
+
+        try:
+            # Call LLM for planning
+            planning_response = self.client.chat.completions.create(
+                model="llama-3.3-70b",  # Use best available model
+                messages=[
+                    {"role": "system", "content": "You are a precise workflow planner. Output only valid JSON."},
+                    {"role": "user", "content": planning_prompt}
+                ],
+                temperature=0.1,  # Low temp for consistency
+                max_tokens=800
+            )
+            
+            plan_text = planning_response.choices[0].message.content.strip()
+            
+            # Extract JSON (might be wrapped in ```json blocks)
+            if '```json' in plan_text:
+                plan_text = plan_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in plan_text:
+                plan_text = plan_text.split('```')[1].split('```')[0].strip()
+            
+            plan = json.loads(plan_text)
+            
+            if self.debug_mode:
+                self._safe_print(f"\n🧠 LLM Planning Result:")
+                print(f"   Needs sequencing: {plan.get('needs_sequencing')}")
+                if plan.get('needs_sequencing'):
+                    print(f"   Steps: {len(plan.get('steps', []))}")
+                    for i, step in enumerate(plan.get('steps', []), 1):
+                        print(f"     {i}. [{step['tool']}] {step.get('reason', '')[:50]}...")
+                else:
+                    print(f"   Tool: {plan.get('tool')}")
+                    print(f"   Reason: {plan.get('reason', '')[:60]}...")
+            
+            return plan
+            
+        except Exception as e:
+            if self.debug_mode:
+                self._safe_print(f"⚠️  LLM planning failed: {e}, falling back to heuristics")
+            
+            # Fallback to pattern matching if LLM fails
+            sequential_tasks = self._decompose_sequential_query(query)
+            
+            if len(sequential_tasks) > 1:
+                return {
+                    "needs_sequencing": True,
+                    "steps": [
+                        {
+                            "tool": task['type'],
+                            "query": task['query'],
+                            "reason": f"Pattern-based classification as {task['type']}"
+                        }
+                        for task in sequential_tasks
+                    ]
+                }
+            else:
+                return {
+                    "needs_sequencing": False,
+                    "tool": self._classify_query_type(query),
+                    "reason": "Fallback heuristic classification"
+                }
+    
+    async def _execute_plan_from_llm(self, plan: Dict, original_request: ChatRequest) -> ChatResponse:
+        """
+        Execute the LLM-generated execution plan.
+        """
+        
+        debug_mode = self.debug_mode
+        steps = plan.get("steps", [])
+        
+        if debug_mode:
+            print(f"\n🔀 Executing {len(steps)}-step workflow (LLM-planned)")
+        
+        results = []
+        context_data = {}
+        all_tools_used = ["llm_planning"]
+        total_tokens = 0
+        errors_occurred = False
+        
+        for i, step in enumerate(steps, 1):
+            if debug_mode:
+                print(f"\n{'='*60}")
+                print(f"📍 Step {i}/{len(steps)}: [{step['tool'].upper()}]")
+                print(f"   Query: {step['query']}")
+                print(f"   Reason: {step['reason']}")
+                print(f"{'='*60}")
+            
+            try:
+                # Create sub-request
+                sub_request = ChatRequest(
+                    question=step['query'],
+                    context=original_request.context,
+                    user_id=original_request.user_id,
+                    conversation_id=original_request.conversation_id
+                )
+                
+                # Execute based on tool type
+                tool = step['tool']
+                
+                if tool == 'financial':
+                    response = await self._execute_financial_task(sub_request, None, context_data)
+                    
+                elif tool == 'research':
+                    response = await self._execute_research_task(sub_request, None, context_data)
+                    
+                elif tool == 'analysis':
+                    # Inject context from previous steps into code generation
+                    if context_data:
+                        enriched_query = step['query'] + "\n\n# Context from previous steps:\n"
+                        # Include direct numeric values
+                        for key, value in context_data.items():
+                            if not key.startswith('step_') and isinstance(value, (int, float)):
+                                enriched_query += f"# {key} = {value}\n"
+                        # Include previous step results
+                        for key, value in context_data.items():
+                            if key.startswith('step_'):
+                                step_num = key.replace('step_', '')
+                                step_response = value.get('response', '')
+                                enriched_query += f"# Step {step_num} result: {step_response.strip()[:200]}\n"
+                        sub_request.question = enriched_query
+                    
+                    response = await self._execute_analysis_task(sub_request, None, context_data)
+                    
+                elif tool == 'file':
+                    response = await self._execute_file_task(sub_request, None, context_data)
+                    
+                else:
+                    response = await self._execute_general_task(sub_request, None, context_data)
+                
+                # Collect results (preserve statistical notation like p<0.01** but remove markdown bold)
+                cleaned_response = self._clean_markdown_preserve_stats(response.response)
+                result_text = f"Step {i} [{tool}]: {cleaned_response}"
+                results.append(result_text)
+                
+                # Update context with this step's results
+                context_data[f'step_{i}'] = {
+                    'type': tool,
+                    'query': step['query'],
+                    'response': response.response,
+                    'api_results': response.api_results
+                }
+                
+                # Extract key values for next steps (e.g., AAPL_revenue)
+                if tool == 'financial' and response.api_results:
+                    for key, value in response.api_results.items():
+                        context_data[key] = value
+                
+                all_tools_used.extend(response.tools_used or [])
+                total_tokens += response.tokens_used or 0
+                
+                if debug_mode:
+                    self._safe_print(f"✅ Step {i} complete")
+                    
+            except Exception as e:
+                error_msg = f"Step {i} [{tool}]: ⚠️ Error: {str(e)}"
+                results.append(error_msg)
+                errors_occurred = True
+                if debug_mode:
+                    self._safe_print(f"❌ Step {i} failed: {e}")
+        
+        # Combine results
+        combined_response = "\n\n".join(results)
+        # Only show success if no errors occurred
+        if not errors_occurred:
+            combined_response += f"\n\n{'─'*60}\n✅ All {len(steps)} tasks completed!"
+        else:
+            combined_response += f"\n\n{'─'*60}\n⚠️ Completed with some errors"
+        
+        return ChatResponse(
+            response=combined_response,
+            timestamp=datetime.now().isoformat(),
+            tools_used=list(set(all_tools_used)),
+            api_results={'workflow_steps': context_data, 'plan': plan},
+            tokens_used=total_tokens,
+            confidence_score=0.95,
+            reasoning_steps=[f"Step {i}: {s['reason']}" for i, s in enumerate(steps, 1)]
+        )
+    
+    def _decompose_sequential_query(self, query: str) -> List[Dict[str, str]]:
+        """
+        Decompose multi-step queries into sequential subtasks.
+        
+        Returns: List of {'type': str, 'query': str} dicts
+        
+        Tool types: 'financial', 'research', 'analysis', 'file', 'general'
+        """
+        query_lower = query.lower()
+        
+        # Sequential patterns to detect
+        sequential_patterns = [
+            r'(.+?),?\s+then\s+(.+)',           # "Get X, then do Y"
+            r'(.+?),?\s+and then\s+(.+)',       # "Get X, and then do Y"
+            r'(.+?)[,;]\s*also[,\s]+(.+)',      # "Get X, also do Y"
+            r'first\s+(.+?)[,;]?\s+then\s+(.+)', # "First X, then Y"
+            r'(.+?),?\s+after that\s+(.+)',     # "Get X, after that do Y"
+        ]
+        
+        for pattern in sequential_patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                parts = list(match.groups())
+                
+                # Handle 3+ part queries (nested "then")
+                expanded_parts = []
+                for part in parts:
+                    if re.search(r',?\s+(then|and then|after that)\s+', part, re.IGNORECASE):
+                        # Recursively decompose
+                        sub_parts = self._decompose_sequential_query(part)
+                        if len(sub_parts) > 1:
+                            expanded_parts.extend([sp['query'] for sp in sub_parts])
+                        else:
+                            expanded_parts.append(part)
+                    else:
+                        expanded_parts.append(part)
+                
+                # Classify each part by tool type
+                tasks = []
+                for i, part in enumerate(expanded_parts, 1):
+                    part_clean = part.strip().rstrip('.,;')
+                    task_type = self._classify_query_type(part_clean)
+                    tasks.append({
+                        'type': task_type,
+                        'query': part_clean,
+                        'step': i
+                    })
+                
+                return tasks
+        
+        # No sequential pattern detected - single task
+        task_type = self._classify_query_type(query)
+        return [{'type': task_type, 'query': query, 'step': 1}]
+    
+    def _classify_query_type(self, query: str) -> str:
+        """Classify query into tool categories"""
+        query_lower = query.lower()
+        
+        # Analysis keywords (CHECK FIRST - most specific)
+        analysis_keywords = ['calculate', 'compute', 'correlation', 'regression',
+                            'mean', 'average', 'median', 'std', 'variance', 
+                            'analyze', 'analyse', 'statistics', 'test', 'sum',
+                            'count', 'histogram', 'plot']
+        
+        # Research keywords  
+        research_keywords = ['paper', 'research', 'study', 'publication', 'arxiv',
+                            'journal', 'cite', 'citation', 'author', 'abstract']
+        
+        # Financial keywords (but not if analysis is present)
+        financial_keywords = ['revenue', 'profit', 'earnings', 'stock price', 
+                             'margin', 'eps', 'market cap', 'financial', 'nasdaq',
+                             'ticker', 'shares', 'dividend']
+        
+        # File operation keywords
+        file_keywords = ['read', 'write', 'file', 'list', 'directory', 'show',
+                        'display', 'open', 'save']
+        
+        # Check in priority order (analysis first to avoid confusion)
+        if any(kw in query_lower for kw in analysis_keywords):
+            # But if it's about financial metrics, classify as financial
+            if any(kw in query_lower for kw in financial_keywords) and not any(ext in query_lower for ext in ['.csv', '.txt', 'data']):
+                return 'financial'
+            return 'analysis'
+        elif any(kw in query_lower for kw in research_keywords):
+            return 'research'
+        elif any(kw in query_lower for kw in financial_keywords):
+            return 'financial'
+        elif any(kw in query_lower for kw in file_keywords):
+            return 'file'
+        else:
+            return 'general'
+    
+    async def _execute_sequential_workflow(
+        self, 
+        tasks: List[Dict[str, str]], 
+        original_request: ChatRequest,
+        session_key: Optional[str]
+    ) -> ChatResponse:
+        """
+        Execute multiple tasks in sequence, passing context between them.
+        """
+        debug_mode = os.getenv("NOCTURNAL_DEBUG", "0") == "1"
+        
+        if debug_mode:
+            print(f"\n🔀 Sequential workflow detected: {len(tasks)} tasks")
+            for task in tasks:
+                print(f"   Step {task['step']}: [{task['type']}] {task['query'][:60]}...")
+        
+        results = []
+        context_data = {}  # Accumulate data for later steps
+        all_tools_used = []
+        total_tokens = 0
+        workflow_errors = False
+        
+        for i, task in enumerate(tasks, 1):
+            if debug_mode:
+                print(f"\n{'='*60}")
+                print(f"📍 Executing Step {i}/{len(tasks)}: [{task['type'].upper()}]")
+                print(f"   Query: {task['query']}")
+                print(f"{'='*60}")
+            
+            try:
+                # Create sub-request
+                sub_request = ChatRequest(
+                    question=task['query'],
+                    context=original_request.context,
+                    user_id=original_request.user_id,
+                    conversation_id=original_request.conversation_id
+                )
+                
+                # Execute based on task type
+                if task['type'] == 'financial':
+                    response = await self._execute_financial_task(sub_request, session_key, context_data)
+                    
+                elif task['type'] == 'research':
+                    response = await self._execute_research_task(sub_request, session_key, context_data)
+                    
+                elif task['type'] == 'analysis':
+                    response = await self._execute_analysis_task(sub_request, session_key, context_data)
+                    
+                elif task['type'] == 'file':
+                    response = await self._execute_file_task(sub_request, session_key, context_data)
+                    
+                else:
+                    # General query - use normal chat
+                    response = await self._execute_general_task(sub_request, session_key, context_data)
+                
+                # Collect results
+                result_text = f"**Step {i}** [{task['type']}]: {response.response}"
+                results.append(result_text)
+                
+                # Update context with this step's results
+                context_data[f'step_{i}'] = {
+                    'type': task['type'],
+                    'query': task['query'],
+                    'response': response.response,
+                    'api_results': response.api_results
+                }
+                
+                all_tools_used.extend(response.tools_used or [])
+                total_tokens += response.tokens_used or 0
+                
+                if debug_mode:
+                    self._safe_print(f"✅ Step {i} complete: {len(response.response)} chars")
+                    
+            except Exception as e:
+                error_msg = f"**Step {i}** [{task['type']}]: ⚠️ Error: {str(e)}"
+                results.append(error_msg)
+                workflow_errors = True
+                if debug_mode:
+                    self._safe_print(f"❌ Step {i} failed: {e}")
+        
+        # Combine all results
+        combined_response = "\n\n".join(results)
+        if not workflow_errors:
+            combined_response += f"\n\n{'─'*60}\n✅ **All {len(tasks)} tasks completed!**"
+        else:
+            combined_response += f"\n\n{'─'*60}\n⚠️ **Completed with some errors**"
+        
+        # Add final synthesis if multiple steps
+        if len(tasks) > 1 and context_data:
+            synthesis = self._synthesize_workflow_results(context_data, original_request.question)
+            if synthesis:
+                combined_response += f"\n\n📊 **Summary**: {synthesis}"
+        
+        return ChatResponse(
+            response=combined_response,
+            timestamp=datetime.now().isoformat(),
+            tools_used=["sequential_workflow"] + list(set(all_tools_used)),
+            api_results={'workflow_steps': context_data},
+            tokens_used=total_tokens,
+            confidence_score=0.92,
+            reasoning_steps=[f"Step {i}: {t['type']}" for i, t in enumerate(tasks, 1)]
+        )
+    
+    async def _execute_financial_task(
+        self, 
+        request: ChatRequest, 
+        session_key: Optional[str],
+        context: Dict
+    ) -> ChatResponse:
+        """Execute financial data query using FinSight API"""
+        # Extract tickers and metrics
+        tickers, metrics = self._plan_financial_request(request.question, session_key)
+        
+        if not tickers:
+            return self._quick_reply(request, "No stock ticker found in query")
+        
+        # Fetch data
+        api_results = {}
+        for ticker in tickers:
+            for metric in (metrics or ['revenue']):
+                endpoint = f"calc/{ticker}/{metric}"
+                result = await self._call_finsight_api(endpoint)
+                if not result.get('error'):
+                    api_results[f"{ticker}_{metric}"] = result.get('value')
+                    # Store in context for next steps
+                    context[f"{ticker}_{metric}"] = result.get('value')
+        
+        # Format response
+        response_text = self._format_financial_results(api_results, tickers)
+        
+        return ChatResponse(
+            response=response_text,
+            timestamp=datetime.now().isoformat(),
+            tools_used=["finsight_api"],
+            api_results=api_results,
+            tokens_used=0,
+            confidence_score=0.9
+        )
+    
+    async def _execute_research_task(
+        self,
+        request: ChatRequest,
+        session_key: Optional[str],
+        context: Dict
+    ) -> ChatResponse:
+        """Execute research paper query using Archive API"""
+        # Use existing archive search logic
+        query = request.question
+        
+        # Call archive API
+        search_results = await self._call_archive_api("search", {"query": query, "limit": 5})
+        
+        if search_results.get('error'):
+            return self._quick_reply(request, f"Research search failed: {search_results['error']}")
+        
+        papers = search_results.get('papers', [])
+        response_text = f"Found {len(papers)} research papers:\n\n"
+        
+        for i, paper in enumerate(papers[:3], 1):
+            response_text += f"{i}. **{paper.get('title', 'Unknown')}**\n"
+            
+            # Handle authors (can be list of strings or dicts)
+            authors = paper.get('authors', [])
+            if authors and isinstance(authors[0], dict):
+                author_names = [a.get('name', 'Unknown') for a in authors[:3]]
+            else:
+                author_names = [str(a) for a in authors[:3]]
+            response_text += f"   Authors: {', '.join(author_names)}\n"
+            response_text += f"   Year: {paper.get('year', 'N/A')}\n\n"
+        
+        # Store in context
+        context['research_papers'] = papers
+        
+        return ChatResponse(
+            response=response_text,
+            timestamp=datetime.now().isoformat(),
+            tools_used=["archive_api"],
+            api_results={'papers': papers},
+            tokens_used=0,
+            confidence_score=0.85
+        )
+    
+    async def _execute_analysis_task(
+        self,
+        request: ChatRequest,
+        session_key: Optional[str],
+        context: Dict
+    ) -> ChatResponse:
+        """Execute data analysis using auto-execute"""
+        # Inject context from previous steps
+        enriched_query = request.question
+        
+        if context:
+            enriched_query += "\n\n# Context from previous steps:\n"
+            for key, value in context.items():
+                if isinstance(value, (int, float)):
+                    enriched_query += f"# {key} = {value}\n"
+        
+        # Generate and execute code
+        code_gen_prompt = f"""Write Python code to answer: {enriched_query}
+
+Requirements:
+- Use any context variables provided above
+- Print results with 4 decimal places for floats
+- Complete and runnable code
+
+Output ONLY the Python code in ```python ``` blocks."""
+        
+        code_gen_messages = [
+            {"role": "system", "content": "You are a Python code generator."},
+            {"role": "user", "content": code_gen_prompt}
+        ]
+        
+        try:
+            code_response = self.client.chat.completions.create(
+                model="llama-3.3-70b",
+                messages=code_gen_messages,
+                max_tokens=1000,
+                temperature=0.2
+            )
+            
+            code_text = code_response.choices[0].message.content
+            code_blocks = re.findall(r'```python\n(.*?)```', code_text, re.DOTALL)
+            
+            if code_blocks:
+                code_to_run = code_blocks[0].strip()
+                
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                    f.write(code_to_run)
+                    temp_path = f.name
+                
+                try:
+                    output = self.execute_command(f"cd ~/Downloads/data && python3 {temp_path}")
+                    response_text = f"📊 Analysis Results:\n```\n{output}\n```"
+                    
+                    return ChatResponse(
+                        response=response_text,
+                        timestamp=datetime.now().isoformat(),
+                        tools_used=["auto_execute"],
+                        api_results={},
+                        tokens_used=code_response.usage.total_tokens if code_response.usage else 0,
+                        confidence_score=0.9
+                    )
+                finally:
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+        except Exception as e:
+            return self._quick_reply(request, f"Analysis failed: {e}")
+    
+    async def _execute_file_task(
+        self,
+        request: ChatRequest,
+        session_key: Optional[str],
+        context: Dict
+    ) -> ChatResponse:
+        """Execute file operation"""
+        # Use shell command for file operations
+        query_lower = request.question.lower()
+        
+        if 'read' in query_lower or 'show' in query_lower:
+            # Try to extract filename
+            import re
+            filename_match = re.search(r'[\w\-\.]+\.(?:csv|txt|json|py)', request.question)
+            if filename_match:
+                filename = filename_match.group(0)
+                cmd = f"cd ~/Downloads/data && head -5 {filename}"
+                output = self.execute_command(cmd)
+                return ChatResponse(
+                    response=f"📄 First 5 lines of {filename}:\n```\n{output}\n```",
+                    timestamp=datetime.now().isoformat(),
+                    tools_used=["file_operations"],
+                    api_results={},
+                    tokens_used=0,
+                    confidence_score=0.8
+                )
+        
+        return self._quick_reply(request, "File operation not yet fully implemented in workflow mode")
+    
+    async def _execute_general_task(
+        self,
+        request: ChatRequest,
+        session_key: Optional[str],
+        context: Dict
+    ) -> ChatResponse:
+        """Execute general query with context injection"""
+        # Add context to query
+        if context:
+            context_str = "\n\nContext from previous steps:\n"
+            for key, value in context.items():
+                if not key.startswith('step_'):
+                    context_str += f"- {key}: {value}\n"
+            request.question += context_str
+        
+        # Use simple LLM response
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": request.question}
+        ]
+        
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        return ChatResponse(
+            response=response.choices[0].message.content,
+            timestamp=datetime.now().isoformat(),
+            tools_used=["llm"],
+            api_results={},
+            tokens_used=response.usage.total_tokens if response.usage else 0,
+            confidence_score=0.75
+        )
+    
+    def _synthesize_workflow_results(self, context_data: Dict, original_query: str) -> str:
+        """Synthesize results from multiple workflow steps"""
+        # Simple synthesis - can be enhanced with LLM call
+        summary_parts = []
+        
+        for key, data in context_data.items():
+            if key.startswith('step_'):
+                task_type = data.get('type', 'unknown')
+                summary_parts.append(f"{task_type} query completed")
+        
+        return f"Completed {len(context_data)} sequential tasks successfully."
+    
+    def _format_financial_results(self, api_results: Dict, tickers: List[str]) -> str:
+        """Format financial data results"""
+        if not api_results:
+            return "No financial data retrieved"
+        
+        response_text = ""
+        for ticker in tickers:
+            ticker_data = {k: v for k, v in api_results.items() if k.startswith(ticker)}
+            if ticker_data:
+                response_text += f"\n**{ticker}** Metrics:\n"
+                for key, value in ticker_data.items():
+                    metric = key.replace(f"{ticker}_", "").title()
+                    if isinstance(value, (int, float)):
+                        if value > 1_000_000_000:
+                            response_text += f"  • {metric}: ${value/1_000_000_000:.2f}B\n"
+                        elif value > 1_000_000:
+                            response_text += f"  • {metric}: ${value/1_000_000:.2f}M\n"
+                        else:
+                            response_text += f"  • {metric}: ${value:,.2f}\n"
+        
+        return response_text.strip()
+    
     async def initialize(self, force_reload: bool = False):
         """Initialize the agent with API keys and shell session."""
         lock = self._get_init_lock()
@@ -2203,7 +3218,7 @@ class EnhancedNocturnalAgent:
 
                 debug_mode = self.debug_mode
                 if debug_mode:
-                    print(f"✅ Using temporary local key for fast mode!")
+                    self._safe_print(f"✅ Using temporary local key for fast mode!")
             elif use_local_keys_env == "false":
                 # Explicit backend mode (only if no temp key available)
                 use_local_keys = False
@@ -2217,7 +3232,7 @@ class EnhancedNocturnalAgent:
             if not use_local_keys:
                 debug_mode = self.debug_mode
                 if debug_mode:
-                    print(f"🔍 DEBUG: Taking BACKEND MODE path (use_local_keys=False)")
+                    self._safe_print(f"🔍 DEBUG: Taking BACKEND MODE path (use_local_keys=False)")
                 self.api_keys = []  # Empty - keys stay on server
                 self.current_key_index = 0
                 self.current_api_key = None
@@ -2250,14 +3265,14 @@ class EnhancedNocturnalAgent:
                 debug_mode = self.debug_mode
                 if debug_mode:
                     if self.auth_token:
-                        print(f"✅ Enhanced Nocturnal Agent Ready! (Authenticated)")
+                        self._safe_print(f"✅ Enhanced Nocturnal Agent Ready! (Authenticated)")
                     else:
-                        print("⚠️ Not authenticated. Please log in to use the agent.")
+                        self._safe_print("⚠️ Not authenticated. Please log in to use the agent.")
             else:
                 # Local keys mode - use temporary key if available, otherwise load from env
                 debug_mode = self.debug_mode
                 if debug_mode:
-                    print(f"🔍 DEBUG: Taking LOCAL MODE path (use_local_keys=True)")
+                    self._safe_print(f"🔍 DEBUG: Taking LOCAL MODE path (use_local_keys=True)")
 
                 # Check if we have a temporary key (for speed + security)
                 if hasattr(self, 'temp_api_key') and self.temp_api_key:
@@ -2266,7 +3281,7 @@ class EnhancedNocturnalAgent:
                     self.llm_provider = getattr(self, 'temp_key_provider', 'cerebras')
                     debug_mode = self.debug_mode
                     if debug_mode:
-                        print(f"🔍 Using temp API key: {self.temp_api_key[:10]}... (provider: {self.llm_provider})")
+                        self._safe_print(f"🔍 Using temp API key: {self.temp_api_key[:10]}... (provider: {self.llm_provider})")
                 else:
                     # Fallback: Load permanent keys from environment (dev mode only)
                     self.auth_token = None
@@ -2292,10 +3307,10 @@ class EnhancedNocturnalAgent:
                 debug_mode = self.debug_mode
                 if not self.api_keys:
                     if debug_mode:
-                        print("⚠️ No LLM API keys found. Set CEREBRAS_API_KEY or GROQ_API_KEY")
+                        self._safe_print("⚠️ No LLM API keys found. Set CEREBRAS_API_KEY or GROQ_API_KEY")
                 else:
                     if debug_mode:
-                        print(f"✅ Loaded {len(self.api_keys)} {self.llm_provider.upper()} API key(s)")
+                        self._safe_print(f"✅ Loaded {len(self.api_keys)} {self.llm_provider.upper()} API key(s)")
 
                     # HYBRID MODE FIX: If we have BOTH temp_api_key AND auth_token,
                     # DON'T initialize self.client to force backend synthesis
@@ -2309,7 +3324,7 @@ class EnhancedNocturnalAgent:
                     )
 
                     if debug_mode:
-                        print(f"🔍 DEBUG: has_both_tokens check - temp_api_key={hasattr(self, 'temp_api_key') and bool(getattr(self, 'temp_api_key', None))}, auth_token={hasattr(self, 'auth_token') and bool(getattr(self, 'auth_token', None))}, use_local_keys_explicit={use_local_keys_env == 'true'}")
+                        self._safe_print(f"🔍 DEBUG: has_both_tokens check - temp_api_key={hasattr(self, 'temp_api_key') and bool(getattr(self, 'temp_api_key', None))}, auth_token={hasattr(self, 'auth_token') and bool(getattr(self, 'auth_token', None))}, use_local_keys_explicit={use_local_keys_env == 'true'}")
 
                     if has_both_tokens:
                         # HYBRID MODE: Keep self.client = None to force backend synthesis
@@ -2325,11 +3340,11 @@ class EnhancedNocturnalAgent:
                         )
 
                         if debug_mode:
-                            print(f"🔍 HYBRID MODE: Using backend for synthesis (has both temp_api_key + auth_token)")
+                            self._safe_print(f"🔍 HYBRID MODE: Using backend for synthesis (has both temp_api_key + auth_token)")
                     else:
                         # Normal local mode - initialize client for Cerebras synthesis
                         if debug_mode:
-                            print(f"🔍 DEBUG: Initializing {self.llm_provider.upper()} client with API key")
+                            self._safe_print(f"🔍 DEBUG: Initializing {self.llm_provider.upper()} client with API key")
                         try:
                             if self.llm_provider == "cerebras":
                                 # Cerebras uses OpenAI client with custom base URL
@@ -2349,10 +3364,10 @@ class EnhancedNocturnalAgent:
                             self.current_api_key = self.api_keys[0]
                             self.current_key_index = 0
                             if debug_mode:
-                                print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
-                                print(f"🔍 DEBUG: self.client is now: {type(self.client)}")
+                                self._safe_print(f"✅ Initialized {self.llm_provider.upper()} client for LOCAL MODE")
+                                self._safe_print(f"🔍 DEBUG: self.client is now: {type(self.client)}")
                         except Exception as e:
-                            print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
+                            self._safe_print(f"⚠️ Failed to initialize {self.llm_provider.upper()} client: {e}")
                             if debug_mode:
                                 print(f"   This means you'll fall back to BACKEND MODE")
                             import traceback
@@ -2378,7 +3393,7 @@ class EnhancedNocturnalAgent:
                         cwd=os.getcwd()
                     )
                 except Exception as exc:
-                    print(f"⚠️ Unable to launch persistent shell session: {exc}")
+                    self._safe_print(f"⚠️ Unable to launch persistent shell session: {exc}")
                     self.shell_session = None
 
             if self.session is None or getattr(self.session, "closed", False):
@@ -2452,7 +3467,7 @@ class EnhancedNocturnalAgent:
         # DEBUG: Print auth status
         debug_mode = self.debug_mode
         if debug_mode:
-            print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
+            self._safe_print(f"🔍 call_backend_query: auth_token={self.auth_token}, user_id={self.user_id}")
         
         if not self.auth_token:
             return ChatResponse(
@@ -2557,10 +3572,10 @@ class EnhancedNocturnalAgent:
                                 )
                             elif retry_response.status == 429:
                                 # Rate limit hit
-                                print("\n⚠️ Rate limit exceeded, waiting longer...")
+                                self._safe_print("\n⚠️ Rate limit exceeded, waiting longer...")
                             elif retry_response.status >= 500:
                                 # Server error
-                                print(f"\n❌ Backend server error (HTTP {retry_response.status})")
+                                self._safe_print(f"\n❌ Backend server error (HTTP {retry_response.status})")
                                 break
                             elif retry_response.status != 503:
                                 # Different error, stop retrying
@@ -2717,13 +3732,13 @@ class EnhancedNocturnalAgent:
                 
                 debug_mode = self.debug_mode
                 if debug_mode:
-                    print(f"🔍 Archive headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
-                    print(f"🔍 Archive URL: {url}")
-                    print(f"🔍 Archive data: {data}")
+                    self._safe_print(f"🔍 Archive headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
+                    self._safe_print(f"🔍 Archive URL: {url}")
+                    self._safe_print(f"🔍 Archive data: {data}")
                 
                 async with self.session.post(url, json=data, headers=headers, timeout=30) as response:
                     if debug_mode:
-                        print(f"🔍 Archive response status: {response.status}")
+                        self._safe_print(f"🔍 Archive response status: {response.status}")
                     
                     if response.status == 200:
                         payload = await response.json()
@@ -2808,8 +3823,8 @@ class EnhancedNocturnalAgent:
 
                 debug_mode = self.debug_mode
                 if debug_mode:
-                    print(f"🔍 FinSight headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
-                    print(f"🔍 FinSight URL: {url}")
+                    self._safe_print(f"🔍 FinSight headers: {list(headers.keys())}, X-API-Key={headers.get('X-API-Key')}")
+                    self._safe_print(f"🔍 FinSight URL: {url}")
                 
                 async with self.session.get(url, params=params, headers=headers, timeout=30) as response:
                     if response.status == 200:
@@ -2911,7 +3926,7 @@ Concise query (max {max_length} chars):"""
                 if len(extracted) <= max_length and len(extracted) > 5:
                     debug_mode = self.debug_mode
                     if debug_mode:
-                        print(f"🔍 Extracted query: '{user_question[:80]}...' → '{extracted}'")
+                        self._safe_print(f"🔍 Extracted query: '{user_question[:80]}...' → '{extracted}'")
                     return extracted
 
             except Exception as e:
@@ -2937,7 +3952,7 @@ Concise query (max {max_length} chars):"""
 
         debug_mode = self.debug_mode
         if debug_mode:
-            print(f"🔍 Heuristic extracted: '{user_question[:80]}...' → '{result}'")
+            self._safe_print(f"🔍 Heuristic extracted: '{user_question[:80]}...' → '{result}'")
 
         return result
 
@@ -2965,12 +3980,12 @@ Concise query (max {max_length} chars):"""
             # DEBUG: Log actual API response
             debug_mode = self.debug_mode
             if debug_mode:
-                print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
+                self._safe_print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
                 if "error" in result:
-                    print(f"🔍 [DEBUG] Archive API ERROR: {result['error']}")
+                    self._safe_print(f"🔍 [DEBUG] Archive API ERROR: {result['error']}")
                 papers_key = "papers" if "papers" in result else "results" if "results" in result else None
                 if papers_key:
-                    print(f"🔍 [DEBUG] Found {len(result.get(papers_key, []))} papers under key '{papers_key}'")
+                    self._safe_print(f"🔍 [DEBUG] Found {len(result.get(papers_key, []))} papers under key '{papers_key}'")
 
             if "error" in result:
                 provider_errors.append({"sources": sources, "error": result["error"]})
@@ -3140,7 +4155,7 @@ Concise query (max {max_length} chars):"""
             # Log execution details in debug mode
             if debug_mode:
                 output_preview = output[:200] if output else "(no output)"
-                print(f"✅ Command executed: {command}")
+                self._safe_print(f"✅ Command executed: {command}")
                 print(f"📤 Output ({len(output)} chars): {output_preview}...")
             
             return output if output else "Command executed (no output)"
@@ -3148,8 +4163,8 @@ Concise query (max {max_length} chars):"""
         except Exception as e:
             debug_mode = self.debug_mode
             if debug_mode:
-                print(f"❌ Command failed: {command}")
-                print(f"❌ Error: {e}")
+                self._safe_print(f"❌ Command failed: {command}")
+                self._safe_print(f"❌ Error: {e}")
             return f"ERROR: {e}"
 
     def _format_shell_output(self, output: str, command: str) -> Dict[str, Any]:
@@ -3815,20 +4830,40 @@ Concise query (max {max_length} chars):"""
             self.user_query_counts[user_id] = self.user_query_counts.get(user_id, 0) + 1
 
     def _ensure_usage_day(self):
+        """Ensure we're tracking the current day, load from database if day changed"""
         current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if current_day != self._usage_day:
             self._usage_day = current_day
-            self.daily_token_usage = 0
+            
+            # CRITICAL FIX: Load today's usage from database instead of resetting to zero
+            try:
+                daily_usage = self.usage_db.get_daily_usage("cli_user", current_day)
+                self.daily_token_usage = daily_usage["tokens_used"]
+                self.daily_query_count = daily_usage["query_count"]
+                
+                if self.debug_mode:
+                    print(f"📊 Loaded today's usage: {self.daily_token_usage} tokens, {self.daily_query_count} queries")
+            except Exception as e:
+                # Fallback to zero if database read fails
+                if self.debug_mode:
+                    self._safe_print(f"⚠️  Failed to load usage from database: {e}")
+                self.daily_token_usage = 0
+                self.daily_query_count = 0
+            
             self.user_token_usage = {}
-            self.daily_query_count = 0
             self.user_query_counts = {}
 
     def _charge_tokens(self, user_id: Optional[str], tokens: int):
-        """Charge tokens to daily and per-user usage"""
+        """Charge tokens to daily and per-user usage (now persisted to database)"""
         self._ensure_usage_day()
+        
+        # Keep in-memory tracking for backward compatibility
         self.daily_token_usage += tokens
         if user_id:
             self.user_token_usage[user_id] = self.user_token_usage.get(user_id, 0) + tokens
+        
+        # CRITICAL FIX: This data is now ALSO persisted via record_query() call
+        # Token tracking happens when we call usage_db.record_query() in _finalize_interaction()
 
     def _finalize_interaction(
         self,
@@ -3892,6 +4927,36 @@ Concise query (max {max_length} chars):"""
                 )
             except Exception as archive_error:
                 logger.debug("Archive write failed", error=str(archive_error))
+        
+        # CRITICAL: Record to persistent database for cross-process tracking
+        try:
+            # Calculate response time if start_time was set
+            response_time_ms = 0
+            if hasattr(request, '_start_time'):
+                import time
+                response_time_ms = int((time.time() - request._start_time) * 1000)
+            
+            self.usage_db.record_query(
+                user_id=request.user_id,
+                conversation_id=request.conversation_id,
+                query=request.question,
+                response=response.response[:1000],  # Truncate long responses
+                tokens_used=response.tokens_used or 0,
+                tools_used=response.tools_used or [],
+                response_time_ms=response_time_ms,
+                success=True,
+                metadata={
+                    "confidence": response.confidence_score,
+                    "data_sources": getattr(response, 'data_sources', [])
+                }
+            )
+            
+            if self.debug_mode:
+                self._safe_print(f"✅ Recorded to database: {response.tokens_used} tokens, {response_time_ms}ms")
+        except Exception as db_error:
+            # Don't fail request if database write fails
+            if self.debug_mode:
+                self._safe_print(f"⚠️  Database record failed: {db_error}")
 
         return response
     
@@ -3913,8 +4978,96 @@ Concise query (max {max_length} chars):"""
             context += f"- {mem}\n"
         return context
     
+    def _get_conversation_context_with_summary(self) -> List[Dict[str, str]]:
+        """
+        Get conversation context with automatic summarization to prevent bloat.
+        
+        Strategy:
+        - Under 20 messages: Send everything
+        - 20-30 messages: Sliding window (last 20)
+        - Over 30 messages: Summary of old + last 20
+        
+        Returns:
+            List of message dicts ready for LLM
+        """
+        MAX_RECENT_MESSAGES = 20
+        SUMMARIZE_THRESHOLD = 30
+        
+        # Phase 1: Under threshold, send everything
+        if len(self.conversation_history) <= MAX_RECENT_MESSAGES:
+            return self.conversation_history
+        
+        # Phase 2: Over summarize threshold, create summary
+        if len(self.conversation_history) > SUMMARIZE_THRESHOLD:
+            # Only summarize once when crossing threshold
+            if not hasattr(self, '_conversation_summary') or self._conversation_summary is None:
+                old_messages = self.conversation_history[:-MAX_RECENT_MESSAGES]
+                self._conversation_summary = self._summarize_old_context(old_messages)
+                if self.debug_mode:
+                    self._safe_print(f"🔍 [Context Management] Summarized {len(old_messages)} old messages")
+            
+            # Return: [summary_message] + [recent 20 messages]
+            summary_msg = {
+                "role": "system",
+                "content": f"Previous conversation summary: {self._conversation_summary}"
+            }
+            recent_messages = self.conversation_history[-MAX_RECENT_MESSAGES:]
+            
+            if self.debug_mode:
+                self._safe_print(f"🔍 [Context Management] Using summary + {len(recent_messages)} recent messages")
+            
+            return [summary_msg] + recent_messages
+        
+        # Phase 3: Between thresholds, just use sliding window
+        if self.debug_mode:
+            self._safe_print(f"🔍 [Context Management] Using sliding window: last {MAX_RECENT_MESSAGES} messages")
+        return self.conversation_history[-MAX_RECENT_MESSAGES:]
+    
+    def _summarize_old_context(self, old_messages: List[Dict[str, str]]) -> str:
+        """
+        Generate a brief summary of old conversation without LLM call.
+        
+        Args:
+            old_messages: List of message dicts to summarize
+            
+        Returns:
+            String summary of the old context
+        """
+        if not old_messages:
+            return "No previous context."
+        
+        # Extract user queries for context
+        user_queries = [
+            m['content'][:80].strip() 
+            for m in old_messages 
+            if m.get('role') == 'user'
+        ]
+        
+        if not user_queries:
+            return f"Earlier conversation with {len(old_messages)} messages."
+        
+        # Build concise summary
+        if len(user_queries) <= 3:
+            topics = "; ".join(user_queries)
+            return f"Earlier you asked: {topics}"
+        else:
+            first = user_queries[0]
+            last = user_queries[-1]
+            middle_count = len(user_queries) - 2
+            return (
+                f"Earlier you asked: {first}; "
+                f"... {middle_count} more questions ...; "
+                f"{last}"
+            )
+    
+    def _reset_conversation_summary(self):
+        """Reset summary when starting new conversation or topic shift"""
+        self._conversation_summary = None
+        if self.debug_mode:
+            self._safe_print("🔍 [Context Management] Conversation summary reset")
+    
     def _update_memory(self, user_id: str, conversation_id: str, interaction: str):
-        """Update memory with new interaction"""
+        """Update memory with new interaction AND persist to disk"""
         if user_id not in self.memory:
             self.memory[user_id] = {}
         
@@ -3923,9 +5076,74 @@ Concise query (max {max_length} chars):"""
         
         self.memory[user_id][conversation_id].append(interaction)
         
-        # Keep only last 10 interactions
+        # Keep only last 10 interactions in memory
         if len(self.memory[user_id][conversation_id]) > 10:
             self.memory[user_id][conversation_id] = self.memory[user_id][conversation_id][-10:]
+        
+        # CRITICAL FIX: Persist memory to disk for cross-process continuity
+        self._persist_memory_to_disk(user_id, conversation_id)
+    
+    def _persist_memory_to_disk(self, user_id: str, conversation_id: str):
+        """Persist current memory to disk for cross-CLI continuity"""
+        try:
+            from pathlib import Path
+            import json
+            
+            memory_dir = Path.home() / ".cite_agent" / "memory_cache"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            
+            memory_file = memory_dir / f"{conversation_id}.json"
+            
+            # Get current memory for this conversation
+            if user_id in self.memory and conversation_id in self.memory[user_id]:
+                memory_data = {
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "interactions": self.memory[user_id][conversation_id]
+                }
+                
+                memory_file.write_text(json.dumps(memory_data, indent=2))
+        except Exception as e:
+            # Don't fail the request if persistence fails
+            if self.debug_mode:
+                self._safe_print(f"⚠️  Failed to persist memory: {e}")
+    
+    def _load_memory_from_disk(self, user_id: str, conversation_id: str):
+        """Load memory from disk if available"""
+        try:
+            from pathlib import Path
+            import json
+            from datetime import timedelta
+            
+            memory_dir = Path.home() / ".cite_agent" / "memory_cache"
+            memory_file = memory_dir / f"{conversation_id}.json"
+            
+            if not memory_file.exists():
+                return
+            
+            # Check if memory is recent (within 24 hours)
+            memory_data = json.loads(memory_file.read_text())
+            last_updated = datetime.fromisoformat(memory_data["last_updated"])
+            age_hours = (datetime.now(timezone.utc) - last_updated).total_seconds() / 3600
+            
+            if age_hours > 24:
+                # Memory too old, skip
+                return
+            
+            # Load memory into agent
+            if user_id not in self.memory:
+                self.memory[user_id] = {}
+            
+            self.memory[user_id][conversation_id] = memory_data.get("interactions", [])
+            
+            if self.debug_mode:
+                self._safe_print(f"✅ Loaded {len(self.memory[user_id][conversation_id])} past interactions from disk")
+                
+        except Exception as e:
+            # Don't fail if loading fails
+            if self.debug_mode:
+                self._safe_print(f"⚠️  Failed to load memory from disk: {e}")
 
     @staticmethod
     def _hash_identifier(value: Optional[str]) -> Optional[str]:
@@ -4649,7 +5867,7 @@ Concise query (max {max_length} chars):"""
 
         except Exception as e:
             if debug_mode:
-                print(f"⚠️ [Heuristic] Execution failed: {e}, falling back to LLM")
+                self._safe_print(f"⚠️ [Heuristic] Execution failed: {e}, falling back to LLM")
             return None  # Fall back to LLM routing
 
     async def process_request_with_function_calling(self, request: ChatRequest) -> ChatResponse:
@@ -4699,7 +5917,7 @@ Concise query (max {max_length} chars):"""
                 )
 
             if debug_mode:
-                print(f"🔍 [Function Calling] Processing query: {request.question[:100]}...")
+                self._safe_print(f"🔍 [Function Calling] Processing query: {request.question[:100]}...")
 
             # Multi-step execution: allow up to 3 rounds of tool calls
             MAX_ITERATIONS = 3
@@ -4731,10 +5949,11 @@ Concise query (max {max_length} chars):"""
                 f"- Exception: If user explicitly asks for JSON data, provide it cleanly formatted\n"
             )
 
-            # Build conversation context
+            # Build conversation context with automatic summarization
             conversation = []
             if hasattr(self, 'conversation_history'):
-                conversation = self.conversation_history[-10:].copy()
+                # Use smart context management (sliding window + summarization)
+                conversation = self._get_conversation_context_with_summary()
 
             current_query = request.question
             last_assistant_message = None
@@ -4745,7 +5964,7 @@ Concise query (max {max_length} chars):"""
                     print(f"💭 Processing step {iteration + 1}/{MAX_ITERATIONS}...")
                 
                 if debug_mode:
-                    print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
+                    self._safe_print(f"🔍 [Function Calling] Iteration {iteration + 1}/{MAX_ITERATIONS}")
 
                 # Update system prompt with current cwd (may have changed from previous iteration)
                 current_cwd = self.file_context.get('current_cwd', os.getcwd())
@@ -4766,7 +5985,7 @@ Concise query (max {max_length} chars):"""
                 # If no tool calls, break the loop
                 if not fc_response.tool_calls:
                     if debug_mode:
-                        print(f"🔍 [Function Calling] No tool calls in iteration {iteration + 1}")
+                        self._safe_print(f"🔍 [Function Calling] No tool calls in iteration {iteration + 1}")
 
                     # If this is first iteration with no tools, return direct response
                     if iteration == 0:
@@ -4793,7 +6012,7 @@ Concise query (max {max_length} chars):"""
 
                 # Step 2: Execute tools
                 if debug_mode:
-                    print(f"🔍 [Function Calling] Executing {len(fc_response.tool_calls)} tool(s)")
+                    self._safe_print(f"🔍 [Function Calling] Executing {len(fc_response.tool_calls)} tool(s)")
 
                 iteration_results = {}
                 for tool_call in fc_response.tool_calls:
@@ -4820,7 +6039,7 @@ Concise query (max {max_length} chars):"""
                     all_tools_used.append(tool_call.name)
 
                     if debug_mode:
-                        print(f"🔍 [Function Calling] Tool {tool_call.name} executed: "
+                        self._safe_print(f"🔍 [Function Calling] Tool {tool_call.name} executed: "
                               f"{'error' if 'error' in result else 'success'}")
 
                 all_tool_calls.extend(fc_response.tool_calls)
@@ -4832,7 +6051,7 @@ Concise query (max {max_length} chars):"""
                     fc_response.tool_calls[0].name == "chat" and  # Chat tool
                     len(request.question.split()) <= 3):  # Simple query
                     if debug_mode:
-                        print(f"🔍 [Function Calling] Simple chat detected, skipping additional iterations")
+                        self._safe_print(f"🔍 [Function Calling] Simple chat detected, skipping additional iterations")
                     break  # Skip to final synthesis
 
                 # OPTIMIZATION: If load_dataset returned stats and query asks for specific stat, return directly
@@ -4892,7 +6111,7 @@ Concise query (max {max_length} chars):"""
                                 )
 
                             if debug_mode:
-                                print(f"🔍 [Function Calling] Direct answer from stats: {direct_answer}")
+                                self._safe_print(f"🔍 [Function Calling] Direct answer from stats: {direct_answer}")
 
                             # Return immediately without LLM synthesis
                             return ChatResponse(
@@ -4984,7 +6203,7 @@ Concise query (max {max_length} chars):"""
 
             # Step 3: Get final response from LLM with all tool results
             if debug_mode:
-                print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
+                self._safe_print(f"🔍 [Function Calling] Getting final response after {len(all_tool_calls)} tool call(s)")
 
             # OPTIMIZATION: Skip synthesis for simple shell operations
             # If single tool call and it's a shell command, return output directly
@@ -4998,7 +6217,7 @@ Concise query (max {max_length} chars):"""
                     cwd = result.get("working_directory", ".")
 
                     if debug_mode:
-                        print(f"🔍 [Function Calling] Direct shell output - skipping synthesis")
+                        self._safe_print(f"🔍 [Function Calling] Direct shell output - skipping synthesis")
 
                     # Format based on command type
                     if command.strip().startswith("cd "):
@@ -5023,7 +6242,7 @@ Concise query (max {max_length} chars):"""
 
                 elif tool_call.name == "list_directory" and "listing" in result:
                     if debug_mode:
-                        print(f"🔍 [Function Calling] Direct directory listing - skipping synthesis")
+                        self._safe_print(f"🔍 [Function Calling] Direct directory listing - skipping synthesis")
 
                     path = result.get("path", ".")
                     listing = result.get("listing", "")
@@ -5043,7 +6262,7 @@ Concise query (max {max_length} chars):"""
 
                 elif tool_call.name == "read_file" and "content" in result:
                     if debug_mode:
-                        print(f"🔍 [Function Calling] Direct file read - skipping synthesis")
+                        self._safe_print(f"🔍 [Function Calling] Direct file read - skipping synthesis")
 
                     file_path = result.get("file_path", "unknown")
                     content = result.get("content", "")
@@ -5106,7 +6325,7 @@ Concise query (max {max_length} chars):"""
                 })
 
             if debug_mode:
-                print(f"🔍 [Function Calling] Final response: {final_response.response[:100]}...")
+                self._safe_print(f"🔍 [Function Calling] Final response: {final_response.response[:100]}...")
 
             # CRITICAL: Clean JSON artifacts from FC synthesis
             cleaned_response = self._clean_formatting(final_response.response)
@@ -5121,7 +6340,7 @@ Concise query (max {max_length} chars):"""
 
         except Exception as e:
             if debug_mode:
-                print(f"❌ [Function Calling] Error: {e}")
+                self._safe_print(f"❌ [Function Calling] Error: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -5137,6 +6356,10 @@ Concise query (max {max_length} chars):"""
 
     async def process_request(self, request: ChatRequest) -> ChatResponse:
         """Process request with full AI capabilities and API integration"""
+        import time
+        start_time = time.time()
+        request._start_time = start_time  # Attach for later timing calculation
+        
         try:
             # Ensure client is initialized
             if not self._initialized:
@@ -5172,7 +6395,7 @@ Concise query (max {max_length} chars):"""
 
             if debug_mode and self.client is not None:
                 mode = "FUNCTION CALLING" if use_function_calling else "TRADITIONAL"
-                print(f"🔍 ROUTING: Using {mode} mode")
+                self._safe_print(f"🔍 ROUTING: Using {mode} mode")
 
             # FUNCTION CALLING MODE: Cursor-like iterative tool execution
             if use_function_calling and self.client is not None:
@@ -5321,7 +6544,7 @@ Concise query (max {max_length} chars):"""
                     # Skip to LLM synthesis with shell results
                     # The LLM will now have actual ls output and can't hallucinate
                     if debug_mode:
-                        print(f"✅ Shell output captured, proceeding to LLM with real data")
+                        self._safe_print(f"✅ Shell output captured, proceeding to LLM with real data")
                 else:
                     # Normal flow: Ask LLM planner what to run
                     planner_prompt = f"""You are a shell command planner. Determine what shell command to run, if any.
@@ -5418,7 +6641,7 @@ JSON:"""
                             # Calling backend here causes recursion/hangs
                             # Just use fallback heuristics instead
                             if debug_mode:
-                                print(f"🔍 Skipping shell planner in backend mode (would cause recursion)")
+                                self._safe_print(f"🔍 Skipping shell planner in backend mode (would cause recursion)")
                             plan_text = '{"action": "none", "reason": "Backend mode - using heuristics"}'
                             plan_response = ChatResponse(response=plan_text)
                         
@@ -5435,7 +6658,7 @@ JSON:"""
                         # Only show planning details with explicit verbose flag (don't leak to users)
                         verbose_planning = debug_mode and os.getenv("NOCTURNAL_VERBOSE_PLANNING", "").lower() == "1"
                         if verbose_planning:
-                            print(f"🔍 SHELL PLAN: {plan}")
+                            self._safe_print(f"🔍 SHELL PLAN: {plan}")
     
                         # GENERIC COMMAND EXECUTION - No more hardcoded actions!
                         if shell_action != "execute" and might_need_shell:
@@ -5461,8 +6684,8 @@ JSON:"""
                             safety_level = self._classify_command_safety(command)
                             
                             if debug_mode:
-                                print(f"🔍 Command: {command}")
-                                print(f"🔍 Safety: {safety_level}")
+                                self._safe_print(f"🔍 Command: {command}")
+                                self._safe_print(f"🔍 Safety: {safety_level}")
                             
                             # Determine if command should be executed
                             should_execute = False
@@ -5475,7 +6698,7 @@ JSON:"""
                                 }
                             elif safety_level == 'DANGEROUS':
                                 # DANGEROUS commands - require interactive confirmation
-                                print(f"\n⚠️  DESTRUCTIVE COMMAND DETECTED:")
+                                self._safe_print(f"\n⚠️  DESTRUCTIVE COMMAND DETECTED:")
                                 print(f"   Command: {command}")
                                 print(f"   This command will modify or delete files/directories.")
                                 
@@ -5484,7 +6707,7 @@ JSON:"""
                                     if confirmation == 'yes':
                                         should_execute = True
                                         if debug_mode:
-                                            print("✅ User confirmed destructive command")
+                                            self._safe_print("✅ User confirmed destructive command")
                                     else:
                                         api_results["shell_info"] = {
                                             "error": f"Command cancelled by user: {command}",
@@ -5620,7 +6843,7 @@ JSON:"""
                                                             tools_used.extend(["grep_search", "write_file"])
                                                     except Exception as e:
                                                         if debug_mode:
-                                                            print(f"⚠️ Grep > file interception error: {e}")
+                                                            self._safe_print(f"⚠️ Grep > file interception error: {e}")
                                                         # Fall back to normal execution
                                                         pass
     
@@ -5678,7 +6901,7 @@ JSON:"""
                                         # This would need to be handled differently (multi-line input)
                                         # For now, just detect and warn
                                         if debug_mode:
-                                            print(f"⚠️  Heredoc detected but not intercepted: {command[:80]}")
+                                            self._safe_print(f"⚠️  Heredoc detected but not intercepted: {command[:80]}")
                                     except:
                                         pass
     
@@ -5722,7 +6945,7 @@ JSON:"""
                                                 print(f"🔄 Intercepted: {command} → grep_search({pattern}, {search_path}, {file_pattern})")
                                     except Exception as e:
                                         if debug_mode:
-                                            print(f"⚠️  Grep interceptor failed: {e}")
+                                            self._safe_print(f"⚠️  Grep interceptor failed: {e}")
                                         pass
     
                                 # If not intercepted, execute as shell command
@@ -5801,8 +7024,8 @@ JSON:"""
                                 find_cmd = f"find {search_path} -maxdepth 4 -type d -iname '*{search_target}*' 2>/dev/null | head -20"
                                 find_output = self.execute_command(find_cmd)
                                 if debug_mode:
-                                    print(f"🔍 FIND: {find_cmd}")
-                                    print(f"🔍 OUTPUT: {repr(find_output)}")
+                                    self._safe_print(f"🔍 FIND: {find_cmd}")
+                                    self._safe_print(f"🔍 OUTPUT: {repr(find_output)}")
                                 if find_output.strip():
                                     api_results["shell_info"] = {
                                         "search_results": f"Searched for '*{search_target}*' in {search_path}:\n{find_output}"
@@ -5854,7 +7077,7 @@ JSON:"""
                             
                             if file_path:
                                 if debug_mode:
-                                    print(f"🔍 READING FILE: {file_path}")
+                                    self._safe_print(f"🔍 READING FILE: {file_path}")
                                 
                                 # Read file content (first 100 lines to detect structure)
                                 cat_output = self.execute_command(f"head -100 {file_path}")
@@ -5892,7 +7115,7 @@ JSON:"""
                                     tools_used.append("file_read")
                                     
                                     if debug_mode:
-                                        print(f"🔍 FILE STRUCTURE: {columns_info}")
+                                        self._safe_print(f"🔍 FILE STRUCTURE: {columns_info}")
                                 else:
                                     api_results["file_context"] = {
                                         "error": f"Could not read file: {file_path}"
@@ -5900,7 +7123,7 @@ JSON:"""
                     
                     except Exception as e:
                         if debug_mode:
-                            print(f"🔍 Shell planner failed: {e}, continuing without shell")
+                            self._safe_print(f"🔍 Shell planner failed: {e}, continuing without shell")
                         shell_action = "none"
             
             # ========================================================================
@@ -5912,11 +7135,11 @@ JSON:"""
             # Analyze what data APIs are needed (only if not pure shell command)
             request_analysis = await self._analyze_request_type(request.question)
             if debug_mode:
-                print(f"🔍 Request analysis: {request_analysis}")
+                self._safe_print(f"🔍 Request analysis: {request_analysis}")
             
             is_vague = self._is_query_too_vague_for_apis(request.question)
             if debug_mode and is_vague:
-                print(f"🔍 Query is VAGUE - skipping expensive APIs")
+                self._safe_print(f"🔍 Query is VAGUE - skipping expensive APIs")
             
             # If query is vague, hint to backend LLM to ask clarifying questions
             if is_vague:
@@ -6102,7 +7325,7 @@ JSON:"""
                     needs_web_search = decision.get("use_web_search", False)
                     
                     if debug_mode:
-                        print(f"🔍 WEB SEARCH DECISION: {needs_web_search}, reason: {decision.get('reason')}")
+                        self._safe_print(f"🔍 WEB SEARCH DECISION: {needs_web_search}, reason: {decision.get('reason')}")
                     
                     if needs_web_search:
                         web_results = await self.web_search.search_web(request.question, num_results=3)
@@ -6110,19 +7333,19 @@ JSON:"""
                             api_results["web_search"] = web_results
                             tools_used.append("web_search")
                             if debug_mode:
-                                print(f"🔍 Web search returned: {len(web_results.get('results', []))} results")
+                                self._safe_print(f"🔍 Web search returned: {len(web_results.get('results', []))} results")
                 
                 except Exception as e:
                     if debug_mode:
-                        print(f"🔍 Web search decision failed: {e}")
+                        self._safe_print(f"🔍 Web search decision failed: {e}")
             
             # PRODUCTION MODE: Call backend LLM with all gathered data
             if self.client is None:
                 # DEBUG: Log what we're sending
                 if debug_mode:
-                    print(f"🔍 Using BACKEND MODE (self.client is None)")
+                    self._safe_print(f"🔍 Using BACKEND MODE (self.client is None)")
                     if api_results.get("shell_info"):
-                        print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
+                        self._safe_print(f"🔍 SENDING TO BACKEND: shell_info keys = {list(api_results.get('shell_info', {}).keys())}")
 
                 # OPTIMIZATION: Check if we can skip synthesis for simple shell operations
                 skip_synthesis, direct_response = self._should_skip_synthesis(
@@ -6131,7 +7354,7 @@ JSON:"""
 
                 if skip_synthesis:
                     if debug_mode:
-                        print(f"🔍 Skipping backend synthesis (pure shell operation, saving tokens)")
+                        self._safe_print(f"🔍 Skipping backend synthesis (pure shell operation, saving tokens)")
 
                     # Clean formatting (preserves LaTeX)
                     cleaned_response = self._clean_formatting(direct_response)
@@ -6156,7 +7379,7 @@ JSON:"""
                 if not response or not hasattr(response, 'response'):
                     # Backend failed - create friendly error with available data
                     if debug_mode:
-                        print(f"⚠️ Backend response invalid or missing")
+                        self._safe_print(f"⚠️ Backend response invalid or missing")
                     return ChatResponse(
                         response="I ran into a technical issue processing that. Let me try to help with what I found:",
                         error_message="Backend response invalid",
@@ -6169,7 +7392,7 @@ JSON:"""
                 if response_text.startswith('{') and '"action"' in response_text and '"command"' in response_text:
                     # This is planning JSON, not a final response!
                     if debug_mode:
-                        print(f"⚠️ Backend returned planning JSON instead of final response")
+                        self._safe_print(f"⚠️ Backend returned planning JSON instead of final response")
                     
                     # Extract real output from api_results and generate friendly response
                     shell_output = api_results.get('shell_info', {}).get('output', '')
@@ -6217,7 +7440,142 @@ JSON:"""
                                         print(f"🔄 Auto-extracted code block → write_file({target_filename})")
                             except Exception as e:
                                 if debug_mode:
-                                    print(f"⚠️ Auto-write failed: {e}")
+                                    self._safe_print(f"⚠️ Auto-write failed: {e}")
+
+                # POST-PROCESSING: AUTO-EXECUTE CODE for analysis queries
+                # Detects solve/analyze/calculate queries and automatically runs generated Python code
+                # Iterates up to 3 times if errors occur (install deps, fix bugs, etc.)
+                query_lower = request.question.lower()
+                is_analysis_query = any(kw in query_lower for kw in [
+                    'solve', 'analyze', 'analyse', 'calculate', 'compute', 'estimate', 'regression',
+                    'predict', 'test', 'run', 'execute', 'find', 'answer', 'result', 'output',
+                    'homework', 'problem', 'question', 'assignment', 'correlation', 'correlate'
+                ])
+                
+                if is_analysis_query and hasattr(response, 'response') and response.response:
+                    # Extract Python code blocks from LLM response
+                    code_block_pattern = r'```python\n(.*?)```'
+                    code_blocks = re.findall(code_block_pattern, response.response, re.DOTALL)
+                    
+                    if code_blocks and self.shell_session:
+                        # Use the largest code block (likely the main analysis)
+                        code_to_run = max(code_blocks, key=len).strip()
+                        
+                        if len(code_to_run) > 50:  # Only execute substantial code (not trivial examples)
+                            max_attempts = 3
+                            attempt = 0
+                            execution_output = None
+                            
+                            if debug_mode:
+                                print(f"🚀 AUTO-EXECUTE: Detected analysis query with {len(code_to_run)} chars of Python code")
+                            
+                            while attempt < max_attempts:
+                                attempt += 1
+                                
+                                try:
+                                    # Save code to temp file
+                                    import uuid
+                                    temp_filename = f"cite_agent_exec_{uuid.uuid4().hex[:8]}.py"
+                                    temp_path = f"/tmp/{temp_filename}"
+                                    
+                                    # Write code to temp file
+                                    with open(temp_path, 'w') as f:
+                                        f.write(code_to_run)
+                                    
+                                    if debug_mode:
+                                        self._safe_print(f"  📝 Attempt {attempt}/{max_attempts}: Executing {temp_filename}")
+                                    
+                                    # Execute the code
+                                    execution_output = self.execute_command(f"python3 {temp_path} 2>&1")
+                                    
+                                    # Clean up temp file
+                                    try:
+                                        os.unlink(temp_path)
+                                    except:
+                                        pass
+                                    
+                                    # Check if execution was successful
+                                    if execution_output and not execution_output.startswith("ERROR:"):
+                                        # Check for common error indicators in output
+                                        error_indicators = [
+                                            'ModuleNotFoundError', 'ImportError', 'NameError',
+                                            'SyntaxError', 'IndentationError', 'TypeError',
+                                            'ValueError', 'AttributeError', 'KeyError',
+                                            'Traceback (most recent call last)'
+                                        ]
+                                        
+                                        has_error = any(indicator in execution_output for indicator in error_indicators)
+                                        
+                                        if has_error and attempt < max_attempts:
+                                            # Extract error message
+                                            error_lines = [line for line in execution_output.split('\n') 
+                                                         if any(err in line for err in error_indicators)]
+                                            error_summary = '\n'.join(error_lines[:5])  # First 5 error lines
+                                            
+                                            if debug_mode:
+                                                self._safe_print(f"  ⚠️ Execution error detected, attempting fix...")
+                                                print(f"     Error: {error_summary[:100]}")
+                                            
+                                            # Ask LLM to fix the code
+                                            fix_prompt = (
+                                                f"The code you generated had an execution error:\n\n"
+                                                f"```\n{error_summary}\n```\n\n"
+                                                f"Please fix the code and provide the corrected version. "
+                                                f"Common fixes:\n"
+                                                f"- Missing import? Add it\n"
+                                                f"- Module not found? Use stdlib alternatives (pandas → csv+statistics)\n"
+                                                f"- Syntax error? Fix the code\n\n"
+                                                f"Provide ONLY the fixed Python code in ```python``` block."
+                                            )
+                                            
+                                            # Get fixed code from LLM (simplified call)
+                                            try:
+                                                fix_response = await self._call_llm_for_code_fix(fix_prompt, request)
+                                                fixed_code_blocks = re.findall(code_block_pattern, fix_response, re.DOTALL)
+                                                
+                                                if fixed_code_blocks:
+                                                    code_to_run = max(fixed_code_blocks, key=len).strip()
+                                                    if debug_mode:
+                                                        print(f"  🔄 Got fixed code, retrying...")
+                                                    continue  # Retry with fixed code
+                                                else:
+                                                    if debug_mode:
+                                                        self._safe_print(f"  ❌ LLM didn't provide fixed code")
+                                                    break
+                                            except Exception as fix_error:
+                                                if debug_mode:
+                                                    self._safe_print(f"  ❌ Fix attempt failed: {fix_error}")
+                                                break
+                                        else:
+                                            # Success! Format and append execution results
+                                            formatted_output = self._format_large_numbers(execution_output)
+                                            response.response += (
+                                                f"\n\n{'='*70}\n"
+                                                f"📊 EXECUTION RESULTS (Auto-executed)\n"
+                                                f"{'='*70}\n\n"
+                                                f"{formatted_output}\n"
+                                            )
+                                            tools_used.append("auto_execute_python")
+                                            
+                                            if debug_mode:
+                                                self._safe_print(f"  ✅ Execution successful ({len(execution_output)} chars output)")
+                                            break
+                                    else:
+                                        if debug_mode:
+                                            self._safe_print(f"  ❌ Execution failed: {execution_output[:100]}")
+                                        break
+                                        
+                                except Exception as exec_error:
+                                    if debug_mode:
+                                        self._safe_print(f"  ❌ Auto-execute exception: {exec_error}")
+                                    break
+                            
+                            if attempt >= max_attempts and execution_output and "Traceback" in execution_output:
+                                # All attempts failed, add error notice
+                                response.response += (
+                                    f"\n\n⚠️ **Code execution encountered errors after {max_attempts} attempts.** "
+                                    f"Last error:\n```\n{execution_output[-500:]}\n```\n"
+                                )
 
                 # POST-PROCESSING: Clean formatting and enhance response quality
                 if hasattr(response, 'response') and response.response:
@@ -6239,7 +7597,7 @@ JSON:"""
                         if is_research_focused and not has_financial_focus:
                             response.response = self._enhance_paper_citations(response.response, api_results["research"])
                             if debug_mode:
-                                print(f"🔍 Enhanced research citations with DOI and author info")
+                                self._safe_print(f"🔍 Enhanced research citations with DOI and author info")
 
                 return self._finalize_interaction(
                     request,
@@ -6254,7 +7612,8 @@ JSON:"""
             # Executes when self.client is NOT None (temp key loaded or USE_LOCAL_KEYS=true)
             debug_mode = self.debug_mode
             if debug_mode:
-                print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
+                self._safe_print(f"🐛 STATE CHECK: self.client={self.client is not None}, self.api_keys={len(getattr(self, 'api_keys', []))}, llm_provider={getattr(self, 'llm_provider', 'NONE')}")
+                self._safe_print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
 
             if not self._check_query_budget(request.user_id):
                 effective_limit = self.daily_query_limit if self.daily_query_limit > 0 else self.per_user_query_limit
@@ -6274,6 +7633,122 @@ JSON:"""
 
             self._record_query_usage(request.user_id)
 
+            # PRE-PROCESSING: LLM-driven workflow planning
+            # Let the LLM decide if query needs multiple tools in sequence
+            query_lower = request.question.lower()
+            
+            # Use LLM to create execution plan (much better than pattern matching!)
+            execution_plan = await self._create_execution_plan_with_llm(request.question)
+            
+            if execution_plan.get("needs_sequencing"):
+                # Execute multi-step workflow based on LLM plan
+                return await self._execute_plan_from_llm(execution_plan, request)
+            
+            # Single tool execution - LLM has decided which tool to use
+            llm_tool_choice = execution_plan.get("tool")
+            if debug_mode and llm_tool_choice:
+                self._safe_print(f"🧠 LLM selected tool: {llm_tool_choice} - {execution_plan.get('reason', '')[:60]}...")
+            
+            # PRE-PROCESSING: Check if this is an analysis query requiring code execution
+            # IMPORTANT: Respect LLM's decision - only use auto-execute if LLM says 'analysis'
+            is_analysis_query = any(kw in query_lower for kw in [
+                'correlation', 'correlate', 'regression', 'calculate', 'compute', 'analyze',
+                'analyse', 'estimate', 'predict', 'test', 'mean', 'average', 'variance',
+                'standard deviation', 'homework', 'problem', 'solve'
+            ])
+            
+            # Override: If LLM explicitly chose a different tool, respect that
+            if llm_tool_choice and llm_tool_choice != 'analysis':
+                is_analysis_query = False
+                if debug_mode:
+                    self._safe_print(f"🧠 Overriding auto-execute: LLM chose '{llm_tool_choice}' instead of 'analysis'")
+            
+            if debug_mode:
+                self._safe_print(f"🐛 DEBUG: is_analysis_query={is_analysis_query}, shell_session={self.shell_session is not None}")
+            
+            if is_analysis_query and self.shell_session:
+                if debug_mode:
+                    self._safe_print("🐛 DEBUG: Entered analysis query branch!")
+                # STEP 1: Generate code using dedicated LLM call
+                code_gen_prompt = f"""Write Python code to answer this question: {request.question}
+
+Requirements:
+- Use pandas if CSV files are mentioned
+- Format numbers intelligently: integers as integers (56, not 56.0000), floats with up to 4 decimal places only if needed
+- Code must be complete and runnable
+- DO NOT explain, just write the code
+
+Output ONLY the Python code wrapped in ```python ``` blocks."""
+
+                code_gen_messages = [
+                    {"role": "system", "content": "You are a Python code generator. Output ONLY code in ```python ``` blocks."},
+                    {"role": "user", "content": code_gen_prompt}
+                ]
+                
+                try:
+                    if debug_mode:
+                        print("🔧 Generating code for analysis query...")
+                    
+                    code_response = self.client.chat.completions.create(
+                        model="llama-3.3-70b",
+                        messages=code_gen_messages,
+                        max_tokens=1000,
+                        temperature=0.2
+                    )
+                    
+                    code_text = code_response.choices[0].message.content
+                    code_tokens = code_response.usage.total_tokens if code_response.usage else 0
+                    
+                    # Extract Python code blocks
+                    code_block_pattern = r'```python\n(.*?)```'
+                    code_blocks = re.findall(code_block_pattern, code_text, re.DOTALL)
+                    
+                    if code_blocks and debug_mode:
+                        self._safe_print(f"✅ Generated {len(code_blocks)} code block(s)")
+                    
+                    if code_blocks:
+                        code_to_run = code_blocks[0].strip()
+                        
+                        # STEP 2: Execute the code
+                        if debug_mode:
+                            print(f"🔧 Executing code:\n{code_to_run[:200]}...")
+                        
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                            f.write(code_to_run)
+                            temp_path = f.name
+                        
+                        try:
+                            output = self.execute_command(f"cd ~/Downloads/data && python3 {temp_path}")
+                            
+                            if debug_mode:
+                                self._safe_print(f"✅ Execution complete. Output:\n{output[:300]}")
+                            
+                            # STEP 3: Format response with results (format numbers, clean markdown)
+                            formatted_output = self._format_large_numbers(output)
+                            response_text = f"I've executed the analysis:\n\n📊 Results:\n{formatted_output}"
+                            response_text = self._clean_markdown_preserve_stats(response_text)
+                            
+                            return ChatResponse(
+                                response=response_text,
+                                timestamp=datetime.now().isoformat(),
+                                tools_used=["code_generation", "shell_execution"],
+                                api_results={},
+                                tokens_used=code_tokens,
+                                confidence_score=0.9,
+                                reasoning_steps=["Generated Python code", "Executed code", "Returned results"],
+                                execution_results={"code": code_to_run, "output": output}
+                            )
+                        finally:
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                                
+                except Exception as e:
+                    if debug_mode:
+                        self._safe_print(f"⚠️ Code generation/execution failed: {e}")
+                    # Fall through to normal processing
+            
             # Analyze request type
             request_analysis = await self._analyze_request_type(request.question)
             question_lower = request.question.lower()
@@ -6284,6 +7759,9 @@ JSON:"""
             if direct_shell:
                 return self._respond_with_shell_command(request, direct_shell.group(1).strip())
 
+            # CRITICAL: Load memory from disk first (for cross-CLI continuity)
+            self._load_memory_from_disk(request.user_id, request.conversation_id)
+            
             # Get memory context
             memory_context = self._get_memory_context(request.user_id, request.conversation_id)
             archive_context = self.archive.get_recent_context(
@@ -6403,7 +7881,18 @@ JSON:"""
                 describe_files = (
                     "file" in question_lower or "directory" in question_lower
                 ) and any(verb in question_lower for verb in ("show", "list", "what", "which", "display"))
-                if any(keyword in question_lower for keyword in file_browse_keywords) or describe_files:
+                
+                # Check if query specifies file filters (extensions, types, patterns)
+                # If so, don't use workspace listing - let backend LLM handle with shell
+                has_filter = any(pattern in question_lower for pattern in [
+                    ".py", ".js", ".ts", ".java", ".cpp", ".c", ".h", ".go", ".rs", ".rb", ".php",
+                    ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".toml",
+                    ".sh", ".bash", ".zsh", ".fish",
+                    "python file", "javascript file", "typescript file",
+                    "only", "just", "filter", "matching", "with extension", "ending in"
+                ])
+                
+                if (any(keyword in question_lower for keyword in file_browse_keywords) or describe_files) and not has_filter:
                     workspace_listing = await self._get_workspace_listing()
                     api_results["workspace_listing"] = workspace_listing
 
@@ -6543,7 +8032,19 @@ JSON:"""
                 messages.extend(self.conversation_history)
             
             # Add current user message
-            messages.append({"role": "user", "content": request.question})
+            # For analysis queries, prepend explicit instruction to generate Python code
+            query_lower = request.question.lower()
+            is_analysis_query = any(kw in query_lower for kw in [
+                'solve', 'analyze', 'analyse', 'calculate', 'compute', 'estimate', 'regression',
+                'predict', 'test', 'correlation', 'correlate', 'mean', 'average', 'variance',
+                'standard deviation', 'homework', 'problem', 'find', 'answer'
+            ])
+            
+            if is_analysis_query:
+                modified_question = f"{request.question}\n\n(Generate executable Python code in ```python ``` blocks to calculate this. Do NOT simulate or fake the answer.)"
+                messages.append({"role": "user", "content": modified_question})
+            else:
+                messages.append({"role": "user", "content": request.question})
 
             model_config = self._select_model(request, request_analysis, api_results)
             target_model = model_config["model"]
@@ -6652,7 +8153,7 @@ JSON:"""
                 if self._is_safe_shell_command(command):
                     print(f"\n🔧 Executing: {command}")
                     output = self.execute_command(command)
-                    print(f"✅ Command completed")
+                    self._safe_print(f"✅ Command completed")
                     execution_results = {
                         "command": command,
                         "output": output,
@@ -6751,12 +8252,14 @@ JSON:"""
             details = str(e)
             debug_mode = self.debug_mode
             if debug_mode:
-                print("🔴 FULL TRACEBACK:")
+                self._safe_print("🔴 FULL TRACEBACK:")
                 traceback.print_exc()
             message = (
                 "⚠️ Something went wrong while orchestrating your request, but no actions were performed. "
                 "Please retry, and if the issue persists share this detail with the team: {details}."
             ).format(details=details)
+            # Clean emojis for terminals that don't support them
+            message = self._clean_response_text(message)
             return ChatResponse(
                 response=message,
                 timestamp=datetime.now().isoformat(),
@@ -7016,7 +8519,7 @@ JSON:"""
             return
             
         print("\n" + "="*70)
-        print("🤖 ENHANCED NOCTURNAL AI AGENT")
+        self._safe_print("🤖 ENHANCED NOCTURNAL AI AGENT")
         print("="*70)
         print("Research Assistant with Archive API + FinSight API Integration")
         print("Type 'quit' to exit")
@@ -7035,7 +8538,7 @@ JSON:"""
                 request = ChatRequest(question=user_input)
                 response = await self.process_request(request)
                 
-                print(f"\n🤖 Agent: {response.response}")
+                self._safe_print(f"\n🤖 Agent: {response.response}")
                 
                 if response.api_results:
                     print(f"📊 API Results: {len(response.api_results)} sources used")
@@ -7044,16 +8547,18 @@ JSON:"""
                     print(f"🔧 Command: {response.execution_results['command']}")
                     print(f"📊 Success: {response.execution_results['success']}")
                 
-                print(f"📈 Tokens used: {response.tokens_used}")
-                print(f"🎯 Confidence: {response.confidence_score:.2f}")
-                print(f"🛠️ Tools used: {', '.join(response.tools_used) if response.tools_used else 'None'}")
+                # Don't show tokens/confidence in production - just clutter
+                # print(f"📈 Tokens used: {response.tokens_used}")
+                # print(f"🎯 Confidence: {response.confidence_score:.2f}")
+                if response.tools_used:
+                    self._safe_print(f"🛠️ Tools: {', '.join(response.tools_used)}")
                 
             except KeyboardInterrupt:
                 print("\n👋 Goodbye!")
                 await self.close()
                 break
             except Exception as e:
-                print(f"\n❌ Error: {e}")
+                self._safe_print(f"\n❌ Error: {e}")
 
 async def main():
     """Main entry point"""
