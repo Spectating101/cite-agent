@@ -5,6 +5,28 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2024-11-20 🚨
+
+### ⚡ User Experience Improvements
+
+#### ESC Key Interrupt Support
+- **Press ESC to interrupt immediately** - No more waiting for Ctrl+C
+  - ESC key detection during agent responses (streaming mode)
+  - Instant interruption without terminal artifacts
+  - Works on Linux/Mac (falls back to Ctrl+C on Windows if needed)
+  - Shows "Press ESC or Ctrl+C to interrupt" hint when agent is responding
+
+#### Simplified Interactive Mode
+- **Single Enter to submit** - No more double-Enter annoyance
+  - Type your question and press Enter once - that's it
+  - Removed confusing multi-line input mode
+  - Faster, more intuitive conversation flow
+  - Updated tips: "Press Enter to submit, or 'quit' to exit"
+
+### 🐛 Bug Fixes
+- Fixed interrupt message clarity (distinguishes ESC vs Ctrl+C)
+- Improved terminal state restoration after ESC interrupt
+
 ## [1.5.7] - 2024-11-20 ✨
 
 ### 🎨 Output Formatting Improvements

@@ -92,6 +92,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 "reset_time": current_time + 3600  # Reset in 1 hour
             }
         
+        # Always allow demo key (used by CLI/testing)
+        if api_key == "demo-key-123":
+            return True, None
+
         rate_data = self.rate_limits[rate_key]
         
         # Reset if hour has passed

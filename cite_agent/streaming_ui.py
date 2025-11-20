@@ -6,6 +6,7 @@ Minimal, clean, conversational interface for data analysis assistant
 
 import sys
 import asyncio
+import threading
 from typing import Optional, AsyncGenerator
 from rich.console import Console
 from rich.markdown import Markdown
@@ -14,6 +15,9 @@ from rich.live import Live
 from rich.spinner import Spinner
 
 console = Console()
+
+# Global flag for ESC interrupt
+_interrupt_requested = False
 
 
 class StreamingChatUI:
@@ -41,6 +45,13 @@ class StreamingChatUI:
         self.console.print("─" * 70)
         self.console.print()
     
+    def show_footer(self):
+        """Display footer hint bar (like Claude/Cursor style)"""
+        self.console.print()
+        self.console.print("[dim]─" * 70 + "[/dim]")
+        self.console.print("[dim]Press ESC or Ctrl+C to interrupt • Type 'quit' to exit[/dim]")
+        self.console.print()
+    
     def show_user_message(self, message: str):
         """Display user message with 'You:' prefix"""
         self.console.print(f"[bold]You:[/bold] {message}")
@@ -58,21 +69,56 @@ class StreamingChatUI:
             content_generator: Async generator yielding text chunks
             show_markdown: Whether to render as markdown (default True)
         """
+        global _interrupt_requested
+        _interrupt_requested = False
+        
+        # Start ESC key listener in background thread
+        stop_listener = threading.Event()
+        def listen_for_esc():
+            global _interrupt_requested
+            try:
+                import termios, tty
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    while not stop_listener.is_set():
+                        ch = sys.stdin.read(1)
+                        if ch == '\x1b':  # ESC key
+                            _interrupt_requested = True
+                            break
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except:
+                pass  # Fall back to Ctrl+C only on Windows or if termios unavailable
+        
+        listener_thread = threading.Thread(target=listen_for_esc, daemon=True)
+        listener_thread.start()
+        
         # No prefix for agent - just stream naturally
         buffer = ""
         
         try:
             async for chunk in content_generator:
+                # Check for ESC interrupt
+                if _interrupt_requested:
+                    self.console.print("\n[dim]⏹️  Interrupted by ESC.[/dim]")
+                    stop_listener.set()
+                    return buffer
+                    
                 buffer += chunk
                 self.console.print(chunk, end="", style="white")
                 if self.typing_speed:
                     await asyncio.sleep(self.typing_speed)
         except KeyboardInterrupt:
-            self.console.print("\n[dim]⏹️  Streaming interrupted by user.[/dim]")
+            self.console.print("\n[dim]⏹️  Interrupted by Ctrl+C.[/dim]")
+            stop_listener.set()
             return buffer
+        finally:
+            stop_listener.set()
         
         self.console.print()  # Newline after response
-        self.console.print()  # Extra space for readability
+        self.show_footer()  # Show footer hint bar after response
         
         return buffer
     

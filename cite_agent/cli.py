@@ -358,7 +358,7 @@ class NocturnalCLI:
         panel = Panel(
             "Systems check complete.\n"
             "Type [bold]help[/] for commands or [bold]tips[/] for power moves.\n"
-            "[dim]Press Ctrl+C while the agent is thinking to interrupt and ask something else.[/dim]",
+            "[dim]Press ESC or Ctrl+C while the agent is thinking to interrupt and ask something else.[/dim]",
             title="✅ Cite Agent ready!",
             border_style="green",
             padding=(1, 2),
@@ -524,36 +524,17 @@ class NocturnalCLI:
         except:
             pass  # Silently skip if detection fails
         
-        self.console.print(self._clean_emoji("\n[bold]🤖 Interactive Mode[/] — Multi-line input supported"))
-        self.console.print(self._clean_emoji("[dim]💡 Tip: Press Enter twice to submit, or 'quit' to exit[/dim]"))
+        self.console.print(self._clean_emoji("\n[bold]🤖 Interactive Mode[/]"))
+        self.console.print(self._clean_emoji("[dim]💡 Tip: Press Enter to submit, or 'quit' to exit[/dim]"))
         self.console.rule(style="magenta")
         
         try:
             while True:
                 try:
-                    # Multi-line input collection
-                    lines = []
+                    # Single-line input - Enter submits immediately
                     self.console.print("\n[bold cyan]👤 You[/]: ", end="")
                     
-                    first_line = input().strip()
-                    if first_line.lower() in ['quit', 'exit', 'q']:
-                        break
-                    
-                    lines.append(first_line)
-                    
-                    # If first line is not empty, continue collecting lines
-                    if first_line:
-                        while True:
-                            self.console.print("[dim]... [/]", end="")
-                            line = input()
-                            
-                            # Empty line signals end of input
-                            if not line.strip():
-                                break
-                            
-                            lines.append(line)
-                    
-                    user_input = "\n".join(lines).strip()
+                    user_input = input().strip()
                     
                     if not user_input:
                         continue
