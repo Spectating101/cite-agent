@@ -279,9 +279,9 @@ class ToolExecutor:
                     print(f"📁 [List Directory] Got {len(output)} chars of output")
 
                 # INTELLIGENT TRUNCATION: Prevent overwhelming output
-                # If output has more than 50 lines, truncate and show summary
+                # If output has more than 20 lines, truncate and show summary
                 lines = output.strip().split('\n')
-                MAX_LINES = 50
+                MAX_LINES = 20
                 
                 if len(lines) > MAX_LINES:
                     truncated_output = '\n'.join(lines[:MAX_LINES])
@@ -325,7 +325,7 @@ class ToolExecutor:
                     })
 
                 # INTELLIGENT TRUNCATION: Prevent overwhelming output
-                MAX_ENTRIES = 50
+                MAX_ENTRIES = 20
                 truncated = len(entries) > MAX_ENTRIES
                 displayed_entries = entries[:MAX_ENTRIES] if truncated else entries
 

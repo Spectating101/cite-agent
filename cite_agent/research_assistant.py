@@ -112,15 +112,19 @@ class DataAnalyzer:
 
         try:
             if column:
-                # Stats for specific column
-                if column not in self.current_dataset.columns:
-                    return {"error": f"Column '{column}' not found"}
+                # Stats for specific column (case-insensitive matching)
+                column_lower = column.lower()
+                matching_cols = [c for c in self.current_dataset.columns if c.lower() == column_lower]
 
-                series = self.current_dataset[column]
+                if not matching_cols:
+                    return {"error": f"Column '{column}' not found. Available: {', '.join(self.current_dataset.columns)}"}
+
+                actual_column = matching_cols[0]
+                series = self.current_dataset[actual_column]
 
                 if pd.api.types.is_numeric_dtype(series):
                     return {
-                        "column": column,
+                        "column": actual_column,
                         "count": int(series.count()),
                         "mean": float(series.mean()),
                         "std": float(series.std()),
@@ -134,7 +138,7 @@ class DataAnalyzer:
                 else:
                     value_counts = series.value_counts().head(10).to_dict()
                     return {
-                        "column": column,
+                        "column": actual_column,
                         "type": "categorical",
                         "unique_values": int(series.nunique()),
                         "top_values": {str(k): int(v) for k, v in value_counts.items()},
@@ -176,17 +180,26 @@ class DataAnalyzer:
         try:
             from scipy.stats import pearsonr, spearmanr
 
-            if var1 not in self.current_dataset.columns or var2 not in self.current_dataset.columns:
-                return {"error": "One or both variables not found"}
+            # Case-insensitive column matching
+            var1_lower = var1.lower()
+            var2_lower = var2.lower()
+            matching_var1 = [c for c in self.current_dataset.columns if c.lower() == var1_lower]
+            matching_var2 = [c for c in self.current_dataset.columns if c.lower() == var2_lower]
+
+            if not matching_var1 or not matching_var2:
+                return {"error": f"One or both variables not found. Available: {', '.join(self.current_dataset.columns)}"}
+
+            actual_var1 = matching_var1[0]
+            actual_var2 = matching_var2[0]
 
             # Drop missing values
-            data = self.current_dataset[[var1, var2]].dropna()
+            data = self.current_dataset[[actual_var1, actual_var2]].dropna()
 
             if len(data) < 3:
                 return {"error": "Not enough data points (need at least 3)"}
 
-            x = data[var1]
-            y = data[var2]
+            x = data[actual_var1]
+            y = data[actual_var2]
 
             if method == "pearson":
                 r, p = pearsonr(x, y)

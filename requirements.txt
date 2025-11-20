@@ -43,6 +43,7 @@ groq>=0.4.0  # Groq LLM API
 pandas>=2.1.0
 requests>=2.31.0
 numpy>=1.25.0
+matplotlib>=3.7.0
 
 # ============================================================================
 # SEC Filings Ingest
