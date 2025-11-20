@@ -11,7 +11,8 @@
       "Read(//home/phyrexian/Downloads/data/**)",
       "Bash(lsof:*)",
       "Read(//home/phyrexian/.nocturnal_archive/**)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
