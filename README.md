@@ -1,10 +1,27 @@
 # Cite-Agent: AI Research Assistant
 
-[![Version](https://img.shields.io/badge/version-1.4.9-blue.svg)](https://pypi.org/project/cite-agent/)
+[![Version](https://img.shields.io/badge/version-1.5.6-blue.svg)](https://pypi.org/project/cite-agent/)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 **Cite-Agent** is a sophisticated AI research assistant that combines academic research, financial data, and truth-seeking capabilities in one powerful tool. Built for researchers, academics, and professionals who need accurate, cited information.
+
+---
+
+## 🔥 **DEVELOPER NOTE: v1.5.6 → v1.5.7 In Progress**
+
+**Current Status**: Comprehensive testing phase  
+**What's New**: Fixed multi-step context passing + number formatting  
+**What's Next**: Testing 39-tool workflow system before v1.5.7 release
+
+📚 **For Contributors/Maintainers**:
+- 📋 **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - 2-min overview of current state
+- 📖 **[CURRENT_STATE_V156.md](CURRENT_STATE_V156.md)** - Full context & progress (20 min read)
+- 🔧 **[TOOL_CAPABILITY_MATRIX.md](TOOL_CAPABILITY_MATRIX.md)** - All 39 tools + sequencing rules
+
+**Next LLM can catch up in ~20 minutes** by reading these docs. No need to repeat context!
+
+---
 
 ## 🌟 Features
 
