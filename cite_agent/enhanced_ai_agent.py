@@ -3055,15 +3055,16 @@ Output ONLY the Python code in ```python ``` blocks."""
         query_lower = request.question.lower()
         
         if 'read' in query_lower or 'show' in query_lower:
-            # Try to extract filename
-            import re
-            filename_match = re.search(r'[\w\-\.]+\.(?:csv|txt|json|py)', request.question)
-            if filename_match:
-                filename = filename_match.group(0)
-                cmd = f"cd ~/Downloads/data && head -5 {filename}"
-                output = self.execute_command(cmd)
+            candidate = self._extract_file_reference(request.question)
+            if not candidate:
+                candidate = self.file_context.get('last_file')
+
+            target_path = self._resolve_file_target(candidate) if candidate else None
+            if target_path:
+                preview = self.read_file(target_path, offset=0, limit=5)
+                display_name = os.path.basename(target_path)
                 return ChatResponse(
-                    response=f"📄 First 5 lines of {filename}:\n```\n{output}\n```",
+                    response=f"📄 First 5 lines of {display_name}:\n```\n{preview}\n```",
                     timestamp=datetime.now().isoformat(),
                     tools_used=["file_operations"],
                     api_results={},
@@ -4215,6 +4216,144 @@ Concise query (max {max_length} chars):"""
     # ========================================================================
     # DIRECT FILE OPERATIONS (Claude Code / Cursor Parity)
     # ========================================================================
+
+    def _remember_recent_file(self, file_path: str) -> None:
+        """Track the most recent file referenced or created."""
+        if not file_path:
+            return
+        file_path = file_path.strip().strip("\"'")  # remove wrapping quotes
+        if not file_path or file_path.lower() == "/dev/null" or file_path.startswith("&"):
+            return
+
+        # Resolve to absolute path relative to current working directory
+        expanded = os.path.expanduser(file_path)
+        if not os.path.isabs(expanded):
+            current_cwd = self.file_context.get('current_cwd', os.getcwd())
+            expanded = os.path.abspath(os.path.join(current_cwd, expanded))
+
+        self.file_context['last_file'] = expanded
+        if expanded not in self.file_context['recent_files']:
+            self.file_context['recent_files'].append(expanded)
+            self.file_context['recent_files'] = self.file_context['recent_files'][-5:]
+
+    def _remember_recent_directory(self, dir_path: str) -> None:
+        """Track the most recent directory referenced."""
+        if not dir_path:
+            return
+        dir_path = dir_path.strip().strip("\"'")
+        if not dir_path:
+            return
+
+        expanded = os.path.expanduser(dir_path)
+        if not os.path.isabs(expanded):
+            current_cwd = self.file_context.get('current_cwd', os.getcwd())
+            expanded = os.path.abspath(os.path.join(current_cwd, expanded))
+
+        self.file_context['last_directory'] = expanded
+        if expanded not in self.file_context['recent_dirs']:
+            self.file_context['recent_dirs'].append(expanded)
+            self.file_context['recent_dirs'] = self.file_context['recent_dirs'][-5:]
+
+    def _extract_file_reference(self, text: str) -> Optional[str]:
+        """Extract a file path-like token from natural language text."""
+        candidates = re.findall(
+            r'([~./\w-]*[\w-]+\.(?:csv|txt|json|py|md|r|ipynb|tsv|log))',
+            text,
+            re.IGNORECASE
+        )
+        if not candidates:
+            return None
+        for candidate in candidates:
+            cleaned = candidate.strip().strip("\"'")
+            if cleaned.startswith(('.', '/', '~')) or '/' in cleaned:
+                return cleaned
+        return candidates[0].strip().strip("\"'")
+
+    def _resolve_file_target(self, candidate: Optional[str]) -> Optional[str]:
+        """Resolve a file candidate relative to the tracked working directory."""
+        if not candidate:
+            return None
+        candidate = candidate.strip().strip("\"'")
+        if not candidate:
+            return None
+        expanded = os.path.expanduser(candidate)
+        if not os.path.isabs(expanded):
+            current_cwd = self.file_context.get('current_cwd', os.getcwd())
+            expanded = os.path.abspath(os.path.join(current_cwd, expanded))
+        return expanded
+
+    def _extract_redirect_targets(self, command: str) -> List[str]:
+        """Return files that appear as redirect targets in a shell command."""
+        targets: List[str] = []
+        if '>' in command or 'tee' in command:
+            redirect_matches = re.findall(r'(?:>>|>)\s*([^>|&;\n]+)', command)
+            for raw_target in redirect_matches:
+                target = raw_target.strip().strip("\"'")
+                if not target or target.startswith("&") or target.lower() == "/dev/null":
+                    continue
+                targets.append(target)
+
+            # Handle tee/tee -a patterns as file writers
+            try:
+                parts = shlex.split(command)
+            except ValueError:
+                parts = command.split()
+            i = 0
+            while i < len(parts):
+                part = parts[i]
+                if part == "tee":
+                    j = i + 1
+                    while j < len(parts) and parts[j].startswith("-"):
+                        j += 1
+                    if j < len(parts):
+                        tee_target = parts[j]
+                        if tee_target and tee_target.lower() != "/dev/null":
+                            targets.append(tee_target)
+                        i = j
+                i += 1
+
+        # Preserve order but remove duplicates
+        deduped = []
+        seen = set()
+        for target in targets:
+            normalized = target.strip()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
+
+    def _update_file_context_after_shell(self, command: str, updates_context: bool) -> None:
+        """Update file/directory context hints after running a shell command."""
+        if updates_context:
+            file_patterns = r'([a-zA-Z0-9_\-./]+\.(py|r|csv|txt|json|md|ipynb|rmd))'
+            files_mentioned = re.findall(file_patterns, command, re.IGNORECASE)
+            if files_mentioned:
+                for file_path, _ in files_mentioned:
+                    self._remember_recent_file(file_path)
+
+            dir_patterns = r'cd\s+([^\s&|;]+)|mkdir\s+([^\s&|;]+)'
+            dirs_mentioned = re.findall(dir_patterns, command)
+            if dirs_mentioned:
+                for dir_tuple in dirs_mentioned:
+                    dir_path = dir_tuple[0] or dir_tuple[1]
+                    if dir_path:
+                        self._remember_recent_directory(dir_path)
+
+        # Track file writes even if planner forgot to set updates_context
+        redirect_targets = self._extract_redirect_targets(command)
+        for target in redirect_targets:
+            self._remember_recent_file(target)
+
+        stripped = command.strip()
+        if stripped.startswith('cd '):
+            try:
+                new_cwd = self.execute_command("pwd").strip()
+                if new_cwd:
+                    self.file_context['current_cwd'] = new_cwd
+                    self._remember_recent_directory(new_cwd)
+            except Exception:
+                pass
 
     def read_file(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:
         """
@@ -6968,38 +7107,8 @@ JSON:"""
                                     }
                                     tools_used.append("shell_execution")
                                     
-                                    # Update file context if needed
-                                    if updates_context:
-                                        # import re removed - using module-level import
-                                        # Extract file paths from command
-                                        file_patterns = r'([a-zA-Z0-9_\-./]+\.(py|r|csv|txt|json|md|ipynb|rmd))'
-                                        files_mentioned = re.findall(file_patterns, command, re.IGNORECASE)
-                                        if files_mentioned:
-                                            file_path = files_mentioned[0][0]
-                                            self.file_context['last_file'] = file_path
-                                            if file_path not in self.file_context['recent_files']:
-                                                self.file_context['recent_files'].append(file_path)
-                                                self.file_context['recent_files'] = self.file_context['recent_files'][-5:]  # Keep last 5
-                                        
-                                        # Extract directory paths
-                                        dir_patterns = r'cd\s+([^\s&|;]+)|mkdir\s+([^\s&|;]+)'
-                                        dirs_mentioned = re.findall(dir_patterns, command)
-                                        if dirs_mentioned:
-                                            for dir_tuple in dirs_mentioned:
-                                                dir_path = dir_tuple[0] or dir_tuple[1]
-                                                if dir_path:
-                                                    self.file_context['last_directory'] = dir_path
-                                                    if dir_path not in self.file_context['recent_dirs']:
-                                                        self.file_context['recent_dirs'].append(dir_path)
-                                                        self.file_context['recent_dirs'] = self.file_context['recent_dirs'][-5:]  # Keep last 5
-                                        
-                                        # If cd command, update current_cwd
-                                        if command.startswith('cd '):
-                                            try:
-                                                new_cwd = self.execute_command("pwd").strip()
-                                                self.file_context['current_cwd'] = new_cwd
-                                            except:
-                                                pass
+                                    # Update context hints for downstream steps
+                                    self._update_file_context_after_shell(command, updates_context)
                                 else:
                                     # Command failed
                                     api_results["shell_info"] = {
@@ -8154,7 +8263,30 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
 
             if commands:
                 command = commands[0].strip()
-                if self._is_safe_shell_command(command):
+                if "\n" in command or "\r" in command:
+                    if self.debug_mode:
+                        preview = command.replace("\r", "\\r").replace("\n", "\\n")
+                        self._safe_print(f"🔍 Skipping multi-line inline command: {preview[:120]}...")
+                    execution_results = {
+                        "command": command.splitlines()[0] if command.splitlines() else command,
+                        "output": "Inline command spans multiple lines; skipping auto-execution",
+                        "success": False
+                    }
+                elif self._is_safe_shell_command(command):
+                    if self.debug_mode:
+                        self._safe_print(f"🔍 Inline command detected: {repr(command)}")
+                    # Normalize python command to python3 to avoid missing alias
+                    if command.strip() == "python":
+                        command = "python3"
+                    elif command.strip().startswith("python "):
+                        command = "python3 " + command.strip()[7:]
+                    elif command.strip().startswith("$ python"):
+                        # Remove leading prompt + normalize
+                        normalized = command.strip().lstrip("$").strip()
+                        if normalized == "python":
+                            command = "python3"
+                        elif normalized.startswith("python "):
+                            command = "python3 " + normalized[7:]
                     print(f"\n🔧 Executing: {command}")
                     output = self.execute_command(command)
                     self._safe_print(f"✅ Command completed")

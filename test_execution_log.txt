@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/phyrexian/Downloads/llm_automation/project_portfolio/Cite-Agent/test_comprehensive_real_v156.py", line 21, in <module>
+    from cite_agent.enhanced_ai_agent import EnhancedAIAgent
+ImportError: cannot import name 'EnhancedAIAgent' from 'cite_agent.enhanced_ai_agent' (/home/phyrexian/Downloads/llm_automation/project_portfolio/Cite-Agent/cite_agent/enhanced_ai_agent.py). Did you mean: 'enhanced_ai_agent'?
