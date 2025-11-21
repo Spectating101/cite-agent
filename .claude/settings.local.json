@@ -41,7 +41,9 @@
       "Bash(for:*)",
       "Bash(do test -f \"$file\")",
       "Bash(done)",
-      "Bash(git submodule:*)"
+      "Bash(git submodule:*)",
+      "Bash(chmod:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

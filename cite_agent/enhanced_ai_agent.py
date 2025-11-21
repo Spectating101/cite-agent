@@ -1157,7 +1157,6 @@ class EnhancedNocturnalAgent:
         
         Only format if we see raw unformatted numbers from code execution.
         """
-        import re
         
         # First: Remove .0000 from numbers that are actually integers
         # Match patterns like "120.0000" or "3628800.0000" or even "35.00"
@@ -1202,7 +1201,6 @@ class EnhancedNocturnalAgent:
         - \\boxed{value} → value
         - $value$ (when value is just a number) → value
         """
-        import re
         
         # Remove \boxed{} notation
         text = re.sub(r'\$?\\boxed\{([^}]+)\}\$?', r'\1', text)
@@ -1234,7 +1232,6 @@ class EnhancedNocturnalAgent:
         Shared markdown to ANSI conversion logic.
         Supports all common markdown features while preserving statistical notation.
         """
-        import re
         
         # Remove code fences (but preserve content inside)
         # Pattern: ```\n content \n``` → content (without the fences)
@@ -4793,7 +4790,6 @@ Concise query (max {max_length} chars):"""
                 # Check if command is using ls instead of find
                 if 'ls ' in cmd_lower and '| wc' in cmd_lower:
                     # Extract target directory and file pattern
-                    import re
 
                     # Try to extract directory and pattern from ls command
                     # Example: "ls cite_agent/*.py | wc -l" → extract "cite_agent" and "*.py"
@@ -6412,7 +6408,6 @@ Concise query (max {max_length} chars):"""
         #   - "returns" in research/statistics ≠ financial returns data
         #   - "approaches" should NOT match "roa"
 
-        import re
 
         # First check: Is this clearly a research/academic query?
         # If yes, don't even check financial keywords
@@ -6765,7 +6760,6 @@ Concise query (max {max_length} chars):"""
                 elif is_file_counting_question:
                     # Extract target directory from question
                     # Common patterns: "How many Python files in cite_agent?"
-                    import re
                     target_dir = "."  # default to current directory
 
                     # Try to extract directory name
