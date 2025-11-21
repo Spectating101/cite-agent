@@ -2066,6 +2066,12 @@ class EnhancedNocturnalAgent:
         # Remove any remaining JSON artifacts (especially search results)
         cleaned = re.sub(r'\{[\s]*"search_query"[^}]*\}', '', cleaned, flags=re.DOTALL)
         cleaned = re.sub(r'\{[\s]*"search_results"[\s\S]*?\][\s]*\}', '', cleaned, flags=re.DOTALL)
+
+        # CRITICAL: Remove shell execution JSON artifacts that leak through
+        # Example: {"cmd":["bash","-lc","ls -1 cite_agent"], "timeout": 10000}{"response":"..."}
+        cleaned = re.sub(r'\{[\s]*"cmd"[\s]*:[\s]*\[.*?\].*?\}', '', cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r'\{[\s]*"timeout"[\s]*:[\s]*\d+[\s]*\}', '', cleaned)
+        cleaned = re.sub(r'\{[\s]*"response"[\s]*:[\s]*"[^"]*"[\s]*\}', '', cleaned)
         
         # Original check
         for phrase in planning_phrases:
@@ -4724,6 +4730,76 @@ Concise query (max {max_length} chars):"""
                 self._safe_print(f"❌ Error: {e}")
             return f"ERROR: {e}"
 
+    def _validate_and_correct_shell_command(self, command: str, user_question: str) -> str:
+        """
+        Validate and correct shell commands to prevent common LLM mistakes.
+
+        Common fixes:
+        1. File counting: Replace `ls | wc -l` with `find -type f | wc -l` for recursive counts
+        2. Directory listing: Truncate long ls outputs
+        3. Python file counts: Always use recursive find
+        """
+        cmd_lower = command.lower().strip()
+        question_lower = user_question.lower()
+
+        # CRITICAL FIX #1: File counting must be recursive
+        # Bad: ls cite_agent/*.py | wc -l (only finds 4 files)
+        # Good: find cite_agent -name '*.py' -type f | wc -l (finds all 39 files)
+        if 'how many' in question_lower or 'count' in question_lower:
+            # Detect if they're trying to count files
+            if 'file' in question_lower or '.py' in question_lower or '.js' in question_lower or '.csv' in question_lower:
+                # Check if command is using ls instead of find
+                if 'ls ' in cmd_lower and '| wc' in cmd_lower:
+                    # Extract target directory and file pattern
+                    import re
+
+                    # Try to extract directory and pattern from ls command
+                    # Example: "ls cite_agent/*.py | wc -l" → extract "cite_agent" and "*.py"
+                    ls_match = re.search(r'ls\s+([^\s|]+)', command)
+                    if ls_match:
+                        target = ls_match.group(1)
+
+                        # Check if target has glob pattern (e.g., cite_agent/*.py)
+                        if '/' in target and ('*.' in target or target.endswith('.py') or target.endswith('.js')):
+                            # Split into directory and pattern
+                            parts = target.rsplit('/', 1)
+                            directory = parts[0] if len(parts) > 1 else '.'
+                            pattern = parts[1] if len(parts) > 1 else target
+
+                            # Remove leading wildcard if present
+                            if pattern.startswith('*'):
+                                pattern = pattern[1:]  # "*.py" → ".py"
+
+                            # Build correct find command
+                            corrected = f"find {directory} -name '*{pattern}' -type f | wc -l"
+                            return corrected
+                        elif target and not '|' in target:
+                            # Just a directory name, count all files recursively
+                            corrected = f"find {target} -type f | wc -l"
+                            return corrected
+
+                # Also catch: ls -1 cite_agent | wc -l (counts dirs + files, not recursive)
+                if re.match(r'ls\s+-[^\s]*\s+([^\s|]+)\s*\|\s*wc', cmd_lower):
+                    ls_match = re.search(r'ls\s+-[^\s]*\s+([^\s|]+)', command)
+                    if ls_match:
+                        directory = ls_match.group(1)
+                        # Check if question mentions file type
+                        if 'python' in question_lower or '.py' in question_lower:
+                            corrected = f"find {directory} -name '*.py' -type f | wc -l"
+                            return corrected
+                        else:
+                            corrected = f"find {directory} -type f | wc -l"
+                            return corrected
+
+        # CRITICAL FIX #2: Directory listing should be truncated
+        # Replace `ls -la` with `ls -la | head -20` to prevent wall of text
+        if 'list' in question_lower and 'file' in question_lower:
+            if cmd_lower.startswith('ls -') and '| head' not in cmd_lower:
+                return f"{command} | head -20"
+
+        # No correction needed
+        return command
+
     def _format_shell_output(self, output: str, command: str) -> Dict[str, Any]:
         """
         Format shell command output for display.
@@ -6602,6 +6678,14 @@ Concise query (max {max_length} chars):"""
                 question_normalized in ['ls', 'll', 'dir']
             )
 
+            # CRITICAL: Detect file counting questions that MUST run find command
+            # These questions should NEVER be answered by counting ls output
+            is_file_counting_question = not is_small_talk and (
+                ('how many' in question_lower or 'count' in question_lower) and
+                ('file' in question_lower or '.py' in question_lower or '.js' in question_lower or
+                 '.csv' in question_lower or '.txt' in question_lower or '.md' in question_lower)
+            )
+
             if might_need_shell and self.shell_session:
                 # Get current directory and context for intelligent planning
                 try:
@@ -6616,7 +6700,7 @@ Concise query (max {max_length} chars):"""
                 # FORCED EXECUTION: Directory listing questions MUST run ls first
                 # Skip planner entirely to prevent hallucination
                 if is_directory_listing_question:
-                    command = "ls -lah"
+                    command = "ls -lah | head -20"  # Truncate to prevent wall of text
                     if debug_mode:
                         print(f"🚨 FORCED EXECUTION: Directory listing question detected - running: {command}")
 
@@ -6633,6 +6717,65 @@ Concise query (max {max_length} chars):"""
                     # The LLM will now have actual ls output and can't hallucinate
                     if debug_mode:
                         self._safe_print(f"✅ Shell output captured, proceeding to LLM with real data")
+
+                # FORCED EXECUTION: File counting questions MUST run recursive find
+                # Skip planner entirely - LLM always gets this wrong
+                elif is_file_counting_question:
+                    # Extract target directory from question
+                    # Common patterns: "How many Python files in cite_agent?"
+                    import re
+                    target_dir = "."  # default to current directory
+
+                    # Try to extract directory name
+                    dir_match = re.search(r'\bin\s+([a-zA-Z0-9_/.~-]+)', request.question)
+                    if dir_match:
+                        target_dir = dir_match.group(1)
+                    else:
+                        # Check if directory name appears in question
+                        words = request.question.split()
+                        for i, word in enumerate(words):
+                            # Look for directory-like words
+                            if '/' in word or (word.isalnum() and word not in ['file', 'files', 'how', 'many', 'count', 'python', 'the']):
+                                # Could be a directory
+                                if os.path.isdir(word) or '/' not in current_dir or word in current_dir:
+                                    target_dir = word
+                                    break
+
+                    # Determine file extension from question
+                    extension = "*"  # default to all files
+                    if 'python' in question_lower or '.py' in question_lower:
+                        extension = "*.py"
+                    elif '.js' in question_lower or 'javascript' in question_lower:
+                        extension = "*.js"
+                    elif '.csv' in question_lower:
+                        extension = "*.csv"
+                    elif '.txt' in question_lower:
+                        extension = "*.txt"
+                    elif '.md' in question_lower or 'markdown' in question_lower:
+                        extension = "*.md"
+
+                    # Build correct find command (ALWAYS recursive)
+                    command = f"find {target_dir} -name '{extension}' -type f | wc -l"
+
+                    if debug_mode:
+                        print(f"🚨 FORCED EXECUTION: File counting question detected")
+                        print(f"   Target: {target_dir} | Extension: {extension}")
+                        print(f"   Command: {command}")
+
+                    output = self.execute_command(command)
+                    if output and not output.startswith("ERROR"):
+                        count = output.strip()
+                        api_results["shell_info"] = {
+                            "command": command,
+                            "output": count,
+                            "file_count": count,
+                            "current_directory": current_dir
+                        }
+                        tools_used.append("shell_execution")
+
+                    if debug_mode:
+                        self._safe_print(f"✅ File count: {output.strip()}")
+
                 else:
                     # Normal flow: Ask LLM planner what to run
                     planner_prompt = f"""You are a shell command planner. Determine what shell command to run, if any.
@@ -7036,8 +7179,14 @@ JSON:"""
                                             self._safe_print(f"⚠️  Grep interceptor failed: {e}")
                                         pass
     
-                                # If not intercepted, execute as shell command
+                                # If not intercepted, validate and correct command before execution
                                 if not intercepted:
+                                    # COMMAND VALIDATOR: Fix common mistakes
+                                    original_command = command
+                                    command = self._validate_and_correct_shell_command(command, request.question)
+                                    if command != original_command and debug_mode:
+                                        self._safe_print(f"🔧 Command corrected: {original_command} → {command}")
+
                                     output = self.execute_command(command)
                                 
                                 if not output.startswith("ERROR"):
