@@ -1575,6 +1575,24 @@ class EnhancedNocturnalAgent:
         )
         sections.append(intro)
 
+        # Check if dataset is already loaded in tool executor
+        dataset_context = ""
+        if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+            analyzer = self.tool_executor._data_analyzer
+            if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                df = analyzer.current_dataset
+                dataset_context = (
+                    f"\n📊 CURRENT DATASET LOADED:\n"
+                    f"• Rows: {len(df)}\n"
+                    f"• Columns: {list(df.columns)}\n"
+                    f"• File: {getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else 'unknown'}\n"
+                    f"• When user says 'this dataset', 'my data', 'the dataset' → Use THIS loaded dataset\n"
+                    f"• You can analyze, clean, plot this data without reloading\n\n"
+                )
+
+        if dataset_context:
+            sections.append(dataset_context)
+
         # Behavioral guidelines
         guidelines = [
             "💡 WHEN ASKED 'WHAT CAN YOU DO?' - Showcase your full capabilities:",
@@ -7455,16 +7473,36 @@ JSON:"""
                             if debug_mode:
                                 self._safe_print(f"❌ Dataset loading failed: {e}")
 
-                    # Check for analysis requests
-                    if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship between']):
-                        # Try to run correlation analysis if dataset is loaded
-                        if hasattr(self.tool_executor, 'data_analyzer') and self.tool_executor.data_analyzer.current_dataset is not None:
-                            try:
-                                result = self.tool_executor._execute_analyze_data({"analysis_type": "correlation"})
-                                api_results["correlation_analysis"] = result
-                                tools_used.append("data_analysis")
-                            except:
-                                pass
+                    # Check for analysis requests on loaded dataset
+                    if hasattr(self.tool_executor, '_data_analyzer'):
+                        analyzer = self.tool_executor._data_analyzer
+                        if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                            # Dataset is loaded - check what user wants to do with it
+                            if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship between']):
+                                try:
+                                    result = self.tool_executor._execute_analyze_data({"analysis_type": "correlation"})
+                                    api_results["correlation_analysis"] = result
+                                    tools_used.append("data_analysis")
+                                except:
+                                    pass
+
+                            # Data cleaning requests
+                            elif any(kw in question_lower for kw in ['missing value', 'outlier', 'clean', 'check for']):
+                                try:
+                                    # Get dataset info which includes missing values and basic stats
+                                    df = analyzer.current_dataset
+                                    missing_info = {col: int(df[col].isna().sum()) for col in df.columns}
+                                    api_results["data_quality"] = {
+                                        "missing_values": missing_info,
+                                        "total_rows": len(df),
+                                        "columns": list(df.columns)
+                                    }
+                                    tools_used.append("data_analysis")
+                                    if debug_mode:
+                                        self._safe_print(f"✅ Data quality check complete")
+                                except Exception as e:
+                                    if debug_mode:
+                                        self._safe_print(f"❌ Data quality check failed: {e}")
 
             # ========================================================================
             # PRIORITY 3: WEB SEARCH (Fallback - only if shell didn't handle AND no data yet)
