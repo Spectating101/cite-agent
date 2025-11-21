@@ -6346,7 +6346,9 @@ Concise query (max {max_length} chars):"""
             'r squared', 'r²', 'p-value', 'confidence interval',
             'sample size', 'observations', 'variables', 'predictor',
             'run regression', 'run analysis', 'analyze csv',
-            'r code', 'r script', 'execute r', 'run r'
+            'r code', 'r script', 'execute r', 'run r',
+            'missing value', 'missing data', 'outlier', 'data quality', 'clean data',
+            'compare', 'comparison', 'between groups', 'group comparison', 'by group'
         ]
 
         # System/technical indicators
@@ -7473,36 +7475,64 @@ JSON:"""
                             if debug_mode:
                                 self._safe_print(f"❌ Dataset loading failed: {e}")
 
-                    # Check for analysis requests on loaded dataset
+                    # SMART DATASET USAGE: If dataset already loaded, inject it into context
                     if hasattr(self.tool_executor, '_data_analyzer'):
                         analyzer = self.tool_executor._data_analyzer
                         if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
-                            # Dataset is loaded - check what user wants to do with it
-                            if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship between']):
+                            df = analyzer.current_dataset
+
+                            # Always provide loaded dataset info to LLM
+                            api_results["dataset_in_memory"] = {
+                                "loaded": True,
+                                "rows": len(df),
+                                "columns": list(df.columns),
+                                "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
+                                "sample": df.head(3).to_dict('records') if len(df) > 0 else [],
+                                "filepath": getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else None
+                            }
+
+                            # EXECUTE requested analysis automatically
+                            if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship']):
                                 try:
                                     result = self.tool_executor._execute_analyze_data({"analysis_type": "correlation"})
-                                    api_results["correlation_analysis"] = result
+                                    api_results["analysis_result"] = result
                                     tools_used.append("data_analysis")
                                 except:
                                     pass
 
-                            # Data cleaning requests
-                            elif any(kw in question_lower for kw in ['missing value', 'outlier', 'clean', 'check for']):
+                            elif any(kw in question_lower for kw in ['missing', 'outlier', 'clean', 'quality', 'check']):
                                 try:
-                                    # Get dataset info which includes missing values and basic stats
-                                    df = analyzer.current_dataset
                                     missing_info = {col: int(df[col].isna().sum()) for col in df.columns}
-                                    api_results["data_quality"] = {
+
+                                    # Detect outliers using IQR method for numeric columns
+                                    outliers = {}
+                                    for col in df.select_dtypes(include=['number']).columns:
+                                        Q1 = df[col].quantile(0.25)
+                                        Q3 = df[col].quantile(0.75)
+                                        IQR = Q3 - Q1
+                                        outlier_mask = (df[col] < (Q1 - 1.5 * IQR)) | (df[col] > (Q3 + 1.5 * IQR))
+                                        outlier_count = outlier_mask.sum()
+                                        if outlier_count > 0:
+                                            outliers[col] = int(outlier_count)
+
+                                    api_results["analysis_result"] = {
                                         "missing_values": missing_info,
-                                        "total_rows": len(df),
-                                        "columns": list(df.columns)
+                                        "outliers": outliers,
+                                        "total_rows": len(df)
                                     }
                                     tools_used.append("data_analysis")
-                                    if debug_mode:
-                                        self._safe_print(f"✅ Data quality check complete")
                                 except Exception as e:
                                     if debug_mode:
-                                        self._safe_print(f"❌ Data quality check failed: {e}")
+                                        self._safe_print(f"❌ Quality check failed: {e}")
+
+                            elif ('compare' in question_lower or 'comparison' in question_lower) and \
+                                 ('between' in question_lower or 'group' in question_lower or 'by' in question_lower):
+                                try:
+                                    result = self.tool_executor._execute_analyze_data({"analysis_type": "descriptive"})
+                                    api_results["analysis_result"] = result
+                                    tools_used.append("data_analysis")
+                                except:
+                                    pass
 
             # ========================================================================
             # PRIORITY 3: WEB SEARCH (Fallback - only if shell didn't handle AND no data yet)

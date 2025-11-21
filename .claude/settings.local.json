@@ -44,7 +44,8 @@
       "Bash(git submodule:*)",
       "Bash(chmod:*)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(NOCTURNAL_DEBUG=1 timeout 60 python3 -c \"\nimport asyncio, tempfile\nfrom pathlib import Path\nfrom cite_agent import EnhancedNocturnalAgent, ChatRequest\n\nasync def test():\n    agent = EnhancedNocturnalAgent()\n    await agent.initialize()\n    \n    test_csv = Path(tempfile.gettempdir()) / ''''debug_test.csv''''\n    test_csv.write_text(''''group,value\\nA,10\\nA,12\\nB,8\\nB,9\\n'''')\n    \n    # Load\n    await agent.process_request(ChatRequest(\n        question=f''''Load {test_csv}'''',\n        user_id=''''test'''', conversation_id=''''debug''''\n    ))\n    \n    # Compare\n    resp = await agent.process_request(ChatRequest(\n        question=''''Compare value between groups'''',\n        user_id=''''test'''', conversation_id=''''debug''''\n    ))\n    \n    print(f''''\\nTools: {resp.tools_used}'''')\n    print(f''''Response: {resp.response[:300]}'''')\n    \n    await agent.close()\n\nasyncio.run(test())\n\")"
     ],
     "deny": [],
     "ask": []
