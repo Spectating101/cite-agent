@@ -1532,14 +1532,20 @@ class EnhancedNocturnalAgent:
 
         # Identity and capabilities
         intro = (
-            "You are Cite Agent, a research and analysis assistant with access to:\n"
+            "🎯 YOUR ROLE: You are Cite Agent, a research assistant.\n\n"
+            "🔧 TOOLS EXECUTE AUTOMATICALLY - YOU DON'T NEED TO EXPLAIN OR REQUEST THEM:\n"
+            "• When user asks 'how many files?', tools ALREADY RAN - just state the count\n"
+            "• When user asks 'list files', tools ALREADY RAN - just present the listing\n"
+            "• DO NOT say 'We need to run...', 'Let me execute...', 'I will search...'\n"
+            "• DO NOT explain what tools to use - they're already used if needed\n"
+            "• Just answer the question with the DATA that's been provided to you\n\n"
+            "📚 You have access to:\n"
             "• Persistent shell (Python, R, SQL, Bash)\n"
             "• File operations (read, write, edit, search)\n"
             "• Academic papers (Archive API - 200M+ papers)\n"
             "• Financial data (FinSight API - SEC filings)\n"
             "• Web search\n\n"
-            "Communication style: Be natural, direct, and helpful. "
-            "Think like a capable research partner, not a rigid assistant."
+            "💬 Communication style: Natural, direct, helpful. Answer questions directly using the data provided."
         )
         sections.append(intro)
 
@@ -1552,14 +1558,19 @@ class EnhancedNocturnalAgent:
             "Ambiguous query? Ask clarification OR infer from context if reasonable.",
             "Be honest about uncertainty.",
             "",
-            "CRITICAL - ANSWER WHAT WAS ASKED:",
-            "• When query asks for SPECIFIC file types:",
-            "  - ALWAYS use `find` for recursive search (NOT just `ls`)",
-            "  - Example: 'Python files' → run `find . -name '*.py' -type f`",
-            "  - Example: 'test files' → run `find . -name '*test*.py' -type f`",
-            "  - Example: 'How many Python files?' → run `find cite_agent -name '*.py' -type f | wc -l`",
-            "  - DO NOT use `ls` for counts - it misses subdirectories",
-            "  - If files_listing used, extract ONLY matching files from result",
+            "🚨 CRITICAL - FILE COUNTING RULES:",
+            "• When counting files, you MUST use `find` with full recursive search",
+            "• Example: 'How many Python files in cite_agent?' → count ALL .py files recursively",
+            "  CORRECT: `find cite_agent -name '*.py' -type f | wc -l` (finds ALL nested files)",
+            "  WRONG: `ls cite_agent/*.py | wc -l` (only finds top-level, misses subdirectories)",
+            "• DO NOT list top-level files and call it complete - search recursively",
+            "• If you see 'cite_agent/__init__.py, cli.py, utils.py' (5 files), that's WRONG",
+            "• The directory has MANY subdirectories with more Python files",
+            "• ALWAYS search recursively through ALL subdirectories",
+            "",
+            "ANSWER WHAT WAS ASKED:",
+            "• 'List files' → Show directory listing concisely",
+            "• 'Find X' → Use tools to locate, return concise path",
             "• 'Find X' → Use tools to locate, return concise path",
             "• 'Read X' → When context has partial info, use tools for full content (but summarize output)",
             "• 'What does X do?' → Answer from visible code/context, no re-execution",
@@ -1979,21 +1990,47 @@ class EnhancedNocturnalAgent:
                     self._safe_print(f"⚠️ [REASONING LOOP] Density: {reasoning_density:.2%}, Keywords: {keyword_count}/{word_count}")
                 return "I encountered an issue processing that request. The system may need additional resources. Please try a different approach or contact support."
         
-        # AGGRESSIVE PREAMBLE REMOVAL: Remove "We need to..." at the start
-        # These patterns ALWAYS indicate reasoning that should be stripped
-        preamble_patterns = [
-            r'^We need to [^.]+\.\s*',
-            r'^We\'ll [^.]+\.\s*',
-            r'^We should [^.]+\.\s*',
-            r'^Executing shell command\.\s*',
-            r'^Running:\s*[^.]+\.\s*',
-            r'^\}[^a-zA-Z]*',  # Stray closing brace
-            r'^Let me [^.]+\.\s*',
-            r'^I\'ll [^.]+\.\s*',
+        # SUPER AGGRESSIVE META-REASONING REMOVAL
+        # The backend LLM gets stuck in "We need to... Let's try... Probably..." loops
+        # Strip ALL of this garbage before presenting to user
+        meta_reasoning_patterns = [
+            # Direct "we need to" patterns
+            r'We need to [^.]+\.',
+            r'We\'ll [^.]+\.',
+            r'We should [^.]+\.',
+            r'We can [^.]+\.',
+            r'We must [^.]+\.',
+            # Execution confusion
+            r'Executing shell command\.',
+            r'Running:?\s*[^.]+\.',
+            r'Will run:?\s*[^.]+\.',
+            r'Let\'s run [^.]+\.',
+            r'Let me run [^.]+\.',
+            # Tool confusion
+            r'Use tool\.',
+            r'Since we have [^.]+\.',
+            r'Given [^.]+\.',
+            r'According to [^.]+\.',
+            r'Probably [^.]+\.',
+            r'Let\'s assume [^.]+\.',
+            r'Let\'s try [^.]+\.',
+            r'I don\'t have [^.]+\.',
+            r'We cannot [^.]+\.',
+            r'We could [^.]+\.',
+            r'But we [^.]+\.',
+            # Command suggestions (not execution)
+            r'Could you provide [^.]+\.',
+            r'so I can [^.]+\.',
+            # Stray artifacts
+            r'^\}[^a-zA-Z]*',
         ]
 
-        for pattern in preamble_patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.MULTILINE)
+        for pattern in meta_reasoning_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+
+        # Remove standalone meta-reasoning fragments
+        cleaned = re.sub(r'\bWe need to\b[^.]*\.', '', cleaned)
+        cleaned = re.sub(r'\bProbably\b[^.]*\.', '', cleaned)
 
         # SURGICAL CLEANING: Remove reasoning sentences at START
         sentences = cleaned.split('.')[:3]
