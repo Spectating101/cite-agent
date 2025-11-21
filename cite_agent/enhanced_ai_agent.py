@@ -1554,9 +1554,11 @@ class EnhancedNocturnalAgent:
             "",
             "CRITICAL - ANSWER WHAT WAS ASKED:",
             "• When query asks for SPECIFIC file types:",
-            "  - Use shell_execution with 'find' or 'ls' filtered to match",
-            "  - Example: 'Python files' → run `find . -name '*.py'` or `ls **/*.py`",
-            "  - Example: 'test files' → run `find . -name '*test*.py'`",
+            "  - ALWAYS use `find` for recursive search (NOT just `ls`)",
+            "  - Example: 'Python files' → run `find . -name '*.py' -type f`",
+            "  - Example: 'test files' → run `find . -name '*test*.py' -type f`",
+            "  - Example: 'How many Python files?' → run `find cite_agent -name '*.py' -type f | wc -l`",
+            "  - DO NOT use `ls` for counts - it misses subdirectories",
             "  - If files_listing used, extract ONLY matching files from result",
             "• 'Find X' → Use tools to locate, return concise path",
             "• 'Read X' → When context has partial info, use tools for full content (but summarize output)",
@@ -1970,25 +1972,41 @@ class EnhancedNocturnalAgent:
                 for kw in ['we need', 'will run', 'running:', 'executing:', 'let me', "let's", 'probably']
             )
             
-            if reasoning_density > 0.15 or (starts_with_reasoning and reasoning_density > 0.08):
+            # Only block if reasoning density is VERY high (30%+) or starts with reasoning AND has sustained reasoning
+            if reasoning_density > 0.30 or (starts_with_reasoning and reasoning_density > 0.20):
                 # Response is stuck in reasoning loop - return clean error
                 if debug_mode:
                     self._safe_print(f"⚠️ [REASONING LOOP] Density: {reasoning_density:.2%}, Keywords: {keyword_count}/{word_count}")
                 return "I encountered an issue processing that request. The system may need additional resources. Please try a different approach or contact support."
         
-        # SURGICAL CLEANING: Only remove obvious reasoning at START (not hardcoded patterns)
-        # Remove up to 3 sentences if they're pure reasoning
+        # AGGRESSIVE PREAMBLE REMOVAL: Remove "We need to..." at the start
+        # These patterns ALWAYS indicate reasoning that should be stripped
+        preamble_patterns = [
+            r'^We need to [^.]+\.\s*',
+            r'^We\'ll [^.]+\.\s*',
+            r'^We should [^.]+\.\s*',
+            r'^Executing shell command\.\s*',
+            r'^Running:\s*[^.]+\.\s*',
+            r'^\}[^a-zA-Z]*',  # Stray closing brace
+            r'^Let me [^.]+\.\s*',
+            r'^I\'ll [^.]+\.\s*',
+        ]
+
+        for pattern in preamble_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.MULTILINE)
+
+        # SURGICAL CLEANING: Remove reasoning sentences at START
         sentences = cleaned.split('.')[:3]
         cleaned_sentences = []
         for sentence in sentences:
             sentence_lower = sentence.lower().strip()
-            # Skip if sentence is >70% reasoning keywords
+            # Skip if sentence is >50% reasoning keywords
             if sentence_lower:
                 sent_keywords = sum(sentence_lower.count(kw) for kw in reasoning_keywords)
                 sent_words = len(sentence.split())
                 if sent_words > 0 and (sent_keywords / sent_words) < 0.5:
                     cleaned_sentences.append(sentence)
-        
+
         if cleaned_sentences:
             # Rejoin and add back the rest
             rest = '.'.join(cleaned.split('.')[len(sentences):])
