@@ -186,6 +186,9 @@ class EnhancedNocturnalAgent:
             )
         )
 
+        # Tool executor for data analysis and advanced features (initialized after setup)
+        self.tool_executor = None
+
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
             'last_file': None,           # Last file mentioned/read
@@ -4026,6 +4029,9 @@ Output ONLY the Python code in ```python ``` blocks."""
                     trust_env=True  # Trust environment proxy settings
                 )
 
+            # Initialize tool executor for data analysis
+            self.tool_executor = ToolExecutor(self)
+
             self._initialized = True
             return True
     
@@ -7429,22 +7435,36 @@ JSON:"""
 
                 # Data Analysis tools (CSV, statistics, R)
                 if "data_analysis" in request_analysis.get("apis", []):
-                    # Data analysis queries need context from the query to determine which tool
-                    # For now, provide info that data analysis tools are available
-                    api_results["data_analysis_available"] = {
-                        "tools": ["load_dataset", "analyze_data", "run_regression", "plot_data", "run_r_code"],
-                        "message": "Data analysis tools are available. Specify the CSV file path and analysis needed.",
-                        "capabilities": [
-                            "Load CSV/Excel datasets",
-                            "Descriptive statistics (mean, median, std, quartiles)",
-                            "Correlation analysis (Pearson, Spearman)",
-                            "Linear/multiple regression",
-                            "ASCII plotting (scatter, bar, histogram)",
-                            "R code execution",
-                            "Statistical assumption checking"
-                        ]
-                    }
-                    tools_used.append("data_analysis_ready")
+                    # DIRECT TOOL EXECUTION: Detect CSV file paths and auto-load
+                    csv_file_match = re.search(r'([^\s]+\.csv|[^\s]+\.xlsx|[^\s]+\.tsv)', request.question)
+                    if csv_file_match:
+                        filepath = csv_file_match.group(1)
+                        if debug_mode:
+                            self._safe_print(f"📊 Auto-loading dataset: {filepath}")
+
+                        try:
+                            result = self.tool_executor._execute_load_dataset({"filepath": filepath})
+                            if result.get("success"):
+                                api_results["dataset_loaded"] = result
+                                tools_used.append("data_analysis")
+                                if debug_mode:
+                                    self._safe_print(f"✅ Dataset loaded: {result.get('rows')} rows, {result.get('columns')} cols")
+                            else:
+                                api_results["dataset_error"] = result.get("error", "Unknown error")
+                        except Exception as e:
+                            if debug_mode:
+                                self._safe_print(f"❌ Dataset loading failed: {e}")
+
+                    # Check for analysis requests
+                    if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship between']):
+                        # Try to run correlation analysis if dataset is loaded
+                        if hasattr(self.tool_executor, 'data_analyzer') and self.tool_executor.data_analyzer.current_dataset is not None:
+                            try:
+                                result = self.tool_executor._execute_analyze_data({"analysis_type": "correlation"})
+                                api_results["correlation_analysis"] = result
+                                tools_used.append("data_analysis")
+                            except:
+                                pass
 
             # ========================================================================
             # PRIORITY 3: WEB SEARCH (Fallback - only if shell didn't handle AND no data yet)
@@ -8496,6 +8516,32 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                         success=False,
                         extra={"expected": expected},
                     )
+
+            # CRITICAL: Auto-execute Python code blocks in response
+            code_blocks = re.findall(r'```python\n(.*?)```', final_response, re.DOTALL)
+            if code_blocks:
+                for code in code_blocks:
+                    if self.debug_mode:
+                        self._safe_print(f"🐍 Executing Python code block ({len(code)} chars)")
+
+                    try:
+                        result = self.tool_executor._execute_run_python_code({"code": code})
+                        if result.get("success"):
+                            output = result.get("output", "").strip()
+                            if output:
+                                # Append execution result to response
+                                final_response += f"\n\n**Execution Result:**\n```\n{output}\n```"
+                                tools_used.append("python_execution")
+                                if self.debug_mode:
+                                    self._safe_print(f"✅ Code executed successfully")
+                        else:
+                            error = result.get("error", "Unknown error")
+                            final_response += f"\n\n**Execution Error:**\n```\n{error}\n```"
+                            if self.debug_mode:
+                                self._safe_print(f"❌ Code execution failed: {error[:100]}")
+                    except Exception as e:
+                        if self.debug_mode:
+                            self._safe_print(f"❌ Code execution exception: {e}")
 
             # CRITICAL: Clean JSON artifacts before returning
             final_response = self._clean_formatting(final_response)

@@ -43,7 +43,8 @@
       "Bash(done)",
       "Bash(git submodule:*)",
       "Bash(chmod:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
