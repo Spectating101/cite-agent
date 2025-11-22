@@ -68,7 +68,7 @@ Cite-Agent/
 
 ### **1. Client Side (`cite_agent/`)**
 
-**Key Component**: `enhanced_ai_agent.py` (3,400 lines)
+**Key Component**: `enhanced_ai_agent.py` (8,700+ lines)
 
 **Responsibilities:**
 - Request analysis: Determines which APIs to call (Archive, FinSight, Web)
@@ -229,9 +229,40 @@ Tools: finsight_api, web_search
 
 ## 🔐 Security Model & Mode Differences
 
-### ⚠️ **IMPORTANT: Two Different Modes**
+### ⚠️ **IMPORTANT: Two Different Execution Modes**
 
 The system operates in TWO distinct modes with different capabilities:
+
+---
+
+### ⚠️ **CRITICAL: LOCAL MODE vs BACKEND MODE (Code Paths)**
+
+**Added in v1.5.10** - This architectural detail is essential for developers:
+
+In `enhanced_ai_agent.py`, there are **TWO SEPARATE code paths** for tool execution:
+
+```
+BACKEND MODE (lines ~6700-8100)
+├── Condition: self.client is None
+├── Flow: Query → Request Analysis → Tool Execution → call_backend_query() → Response
+└── Tool execution: Lines 7565-7627 (data_analysis), etc.
+
+LOCAL MODE (lines ~8116-8700)
+├── Condition: self.client is not None (temp_api_key loaded from session.json)
+├── Flow: Query → Request Analysis → Tool Execution → Direct LLM Call → Response
+└── Tool execution: Lines 8447-8510 (data_analysis), etc.
+```
+
+**Developer Rule**: When adding ANY new tool execution:
+1. Add to BACKEND MODE block (~line 7565)
+2. Add to LOCAL MODE block (~line 8447)
+3. Test BOTH modes separately
+
+**Historical Bug (Fixed in v1.5.10)**:
+- Data analysis tool execution only existed in BACKEND MODE
+- LOCAL MODE was missing the data_analysis block
+- Result: 20% failure rate on follow-up data queries in LOCAL MODE
+- Fix: Added complete data_analysis block to LOCAL MODE
 
 ---
 

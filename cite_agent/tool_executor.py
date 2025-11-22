@@ -1,7 +1,8 @@
 """
-Tool executor for Cite-Agent function calling.
+Tool executor for Cite-Agent.
 
-Executes tools requested by the LLM and returns structured results.
+Provides data analysis, research, and computational tools.
+Primarily used as a container for DataAnalyzer to enable dataset persistence.
 """
 
 import os
@@ -19,10 +20,11 @@ from .literature_synthesis import LiteratureSynthesizer
 
 class ToolExecutor:
     """
-    Executes tools requested via function calling.
+    Provides data analysis and research tools for the agent.
 
-    This class bridges between the function calling layer and the existing
-    agent capabilities (Archive API, FinSight API, shell, etc.)
+    Primary purpose: Container for DataAnalyzer instance to enable dataset persistence
+    across conversation turns. Also provides access to advanced statistics, qualitative
+    coding, literature synthesis, and other research tools
     """
 
     def __init__(self, agent):

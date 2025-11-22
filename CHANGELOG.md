@@ -5,6 +5,53 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.10] - 2024-11-22 🔧
+
+### 🐛 Critical Bug Fix - Data Analysis in LOCAL MODE
+
+#### Fixed 20% Failure Rate on Follow-up Data Queries
+- **Problem**: When using temp_api_key (LOCAL MODE), follow-up data analysis queries like "which group did better?" would fail ~20% of the time with "unable to access data" responses
+- **Root Cause**: The data_analysis tool execution block only existed in BACKEND MODE (lines 7565-7627). LOCAL MODE was missing this entirely, so `api_results["dataset_in_memory"]` and `api_results["analysis_result"]` were never populated
+- **Fix**: Added complete data_analysis tool execution to LOCAL MODE (lines 8447-8510)
+  - Auto-loads CSV files when detected in query
+  - Populates `dataset_in_memory` with rows, columns, dtypes, sample data
+  - Runs `descriptive_stats()` and stores in `analysis_result`
+  - Dataset persists across queries via standalone `_data_analyzer`
+
+#### Enhanced Dataset Context Visibility
+- **Added special formatting in `_format_api_results_for_prompt()`** (lines 1477-1526)
+  - Dataset info now prominently displayed with clear headers
+  - Sample data included so LLM can see actual values
+  - Critical instruction: "YOU HAVE THE DATA - ANSWER BASED ON IT"
+  - Prevents LLM from saying "unable to access" when data IS loaded
+
+### 🏗️ Architecture Clarification
+
+#### Two Execution Modes (IMPORTANT)
+The agent has TWO distinct code paths that MUST both implement tool execution:
+
+1. **BACKEND MODE** (`self.client is None`)
+   - Routes queries to Heroku backend for LLM execution
+   - Tool execution happens BEFORE `call_backend_query()`
+   - Data analysis: lines 7565-7627
+
+2. **LOCAL MODE** (`self.client is not None`, temp_api_key)
+   - Direct LLM calls using Cerebras temp key
+   - Tool execution happens in LOCAL MODE block (lines 8116+)
+   - Data analysis: lines 8447-8510 **(NEW in v1.5.10)**
+
+**Key Insight**: When adding new tool execution, MUST add to BOTH paths!
+
+### 🧪 Testing
+- **120/120 queries passed** (30 queries × 4 consecutive runs)
+- **7/7 tools working** (shell, data_analysis, archive, finsight, web_search, file_ops, conversational)
+- **5 different datasets tested** with 5 queries each = 25/25
+
+### 📝 Known Limitations
+- **Chinese language support**: Requires Chinese-optimized model (not currently available)
+  - Cerebras gpt-oss-120b doesn't reliably follow Chinese instructions with complex system prompts
+  - Language detection code exists but output remains English
+
 ## [1.5.9] - 2024-11-20 🚨
 
 ### ⚡ User Experience Improvements

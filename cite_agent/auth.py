@@ -38,10 +38,10 @@ class AuthManager:
         try:
             # Call auth API
             response = requests.post(
-                f"{self.api_base}/auth/login",
+                f"{self.api_base}/api/auth/login",
                 json={
                     "email": email,
-                    "password_hash": password_hash
+                    "password": password  # Backend expects plain password, not hash
                 },
                 timeout=10
             )
@@ -66,7 +66,7 @@ class AuthManager:
         """
         try:
             response = requests.post(
-                f"{self.api_base}/auth/register",
+                f"{self.api_base}/api/auth/register",
                 json={
                     "email": email,
                     "password": password  # Send plain password over HTTPS (backend will hash)
@@ -120,7 +120,7 @@ class AuthManager:
         
         try:
             response = requests.post(
-                f"{self.api_base}/auth/refresh",
+                f"{self.api_base}/api/auth/refresh",
                 headers={"Authorization": f"Bearer {session['token']}"},
                 timeout=10
             )

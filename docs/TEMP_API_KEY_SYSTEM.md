@@ -174,6 +174,57 @@ Round-robin load balancing distributes users across 4 keys:
 - Backend load: 0% (only auth)
 - Tokens: Cerebras quota
 
+## ⚠️ CRITICAL: Tool Execution in Both Modes
+
+**Added in v1.5.10** - This is a key architectural insight that caused bugs:
+
+The agent has TWO SEPARATE code paths in `enhanced_ai_agent.py`:
+
+### BACKEND MODE (lines ~6700-8100)
+```
+Condition: self.client is None
+Flow: Query → Request Analysis → Tool Execution → call_backend_query() → Response
+Tool execution: Lines 7565-7627 (data_analysis), etc.
+```
+
+### LOCAL MODE (lines ~8116-8700)
+```
+Condition: self.client is not None (temp_api_key loaded)
+Flow: Query → Request Analysis → Tool Execution → Direct LLM Call → Response
+Tool execution: Lines 8447-8510 (data_analysis), etc.
+```
+
+### The Bug That Was Fixed (v1.5.10)
+- **Problem**: Data analysis tool execution only existed in BACKEND MODE
+- **Symptom**: Follow-up queries like "which group did better?" failed 20% of the time in LOCAL MODE
+- **Cause**: LOCAL MODE was missing the data_analysis block - `api_results["dataset_in_memory"]` was never populated
+- **Fix**: Added complete data_analysis tool execution to LOCAL MODE
+
+### Developer Rule
+**When adding ANY new tool execution:**
+1. Add to BACKEND MODE block (~line 7565)
+2. Add to LOCAL MODE block (~line 8447)
+3. Test BOTH modes separately
+
+## ⚠️ Architecture Clarification (v1.5.10+)
+
+**There is ONE execution mode** - direct Python code generation for analysis queries.
+
+**What v1.5.10 fixed**:
+1. **Dataset persistence** - DataAnalyzer (in tool_executor) now persists across queries ✅
+2. **Anti-hallucination** - LLM code generation now includes loaded dataset context ✅
+3. **Dataframe injection** - Generated code automatically has `df = pd.read_csv()` prepended ✅
+
+**Common confusion**:
+- `tool_executor` exists but does NOT control execution flow
+- It's primarily a container for `_data_analyzer` to enable dataset persistence
+- All analysis queries use the same code generation path (lines ~8198-8300)
+
+If follow-up queries show "Dataset in memory: X rows" but return wrong numbers, check:
+1. Is the dataset actually loaded? (Check `tool_executor._data_analyzer.current_dataset`)
+2. Is the code generation including dataset context? (Should see sample data in prompt)
+3. Is the dataframe injection working? (Check generated code has `df = pd.read_csv()` at top)
+
 ## Future Improvements
 
 - [ ] Auto-refresh temp keys before expiration
@@ -181,3 +232,4 @@ Round-robin load balancing distributes users across 4 keys:
 - [ ] Better error messages when key expires
 - [ ] Support for multiple LLM providers (not just Cerebras)
 - [ ] Telemetry: track local vs backend mode usage ratio
+- [ ] Refactor: Consolidate tool execution to single location (DRY)

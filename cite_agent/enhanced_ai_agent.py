@@ -31,7 +31,6 @@ import textwrap
 from .telemetry import TelemetryManager
 from .setup_config import DEFAULT_QUERY_LIMIT
 from .conversation_archive import ConversationArchive
-# Function calling removed - traditional mode only
 from .tool_executor import ToolExecutor
 from .timeout_retry_handler import TimeoutRetryHandler, RetryConfig
 from .workflow import WorkflowManager, Paper
@@ -188,6 +187,14 @@ class EnhancedNocturnalAgent:
 
         # Tool executor for data analysis and advanced features (initialized after setup)
         self.tool_executor = None
+
+        # DataAnalyzer for dataset persistence across queries (fallback if tool_executor unavailable)
+        self._data_analyzer = None
+        try:
+            from .research_assistant import DataAnalyzer
+            self._data_analyzer = DataAnalyzer()
+        except Exception:
+            pass  # Will use tool_executor._data_analyzer if available
 
         # File context tracking (for pronoun resolution and multi-turn)
         self.file_context = {
@@ -1466,6 +1473,57 @@ class EnhancedNocturnalAgent:
 
                 return "\n".join(paper_lines)
 
+        # Special handling for data analysis results - make dataset VERY visible to LLM
+        if "dataset_in_memory" in api_results or "analysis_result" in api_results:
+            formatted_parts = ["=" * 60]
+            formatted_parts.append("📊 DATA ANALYSIS - DATASET IS LOADED AND ANALYZED")
+            formatted_parts.append("=" * 60)
+
+            if "dataset_in_memory" in api_results:
+                ds = api_results["dataset_in_memory"]
+                formatted_parts.append(f"\n✅ DATASET LOADED:")
+                formatted_parts.append(f"   • Rows: {ds.get('rows', 'unknown')}")
+                formatted_parts.append(f"   • Columns: {ds.get('columns', [])}")
+                formatted_parts.append(f"   • File: {ds.get('filepath', 'unknown')}")
+                formatted_parts.append(f"   • Data Types: {ds.get('dtypes', {})}")
+                sample = ds.get('sample', [])
+                if sample:
+                    formatted_parts.append(f"\n📋 SAMPLE DATA (first {len(sample)} rows):")
+                    for i, row in enumerate(sample):
+                        formatted_parts.append(f"   Row {i+1}: {row}")
+
+            if "analysis_result" in api_results:
+                ar = api_results["analysis_result"]
+                formatted_parts.append(f"\n📈 ANALYSIS RESULTS:")
+                # Format analysis result nicely
+                try:
+                    if isinstance(ar, dict):
+                        for key, val in ar.items():
+                            formatted_parts.append(f"   {key}: {val}")
+                    else:
+                        formatted_parts.append(f"   {ar}")
+                except:
+                    formatted_parts.append(f"   {str(ar)[:500]}")
+
+            formatted_parts.append("\n" + "=" * 60)
+            formatted_parts.append("🚨 CRITICAL: YOU HAVE THE DATA - ANSWER BASED ON IT")
+            formatted_parts.append("• The dataset IS loaded - do NOT say 'I cannot access' or 'unable to access'")
+            formatted_parts.append("• Use the sample data and analysis results above to answer")
+            formatted_parts.append("• For group comparisons, statistical questions → use the loaded data")
+            formatted_parts.append("=" * 60)
+
+            # Add any other api_results
+            other_results = {k: v for k, v in api_results.items()
+                           if k not in ("dataset_in_memory", "analysis_result", "dataset_loaded")}
+            if other_results:
+                try:
+                    other_serialized = json.dumps(other_results, indent=2)
+                    formatted_parts.append(f"\nOther data:\n{other_serialized}")
+                except:
+                    formatted_parts.append(f"\nOther data: {str(other_results)}")
+
+            return "\n".join(formatted_parts)
+
         # Normal formatting for non-research results
         try:
             serialized = json.dumps(api_results, indent=2)
@@ -1575,20 +1633,29 @@ class EnhancedNocturnalAgent:
         )
         sections.append(intro)
 
-        # Check if dataset is already loaded in tool executor
+        # Check if dataset is already loaded (tool_executor OR standalone _data_analyzer)
         dataset_context = ""
+        analyzer = None
         if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
             analyzer = self.tool_executor._data_analyzer
-            if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
-                df = analyzer.current_dataset
-                dataset_context = (
-                    f"\n📊 CURRENT DATASET LOADED:\n"
-                    f"• Rows: {len(df)}\n"
-                    f"• Columns: {list(df.columns)}\n"
-                    f"• File: {getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else 'unknown'}\n"
-                    f"• When user says 'this dataset', 'my data', 'the dataset' → Use THIS loaded dataset\n"
-                    f"• You can analyze, clean, plot this data without reloading\n\n"
-                )
+        elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+            analyzer = self._data_analyzer
+
+        if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+            df = analyzer.current_dataset
+            filepath = getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else 'unknown'
+            # Include sample data for context
+            sample_str = df.head(5).to_string() if len(df) > 0 else "No data"
+            dataset_context = (
+                f"\n📊 CURRENT DATASET LOADED:\n"
+                f"• File: {filepath}\n"
+                f"• Shape: {len(df)} rows × {len(df.columns)} columns\n"
+                f"• Columns: {list(df.columns)}\n"
+                f"• Data Types: {dict(df.dtypes.astype(str))}\n"
+                f"• Sample Data:\n{sample_str}\n\n"
+                f"• When user asks about data, groups, values → Use THIS loaded dataset\n"
+                f"• YOU HAVE THE DATA - answer based on the sample above\n\n"
+            )
 
         if dataset_context:
             sections.append(dataset_context)
@@ -1673,16 +1740,29 @@ class EnhancedNocturnalAgent:
             "• DO NOT output JSON like {\"tool\": \"analyze\"} - that's forbidden",
             "• DO NOT simulate results like 'The correlation is 0.84' - write code that calculates it",
             "• DO NOT say 'Result when run: X' - the auto-executor will provide real output",
-            "• Example CORRECT response:",
-            "  Let me calculate the correlation:",
+            "",
+            "🚨 CRITICAL - DATASET USAGE RULES:",
+            "• IF '📊 CURRENT DATASET LOADED' appears above → The dataset is ALREADY loaded as 'df'",
+            "• YOU MUST USE the existing 'df' variable - DO NOT call pd.read_csv() again",
+            "• DO NOT create fake sample data with dictionaries like {'col': [1,2,3]}",
+            "• The 'Sample Data' shown above is REAL DATA from the file - use those exact columns/values",
+            "• Example CORRECT (when dataset loaded):",
+            "  ```python",
+            "  # df is already loaded - just use it directly",
+            "  average = df['Math'].mean()",
+            "  print(f'Average: {average}')",
+            "  ```",
+            "• Example WRONG: df = pd.read_csv('file.csv')  # Dataset already loaded!",
+            "• Example WRONG: data = {'Math': [85, 90, 78]}  # Fake data - use real df!",
+            "",
+            "• IF NO dataset is loaded → You can load from file:",
             "  ```python",
             "  import pandas as pd",
             "  df = pd.read_csv('collegetown.csv')",
             "  correlation = df['price'].corr(df['sqft'])",
             "  print(f'Correlation: {correlation}')",
             "  ```",
-            "• Example WRONG: 'The correlation is 0.84' (fake answer)",
-            "• Example WRONG: {\"tool\": \"analyze_data\", \"method\": \"correlation\"} (forbidden JSON)",
+            "",
             "• Use standard libraries when possible (pandas for CSV, numpy for math)",
             "• Code must be complete, self-contained, and runnable",
             "",
@@ -2420,7 +2500,7 @@ class EnhancedNocturnalAgent:
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         message = str(error).lower()
-        return "rate limit" in message or "429" in message
+        return "rate limit" in message or "429" in message or "tokens per" in message or "quota" in message or "too_many_tokens" in message
 
     def _respond_with_fallback(
         self,
@@ -3352,9 +3432,37 @@ Output ONLY valid JSON, no other text:"""
         special_response = self._handle_special_math_cases(enriched_query, context)
         if special_response:
             return special_response
-        
+
+        # Check if dataset is loaded
+        dataset_context_str = ""
+        analyzer = None
+        if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+            analyzer = self.tool_executor._data_analyzer
+        elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+            analyzer = self._data_analyzer
+
+        if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+            df = analyzer.current_dataset
+            sample_str = df.head(5).to_string() if len(df) > 0 else "No data"
+            dataset_context_str = f"""
+
+IMPORTANT - DATASET ALREADY LOADED:
+The variable 'df' is ALREADY loaded in memory with this data:
+- Shape: {len(df)} rows × {len(df.columns)} columns
+- Columns: {list(df.columns)}
+- Sample data:
+{sample_str}
+
+YOU MUST USE THE EXISTING 'df' VARIABLE - DO NOT call pd.read_csv() or create fake sample data.
+Example: average = df['Math'].mean()  # Correct - uses loaded df
+WRONG: df = pd.read_csv('file.csv')  # Dataset already loaded!
+WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
+"""
+
         # Generate and execute code
         code_gen_prompt = f"""Write Python code to answer: {enriched_query}
+
+{dataset_context_str}
 
 Requirements:
 - Use any context variables provided above
@@ -3390,7 +3498,15 @@ Output ONLY the Python code in ```python ``` blocks."""
             
             if code_blocks:
                 code_to_run = code_blocks[0].strip()
-                
+
+                # If dataset is loaded, prepend dataframe loading code
+                if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                    df = analyzer.current_dataset
+                    filepath = getattr(analyzer.dataset_info, 'filepath', None) if hasattr(analyzer, 'dataset_info') else None
+                    if filepath:
+                        df_loading_code = f"""import pandas as pd\ndf = pd.read_csv('{filepath}')\n\n"""
+                        code_to_run = df_loading_code + code_to_run
+
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                     f.write(code_to_run)
                     temp_path = f.name
@@ -6204,10 +6320,61 @@ Concise query (max {max_length} chars):"""
         # No workflow command detected
         return None
 
-    async def _analyze_request_type(self, question: str) -> Dict[str, Any]:
+    async def _analyze_request_type(self, question: str, user_id: str = None, conversation_id: str = None) -> Dict[str, Any]:
         """Analyze what type of request this is and what APIs to use"""
 
         question_lower = question.lower()
+
+        # PRIORITY 0: If dataset is loaded, assume queries are about it UNLESS explicitly about something else
+        has_loaded_dataset = False
+
+        # Check 1: DataAnalyzer instance (either tool_executor's or standalone)
+        analyzer = None
+        if hasattr(self, 'tool_executor') and self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+            analyzer = self.tool_executor._data_analyzer
+        elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+            analyzer = self._data_analyzer
+
+        if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+            has_loaded_dataset = True
+
+        # Check 2: Conversation memory for dataset loading evidence
+        if not has_loaded_dataset and user_id and conversation_id:
+            if user_id in self.memory and conversation_id in self.memory[user_id]:
+                history = self.memory[user_id][conversation_id]
+                # Look for evidence of loaded dataset in recent conversation (last 10 turns)
+                # Memory format: "Q: ... A: ..." strings
+                for interaction in history[-10:]:
+                    interaction_lower = str(interaction).lower()
+                    # Dataset loaded if contains "load" + file extension, or mentions dataset/rows/columns
+                    if (('load' in interaction_lower and ('.csv' in interaction_lower or '.xlsx' in interaction_lower or '/tmp/' in interaction_lower)) or
+                        ('loaded' in interaction_lower and 'dataset' in interaction_lower) or
+                        ('data loaded' in interaction_lower) or
+                        ('rows' in interaction_lower and 'columns' in interaction_lower)):
+                        has_loaded_dataset = True
+                        break
+
+        if has_loaded_dataset:
+            # Explicit non-data queries (user wants papers, files, finance, etc)
+            non_data_indicators = [
+                'paper', 'papers', 'research', 'study', 'studies', 'literature', 'article',
+                'find papers', 'search papers', 'publications',
+                'file', 'files', 'directory', 'folder', 'python files', '.py', '.js', '.txt',
+                'how many files', 'count files', 'list files', 'file count',
+                'cite_agent', 'codebase', 'repository', 'repo',
+                'revenue', 'stock', 'market cap', 'earnings', 'financial'
+            ]
+
+            is_non_data_query = any(indicator in question_lower for indicator in non_data_indicators)
+
+            # If dataset loaded and NOT asking about papers/files/finance, it's about the data
+            if not is_non_data_query:
+                return {
+                    "type": "data_analysis",
+                    "apis": ["data_analysis"],
+                    "confidence": 0.9,
+                    "analysis_mode": "quantitative"
+                }
 
         # PRIORITY 1: Detect meta/conversational queries about the agent itself
         # These should NOT trigger Archive API searches
@@ -6566,7 +6733,14 @@ Concise query (max {max_length} chars):"""
         
         # Pattern 3: Comparison without metric (compare X and Y)
         if any(word in question_lower for word in ['compare', 'versus', 'vs', 'vs.']):
-            metric_indicators = ['revenue', 'market cap', 'sales', 'growth', 'profit', 'valuation']
+            metric_indicators = [
+                # Financial metrics
+                'revenue', 'market cap', 'sales', 'growth', 'profit', 'valuation',
+                # Data analysis metrics
+                'accuracy', 'response_time', 'response time', 'performance', 'score',
+                'value', 'mean', 'median', 'average', 'rate', 'percentage',
+                'between groups', 'by group', 'group', 'condition'
+            ]
             if not any(indicator in question_lower for indicator in metric_indicators):
                 return True  # Too vague: needs metric specification
         
@@ -6601,36 +6775,9 @@ Concise query (max {max_length} chars):"""
             if not self._initialized:
                 await self.initialize()
 
-            # FUNCTION CALLING: CCT testing results
-            # FC: 16.7% pass rate (only context retention works)
-            # Traditional: 33% pass rate (methodology + context work)
-            # Issue: FC synthesis loses vocabulary requirements from main system prompt
-            #
-            # SELECTIVE ROUTING HYPOTHESIS:
-            # FC might be good for research (paper search, synthesis)
-            # Traditional proven for financial (2,249 tokens, correct calculations)
-            # Testing both modes with selective routing below
-
-            # FUNCTION CALLING MODE: Enable via environment variable
-            # Default: OFF (traditional mode) for backward compatibility
-            # Set NOCTURNAL_FUNCTION_CALLING=1 for Cursor-like iterative tool execution
-            #
-            # Function calling benefits:
-            # - Iterative multi-step tool execution (LLM controls tool invocation)
-            # - Natural directory navigation: "cd ~/Downloads" → "ls" → "find *.csv"
-            # - No "Run:" prefix or absolute path requirements
-            # - LLM can chain commands based on results
-            #
-            # TRADITIONAL MODE ONLY
-            # Benefits:
-            # - Proven 33% pass rate on CCT tests
-            # - Stable financial calculations
-            # - No TLS/proxy issues in container environments
-            # - Single execution path = easier debugging
-
             debug_mode = self.debug_mode
 
-            # Check workflow commands first (both modes)
+            # Check workflow commands first
             workflow_response = await self._handle_workflow_commands(request)
             if workflow_response:
                 return workflow_response
@@ -7402,14 +7549,46 @@ JSON:"""
             # But we skip vague queries to save tokens
             
             # Analyze what data APIs are needed (only if not pure shell command)
-            request_analysis = await self._analyze_request_type(request.question)
+            request_analysis = await self._analyze_request_type(request.question, request.user_id, request.conversation_id)
             if debug_mode:
                 self._safe_print(f"🔍 Request analysis: {request_analysis}")
             
+            # Check if dataset is loaded - if so, query is NOT vague (it's about the data)
+            has_loaded_dataset = False
+
+            # Check 1: DataAnalyzer instance (either tool_executor's or standalone)
+            analyzer = None
+            if hasattr(self, 'tool_executor') and self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+                analyzer = self.tool_executor._data_analyzer
+            elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+                analyzer = self._data_analyzer
+
+            if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                has_loaded_dataset = True
+
+            # Check 2: Conversation memory for dataset loading evidence
+            if not has_loaded_dataset and request.user_id in self.memory and request.conversation_id in self.memory[request.user_id]:
+                history = self.memory[request.user_id][request.conversation_id]
+                # Memory format: "Q: ... A: ..." strings
+                for interaction in history[-10:]:
+                    interaction_lower = str(interaction).lower()
+                    if (('load' in interaction_lower and ('.csv' in interaction_lower or '.xlsx' in interaction_lower or '/tmp/' in interaction_lower)) or
+                        ('loaded' in interaction_lower and 'dataset' in interaction_lower) or
+                        ('data loaded' in interaction_lower) or
+                        ('rows' in interaction_lower and 'columns' in interaction_lower)):
+                        has_loaded_dataset = True
+                        break
+
             is_vague = self._is_query_too_vague_for_apis(request.question)
-            if debug_mode and is_vague:
+
+            # Override vagueness if dataset is loaded - queries about loaded data aren't vague
+            if has_loaded_dataset and is_vague:
+                if debug_mode:
+                    self._safe_print(f"🔍 Query marked vague but dataset loaded - treating as data query")
+                is_vague = False
+            elif debug_mode and is_vague:
                 self._safe_print(f"🔍 Query is VAGUE - skipping expensive APIs")
-            
+
             # If query is vague, hint to backend LLM to ask clarifying questions
             if is_vague:
                 api_results["query_analysis"] = {
@@ -7417,7 +7596,7 @@ JSON:"""
                     "suggestion": "Ask clarifying questions instead of guessing",
                     "reason": "Query needs more specificity to provide accurate answer"
                 }
-            
+
             # Skip Archive/FinSight if query is too vague, but still allow web search later
             if not is_vague:
                 # Archive API for research
@@ -7454,16 +7633,28 @@ JSON:"""
                         tools_used.append("finsight_api")
 
                 # Data Analysis tools (CSV, statistics, R)
+                if debug_mode:
+                    self._safe_print(f"🔍 Checking data_analysis: apis={request_analysis.get('apis', [])}, has_data_analysis={'data_analysis' in request_analysis.get('apis', [])}")
                 if "data_analysis" in request_analysis.get("apis", []):
+                    if debug_mode:
+                        self._safe_print(f"🔍 Data analysis API detected in request_analysis")
+
+                    # Get the analyzer - prefer tool_executor's, fallback to standalone
+                    analyzer = None
+                    if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+                        analyzer = self.tool_executor._data_analyzer
+                    elif self._data_analyzer:
+                        analyzer = self._data_analyzer
+
                     # DIRECT TOOL EXECUTION: Detect CSV file paths and auto-load
                     csv_file_match = re.search(r'([^\s]+\.csv|[^\s]+\.xlsx|[^\s]+\.tsv)', request.question)
-                    if csv_file_match:
+                    if csv_file_match and analyzer:
                         filepath = csv_file_match.group(1)
                         if debug_mode:
                             self._safe_print(f"📊 Auto-loading dataset: {filepath}")
 
                         try:
-                            result = self.tool_executor._execute_load_dataset({"filepath": filepath})
+                            result = analyzer.load_dataset(filepath)
                             if result.get("success"):
                                 api_results["dataset_loaded"] = result
                                 tools_used.append("data_analysis")
@@ -7476,63 +7667,35 @@ JSON:"""
                                 self._safe_print(f"❌ Dataset loading failed: {e}")
 
                     # SMART DATASET USAGE: If dataset already loaded, inject it into context
-                    if hasattr(self.tool_executor, '_data_analyzer'):
-                        analyzer = self.tool_executor._data_analyzer
-                        if hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
-                            df = analyzer.current_dataset
+                    if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                        df = analyzer.current_dataset
+                        if debug_mode:
+                            self._safe_print(f"📊 Dataset in memory: {len(df)} rows, {len(df.columns)} cols")
 
-                            # Always provide loaded dataset info to LLM
-                            api_results["dataset_in_memory"] = {
-                                "loaded": True,
-                                "rows": len(df),
-                                "columns": list(df.columns),
-                                "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
-                                "sample": df.head(3).to_dict('records') if len(df) > 0 else [],
-                                "filepath": getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else None
-                            }
+                        # Always provide loaded dataset info to LLM
+                        api_results["dataset_in_memory"] = {
+                            "loaded": True,
+                            "rows": len(df),
+                            "columns": list(df.columns),
+                            "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
+                            "sample": df.head(5).to_dict('records') if len(df) > 0 else [],
+                            "filepath": getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else None
+                        }
 
-                            # EXECUTE requested analysis automatically
-                            if any(kw in question_lower for kw in ['correlation', 'correlate', 'relationship']):
-                                try:
-                                    result = self.tool_executor._execute_analyze_data({"analysis_type": "correlation"})
-                                    api_results["analysis_result"] = result
-                                    tools_used.append("data_analysis")
-                                except:
-                                    pass
-
-                            elif any(kw in question_lower for kw in ['missing', 'outlier', 'clean', 'quality', 'check']):
-                                try:
-                                    missing_info = {col: int(df[col].isna().sum()) for col in df.columns}
-
-                                    # Detect outliers using IQR method for numeric columns
-                                    outliers = {}
-                                    for col in df.select_dtypes(include=['number']).columns:
-                                        Q1 = df[col].quantile(0.25)
-                                        Q3 = df[col].quantile(0.75)
-                                        IQR = Q3 - Q1
-                                        outlier_mask = (df[col] < (Q1 - 1.5 * IQR)) | (df[col] > (Q3 + 1.5 * IQR))
-                                        outlier_count = outlier_mask.sum()
-                                        if outlier_count > 0:
-                                            outliers[col] = int(outlier_count)
-
-                                    api_results["analysis_result"] = {
-                                        "missing_values": missing_info,
-                                        "outliers": outliers,
-                                        "total_rows": len(df)
-                                    }
-                                    tools_used.append("data_analysis")
-                                except Exception as e:
-                                    if debug_mode:
-                                        self._safe_print(f"❌ Quality check failed: {e}")
-
-                            elif ('compare' in question_lower or 'comparison' in question_lower) and \
-                                 ('between' in question_lower or 'group' in question_lower or 'by' in question_lower):
-                                try:
-                                    result = self.tool_executor._execute_analyze_data({"analysis_type": "descriptive"})
-                                    api_results["analysis_result"] = result
-                                    tools_used.append("data_analysis")
-                                except:
-                                    pass
+                        # Execute analysis - dataset is loaded, user wants something done with it
+                        try:
+                            # Run descriptive analysis - always provides useful context
+                            result = analyzer.descriptive_stats()
+                            api_results["analysis_result"] = result
+                            if "data_analysis" not in tools_used:
+                                tools_used.append("data_analysis")
+                            if debug_mode:
+                                self._safe_print(f"✅ Data analysis complete")
+                        except Exception as e:
+                            if debug_mode:
+                                self._safe_print(f"❌ Data analysis failed: {e}")
+                            if "data_analysis" not in tools_used:
+                                tools_used.append("data_analysis")
 
             # ========================================================================
             # PRIORITY 3: WEB SEARCH (Fallback - only if shell didn't handle AND no data yet)
@@ -7942,9 +8105,14 @@ JSON:"""
             # LOCAL MODE: Direct LLM calls using temp key or dev keys
             # Executes when self.client is NOT None (temp key loaded or USE_LOCAL_KEYS=true)
             debug_mode = self.debug_mode
+
+            # Detect language preference (must happen before any LLM calls)
+            self._detect_language_preference(request.question)
+
             if debug_mode:
                 self._safe_print(f"🐛 STATE CHECK: self.client={self.client is not None}, self.api_keys={len(getattr(self, 'api_keys', []))}, llm_provider={getattr(self, 'llm_provider', 'NONE')}")
                 self._safe_print(f"🔍 Using LOCAL MODE with {self.llm_provider.upper()} (self.client exists)")
+                self._safe_print(f"🔍 Language preference: {getattr(self, 'language_preference', 'en')}")
 
             if not self._check_query_budget(request.user_id):
                 effective_limit = self.daily_query_limit if self.daily_query_limit > 0 else self.per_user_query_limit
@@ -8000,11 +8168,39 @@ JSON:"""
             if is_analysis_query and self.shell_session:
                 if debug_mode:
                     self._safe_print("🐛 DEBUG: Entered analysis query branch!")
+
+                # Check if dataset is loaded
+                dataset_context_str = ""
+                analyzer = None
+                if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+                    analyzer = self.tool_executor._data_analyzer
+                elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+                    analyzer = self._data_analyzer
+
+                if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                    df = analyzer.current_dataset
+                    sample_str = df.head(5).to_string() if len(df) > 0 else "No data"
+                    dataset_context_str = f"""
+IMPORTANT - DATASET ALREADY LOADED:
+The variable 'df' is ALREADY loaded in memory with this data:
+- Shape: {len(df)} rows × {len(df.columns)} columns
+- Columns: {list(df.columns)}
+- Sample data:
+{sample_str}
+
+YOU MUST USE THE EXISTING 'df' VARIABLE - DO NOT call pd.read_csv() or create fake sample data.
+Example: average = df['Math'].mean()  # Correct - uses loaded df
+WRONG: df = pd.read_csv('file.csv')  # Dataset already loaded!
+WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
+"""
+
                 # STEP 1: Generate code using dedicated LLM call
                 code_gen_prompt = f"""Write Python code to answer this question: {request.question}
 
+{dataset_context_str}
+
 Requirements:
-- Use pandas if CSV files are mentioned
+- Use pandas if CSV files are mentioned AND no dataset is loaded yet
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
@@ -8044,11 +8240,19 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                     
                     if code_blocks:
                         code_to_run = code_blocks[0].strip()
-                        
+
+                        # STEP 1.5: If dataset is loaded, prepend dataframe loading code
+                        if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                            df = analyzer.current_dataset
+                            filepath = getattr(analyzer.dataset_info, 'filepath', None) if hasattr(analyzer, 'dataset_info') else None
+                            if filepath:
+                                df_loading_code = f"""import pandas as pd\ndf = pd.read_csv('{filepath}')\n\n"""
+                                code_to_run = df_loading_code + code_to_run
+
                         # STEP 2: Execute the code
                         if debug_mode:
                             print(f"🔧 Executing code:\n{code_to_run[:200]}...")
-                        
+
                         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                             f.write(code_to_run)
                             temp_path = f.name
@@ -8087,7 +8291,7 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                     # Fall through to normal processing
             
             # Analyze request type
-            request_analysis = await self._analyze_request_type(request.question)
+            request_analysis = await self._analyze_request_type(request.question, request.user_id, request.conversation_id)
             question_lower = request.question.lower()
             
             self._reset_data_sources()
@@ -8302,10 +8506,74 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                     api_results["research"] = {"error": result["error"]}
                     logger.warning(f"🔍 DEBUG: Archive API returned error: {result['error']}")
                 tools_used.append("archive_api")
-            
+
+            # Data Analysis tools (CSV, statistics, R) - LOCAL MODE
+            # This mirrors the BACKEND MODE data_analysis block (lines 7565-7627)
+            if "data_analysis" in request_analysis.get("apis", []):
+                if debug_mode:
+                    self._safe_print(f"🔍 [LOCAL] Data analysis API detected in request_analysis")
+
+                # Get the analyzer - prefer tool_executor's, fallback to standalone
+                analyzer = None
+                if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+                    analyzer = self.tool_executor._data_analyzer
+                elif self._data_analyzer:
+                    analyzer = self._data_analyzer
+
+                # DIRECT TOOL EXECUTION: Detect CSV file paths and auto-load
+                csv_file_match = re.search(r'([^\s]+\.csv|[^\s]+\.xlsx|[^\s]+\.tsv)', request.question)
+                if csv_file_match and analyzer:
+                    filepath = csv_file_match.group(1)
+                    if debug_mode:
+                        self._safe_print(f"📊 [LOCAL] Auto-loading dataset: {filepath}")
+
+                    try:
+                        result = analyzer.load_dataset(filepath)
+                        if result.get("success"):
+                            api_results["dataset_loaded"] = result
+                            tools_used.append("data_analysis")
+                            if debug_mode:
+                                self._safe_print(f"✅ [LOCAL] Dataset loaded: {result.get('rows')} rows, {result.get('columns')} cols")
+                        else:
+                            api_results["dataset_error"] = result.get("error", "Unknown error")
+                    except Exception as e:
+                        if debug_mode:
+                            self._safe_print(f"❌ [LOCAL] Dataset loading failed: {e}")
+
+                # SMART DATASET USAGE: If dataset already loaded, inject it into context
+                if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                    df = analyzer.current_dataset
+                    if debug_mode:
+                        self._safe_print(f"📊 [LOCAL] Dataset in memory: {len(df)} rows, {len(df.columns)} cols")
+
+                    # Always provide loaded dataset info to LLM
+                    api_results["dataset_in_memory"] = {
+                        "loaded": True,
+                        "rows": len(df),
+                        "columns": list(df.columns),
+                        "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
+                        "sample": df.head(5).to_dict('records') if len(df) > 0 else [],
+                        "filepath": getattr(analyzer.dataset_info, 'filepath', 'unknown') if hasattr(analyzer, 'dataset_info') else None
+                    }
+
+                    # Execute analysis - dataset is loaded, user wants something done with it
+                    try:
+                        # Run descriptive analysis - always provides useful context
+                        result = analyzer.descriptive_stats()
+                        api_results["analysis_result"] = result
+                        if "data_analysis" not in tools_used:
+                            tools_used.append("data_analysis")
+                        if debug_mode:
+                            self._safe_print(f"✅ [LOCAL] Data analysis complete")
+                    except Exception as e:
+                        if debug_mode:
+                            self._safe_print(f"❌ [LOCAL] Data analysis failed: {e}")
+                        if "data_analysis" not in tools_used:
+                            tools_used.append("data_analysis")
+
             # Build enhanced system prompt with trimmed sections based on detected needs
             system_prompt = self._build_system_prompt(request_analysis, memory_context, api_results)
-            
+
             # Build messages
             messages = [
                 {"role": "system", "content": system_prompt}
@@ -8685,7 +8953,7 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
             self._record_query_usage(request.user_id)
             
             # Analyze request
-            request_analysis = await self._analyze_request_type(request.question)
+            request_analysis = await self._analyze_request_type(request.question, request.user_id, request.conversation_id)
             question_lower = request.question.lower()
             self._reset_data_sources()
 
