@@ -1,25 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(NOCTURNAL_DEBUG=1 timeout 120 python3 /tmp/stress_test.py)",
-      "Bash(export NOCTURNAL_DEBUG=1)",
-      "Bash(echo $USE_LOCAL_KEYS)",
-      "Bash(export USE_LOCAL_KEYS=true)",
-      "Bash(ollama list:*)",
-      "Bash(curl -X POST https://cite-agent-api-720dfadd602c.herokuapp.com/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"email\"\"\"\":\"\"\"\"s1133958@mail.yzu.edu.tw\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"s1133958\"\"\"\"}')",
-      "Bash(curl -X POST 'https://cite-agent-api-720dfadd602c.herokuapp.com/auth/login' -H 'Content-Type: application/json' -d '{\"\"\"\"email\"\"\"\":\"\"\"\"s1133958@mail.yzu.edu.tw\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"s1133958\"\"\"\"}')",
-      "Bash(curl -X POST 'https://cite-agent-api-720dfadd602c.herokuapp.com/auth/login' -H 'Content-Type: application/json' -d '{\"\"email\"\":\"\"s1133958@mail.yzu.edu.tw\"\",\"\"password\"\":\"\"s1133958\"\"}')",
-      "Bash(curl:*)",
-      "Bash(cat:*)",
-      "Bash(NOCTURNAL_DEBUG=1 timeout 60 python3 quick_local_mode_test.py)",
-      "Bash(pip show:*)",
-      "Bash(python -m pytest tests/test_conversation_quality.py::test_data_analysis_workflow -v -s)",
-      "Bash(python3 -m pytest tests/test_conversation_quality.py::test_data_analysis_workflow -v -s)",
-      "Bash(timeout 120 python3 /tmp/traditional_mode_test.py)",
-      "Bash(timeout 300 python3 /tmp/comprehensive_test.py)",
-      "Bash(timeout:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\n🚀 v1.5.10: Anti-hallucination + dataset persistence fixes\n\nKey fixes:\n- Dataset context now includes sample data in LLM prompts\n- Explicit \"MUST USE df\" rules prevent fake data generation\n- Dataframe injection: prepends df=pd.read_csv() to generated code\n- Fallback path checks both tool_executor and standalone _data_analyzer\n\nArchitecture docs:\n- LOCAL MODE vs BACKEND MODE code paths documented\n- Testing mode confusion clarified (TRADITIONAL vs FUNCTION_CALLING)\n- Removed obsolete FC/TM docs (purged unused modes)\n\nTest results: 87.6 Math average, Science 90.4 highest (correct values)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

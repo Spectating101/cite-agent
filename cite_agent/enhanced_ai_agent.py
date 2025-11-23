@@ -3460,11 +3460,24 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 """
 
         # Generate and execute code
-        code_gen_prompt = f"""Write Python code to answer: {enriched_query}
-
-{dataset_context_str}
-
-Requirements:
+        # Build requirements based on whether dataset is loaded
+        if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+            requirements = """Requirements:
+- The 'df' variable is ALREADY LOADED - DO NOT call pd.read_csv() or load data
+- Use the existing 'df' DataFrame variable for all operations
+- Format numbers intelligently:
+  * Integers: print as integers (e.g., 120, not 120.0)
+  * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
+  * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
+- Never import network or scraping libraries (yfinance, requests, urllib, httpx). Use only the numeric context already provided.
+- Prefer matplotlib for plots. If plotting libraries are unavailable, print a textual summary instead of failing.
+- Avoid seaborn entirely (not installed in this runtime).
+- For factorial inputs above 500, use math.lgamma to estimate the number of digits and report the magnitude instead of printing the entire value.
+- Complete and runnable code
+- Print plain text output ONLY - NO LaTeX notation (no $\\boxed{{}}$, no $$, no \\frac, etc.)"""
+        else:
+            requirements = """Requirements:
 - Use any context variables provided above
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
@@ -3476,7 +3489,13 @@ Requirements:
 - Avoid seaborn entirely (not installed in this runtime).
 - For factorial inputs above 500, use math.lgamma to estimate the number of digits and report the magnitude instead of printing the entire value.
 - Complete and runnable code
-- Print plain text output ONLY - NO LaTeX notation (no $\\boxed{{}}$, no $$, no \\frac, etc.)
+- Print plain text output ONLY - NO LaTeX notation (no $\\boxed{{}}$, no $$, no \\frac, etc.)"""
+
+        code_gen_prompt = f"""Write Python code to answer: {enriched_query}
+
+{dataset_context_str}
+
+{requirements}
 
 Output ONLY the Python code in ```python ``` blocks."""
         
@@ -3499,6 +3518,14 @@ Output ONLY the Python code in ```python ``` blocks."""
             if code_blocks:
                 code_to_run = code_blocks[0].strip()
 
+                # DEBUG: Log what LLM generated BEFORE injection
+                if self.debug_mode:
+                    print("="*60)
+                    print("🔍 LLM GENERATED CODE (BEFORE INJECTION):")
+                    print("="*60)
+                    print(code_to_run[:500])
+                    print("="*60)
+
                 # If dataset is loaded, prepend dataframe loading code
                 if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
                     df = analyzer.current_dataset
@@ -3506,6 +3533,13 @@ Output ONLY the Python code in ```python ``` blocks."""
                     if filepath:
                         df_loading_code = f"""import pandas as pd\ndf = pd.read_csv('{filepath}')\n\n"""
                         code_to_run = df_loading_code + code_to_run
+
+                        # DEBUG: Log what we're actually executing
+                        if self.debug_mode:
+                            print("🔍 FINAL CODE (AFTER DF INJECTION):")
+                            print("="*60)
+                            print(code_to_run[:500])
+                            print("="*60)
 
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                     f.write(code_to_run)
@@ -8153,14 +8187,33 @@ JSON:"""
             is_analysis_query = any(kw in query_lower for kw in [
                 'correlation', 'correlate', 'regression', 'calculate', 'compute', 'analyze',
                 'analyse', 'estimate', 'predict', 'test', 'mean', 'average', 'variance',
-                'standard deviation', 'homework', 'problem', 'solve'
+                'standard deviation', 'homework', 'problem', 'solve',
+                'sum', 'total', 'maximum', 'max', 'minimum', 'min', 'median', 'mode',
+                'count', 'std', 'percentile', 'quartile'
             ])
             
             # Override: If LLM explicitly chose a different tool, respect that
+            # EXCEPTION: If dataset is loaded and LLM chose run_python_code, still use analysis path
+            # (because we need our anti-hallucination fixes)
             if llm_tool_choice and llm_tool_choice != 'analysis':
-                is_analysis_query = False
-                if debug_mode:
-                    self._safe_print(f"🧠 Overriding auto-execute: LLM chose '{llm_tool_choice}' instead of 'analysis'")
+                # Check if dataset is loaded
+                has_dataset = False
+                if self.tool_executor and hasattr(self.tool_executor, '_data_analyzer'):
+                    analyzer_check = self.tool_executor._data_analyzer
+                    if analyzer_check and hasattr(analyzer_check, 'current_dataset') and analyzer_check.current_dataset is not None:
+                        has_dataset = True
+                elif hasattr(self, '_data_analyzer') and self._data_analyzer:
+                    if hasattr(self._data_analyzer, 'current_dataset') and self._data_analyzer.current_dataset is not None:
+                        has_dataset = True
+
+                # If dataset loaded and LLM wants data-related tools, keep analysis path
+                if has_dataset and llm_tool_choice in ['run_python_code', 'data_analysis', 'financial', 'research']:
+                    if debug_mode:
+                        self._safe_print(f"🧠 Dataset loaded - using analysis path despite LLM choosing '{llm_tool_choice}'")
+                else:
+                    is_analysis_query = False
+                    if debug_mode:
+                        self._safe_print(f"🧠 Overriding auto-execute: LLM chose '{llm_tool_choice}' instead of 'analysis'")
             
             if debug_mode:
                 self._safe_print(f"🐛 DEBUG: is_analysis_query={is_analysis_query}, shell_session={self.shell_session is not None}")
@@ -8195,12 +8248,11 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 """
 
                 # STEP 1: Generate code using dedicated LLM call
-                code_gen_prompt = f"""Write Python code to answer this question: {request.question}
-
-{dataset_context_str}
-
-Requirements:
-- Use pandas if CSV files are mentioned AND no dataset is loaded yet
+                # Build requirements based on whether dataset is loaded
+                if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
+                    requirements = """Requirements:
+- The 'df' variable is ALREADY LOADED - DO NOT call pd.read_csv() or load data
+- Use the existing 'df' DataFrame variable for all operations
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
@@ -8208,7 +8260,24 @@ Requirements:
   * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
 - Code must be complete and runnable
 - Print plain text output ONLY - NO LaTeX notation (no $\\boxed{{}}$, no $$, no \\frac, etc.)
-- DO NOT explain, just write the code
+- DO NOT explain, just write the code"""
+                else:
+                    requirements = """Requirements:
+- Use pandas if CSV files are mentioned
+- Format numbers intelligently:
+  * Integers: print as integers (e.g., 120, not 120.0)
+  * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
+  * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
+- Code must be complete and runnable
+- Print plain text output ONLY - NO LaTeX notation (no $\\boxed{{}}$, no $$, no \\frac, etc.)
+- DO NOT explain, just write the code"""
+
+                code_gen_prompt = f"""Write Python code to answer this question: {request.question}
+
+{dataset_context_str}
+
+{requirements}
 
 Output ONLY the Python code wrapped in ```python ``` blocks."""
 
@@ -8241,6 +8310,14 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                     if code_blocks:
                         code_to_run = code_blocks[0].strip()
 
+                        # DEBUG: Log what LLM generated BEFORE injection
+                        if debug_mode:
+                            print("="*60)
+                            print("🔍 LLM GENERATED CODE (BEFORE INJECTION):")
+                            print("="*60)
+                            print(code_to_run[:500])
+                            print("="*60)
+
                         # STEP 1.5: If dataset is loaded, prepend dataframe loading code
                         if analyzer and hasattr(analyzer, 'current_dataset') and analyzer.current_dataset is not None:
                             df = analyzer.current_dataset
@@ -8248,6 +8325,13 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                             if filepath:
                                 df_loading_code = f"""import pandas as pd\ndf = pd.read_csv('{filepath}')\n\n"""
                                 code_to_run = df_loading_code + code_to_run
+
+                                # DEBUG: Log what we're actually executing
+                                if debug_mode:
+                                    print("🔍 FINAL CODE (AFTER DF INJECTION):")
+                                    print("="*60)
+                                    print(code_to_run[:500])
+                                    print("="*60)
 
                         # STEP 2: Execute the code
                         if debug_mode:
