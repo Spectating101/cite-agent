@@ -3468,6 +3468,7 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Very small numbers (< 0.01): preserve precision, don't round (e.g., 0.0069, not 0.01)
   * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
   * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
 - Never import network or scraping libraries (yfinance, requests, urllib, httpx). Use only the numeric context already provided.
@@ -3482,6 +3483,7 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Very small numbers (< 0.01): preserve precision, don't round (e.g., 0.0069, not 0.01)
   * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
   * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
 - Never import network or scraping libraries (yfinance, requests, urllib, httpx). Use only the numeric context already provided.
@@ -8189,7 +8191,10 @@ JSON:"""
                 'analyse', 'estimate', 'predict', 'test', 'mean', 'average', 'variance',
                 'standard deviation', 'homework', 'problem', 'solve',
                 'sum', 'total', 'maximum', 'max', 'minimum', 'min', 'median', 'mode',
-                'count', 'std', 'percentile', 'quartile'
+                'count', 'std', 'percentile', 'quartile',
+                'plot', 'chart', 'graph', 'visualize', 'visualise', 'histogram', 'scatter',
+                'distribution', 'frequency', 'pivot', 'group by', 'aggregate',
+                'filter', 'sort', 'rank', 'describe', 'summary', 'statistics'
             ])
             
             # Override: If LLM explicitly chose a different tool, respect that
@@ -8256,6 +8261,7 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Very small numbers (< 0.01): preserve precision, don't round (e.g., 0.0069, not 0.01)
   * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
   * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
 - Code must be complete and runnable
@@ -8267,6 +8273,7 @@ WRONG: data = {{'col': [1,2,3]}}  # Fake data - use real df!
 - Format numbers intelligently:
   * Integers: print as integers (e.g., 120, not 120.0)
   * Small floats (< 1000): print with minimal necessary decimals (e.g., 3.14159 → 3.14, 8.165 → 8.17)
+  * Very small numbers (< 0.01): preserve precision, don't round (e.g., 0.0069, not 0.01)
   * Large numbers (> 10000): use comma separators (e.g., 1,234,567)
   * Very large numbers (> 1M): consider using abbreviated notation (e.g., 1.5M, 2.3B)
 - Code must be complete and runnable
