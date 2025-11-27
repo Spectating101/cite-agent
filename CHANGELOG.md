@@ -5,6 +5,42 @@ All notable changes to Cite-Agent will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.11] - 2024-11-24 🧹
+
+### 🎨 Output Quality Improvements
+
+#### Clean Research Response Formatting
+- **Fixed Python code blocks appearing in research responses**
+  - Archive API responses now display as clean formatted text instead of raw Python code
+  - Papers automatically extracted and formatted with title, year, author, and DOI
+  - Applied to both BACKEND MODE and LOCAL MODE code paths
+
+#### Improved Code Block Handling
+- **Added intelligent code block detection in `_clean_formatting()`**
+  - Extracts paper data from code blocks and formats nicely
+  - Strips API/search code blocks (def, import, requests) entirely
+  - Preserves code blocks only for actual analysis queries
+
+#### Skip Auto-Execute for Research Queries
+- **Research queries no longer trigger code execution**
+  - Code blocks in archive_api responses are paper data, not executable code
+  - Fix applied to BACKEND MODE (line 8046-8050) and LOCAL MODE (line 9015-9018)
+
+### 🐛 Bug Fixes
+
+#### Fixed Transient "str.get" Error
+- **Added type check for Archive API responses** (line 4806-4808)
+  - Handles edge case where API returns string instead of dict
+  - Converts to proper error dict for graceful handling
+
+### 🧪 Testing
+- **5/5 comprehensive tests passing**
+  - Archive API (BERT, multiple papers)
+  - FinSight API (revenue, comparison)
+  - Anti-hallucination (fake topic returns "no papers found")
+
+---
+
 ## [1.5.10] - 2024-11-22 🔧
 
 ### 🐛 Critical Bug Fix - Data Analysis in LOCAL MODE

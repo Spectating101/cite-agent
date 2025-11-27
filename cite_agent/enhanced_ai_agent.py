@@ -2064,6 +2064,62 @@ class EnhancedNocturnalAgent:
 
         cleaned = response_text
 
+        # FIX v1.5.11: Strip Python code blocks from non-analysis responses
+        # The LLM sometimes outputs ```python ... ``` for research/financial queries
+        # Extract the data/content from code blocks instead of showing raw code
+        if '```python' in cleaned:
+            # Check if this looks like a research/financial response (not analysis)
+            code_block_match = re.search(r'```python\n(.*?)```', cleaned, re.DOTALL)
+            if code_block_match:
+                code_content = code_block_match.group(1)
+
+                # FIX v1.5.11b: Strip search/API code blocks (LLM generating code to call APIs)
+                # These contain def/import/requests but NOT actual paper data
+                is_api_code = ('def ' in code_content or 'import ' in code_content or
+                               'requests.' in code_content or 'search_' in code_content or
+                               '__main__' in code_content)
+                if is_api_code:
+                    # This is code to CALL an API, not paper results - strip entirely
+                    before_code = cleaned[:cleaned.find('```python')].strip()
+                    after_code = cleaned[cleaned.rfind('```') + 3:].strip() if cleaned.count('```') >= 2 else ''
+                    cleaned = before_code + ('\n\n' if before_code and after_code else '') + after_code
+                # If the code block contains paper/citation data, extract it
+                elif 'papers = [' in code_content or '"title"' in code_content or '"doi"' in code_content:
+                    # Extract the useful parts - paper info from the list
+                    # Remove the code block and keep any text before/after
+                    before_code = cleaned[:cleaned.find('```python')].strip()
+                    after_code = cleaned[cleaned.rfind('```') + 3:].strip() if cleaned.count('```') >= 2 else ''
+
+                    # Parse papers from the code if possible
+                    try:
+                        # Extract titles and DOIs from the code
+                        titles = re.findall(r'"title":\s*"([^"]+)"', code_content)
+                        dois = re.findall(r'"doi":\s*"([^"]+)"', code_content)
+                        authors = re.findall(r'"authors":\s*(?:"([^"]+)"|\[([^\]]+)\])', code_content)
+                        years = re.findall(r'"year":\s*(\d{4})', code_content)
+
+                        if titles:
+                            # Format papers nicely
+                            paper_list = []
+                            for i, title in enumerate(titles[:5]):  # Max 5 papers
+                                paper_info = f"**{title}**"
+                                if i < len(years):
+                                    paper_info += f" ({years[i]})"
+                                if i < len(authors):
+                                    auth = authors[i][0] if authors[i][0] else authors[i][1].replace('"', '').replace('[', '').replace(']', '')
+                                    paper_info += f" by {auth[:50]}..."  if len(auth) > 50 else f" by {auth}"
+                                if i < len(dois):
+                                    paper_info += f"\n   DOI: {dois[i]}"
+                                paper_list.append(paper_info)
+
+                            cleaned = before_code + ('\n\n' if before_code else '') + '\n\n'.join(paper_list) + ('\n\n' + after_code if after_code else '')
+                    except Exception:
+                        # If parsing fails, just strip the code block
+                        cleaned = before_code + ' ' + after_code
+                else:
+                    # For other code blocks (not paper data), just strip them
+                    cleaned = re.sub(r'```python\n.*?```', '', cleaned, flags=re.DOTALL)
+
         # FIX: PRESERVE LaTeX - do NOT strip math formulas
         # Removed regex that was stripping $$formula$$ and $formula$
 
@@ -4757,6 +4813,11 @@ Concise query (max {max_length} chars):"""
 
             # DEBUG: Log actual API response
             debug_mode = self.debug_mode
+
+            # FIX v1.5.11: Handle case where result might be a string instead of dict
+            if not isinstance(result, dict):
+                result = {"error": f"Unexpected response type: {type(result).__name__}", "raw": str(result)[:200]}
+
             if debug_mode:
                 self._safe_print(f"🔍 [DEBUG] Archive API response keys: {list(result.keys())}")
                 if "error" in result:
@@ -7981,7 +8042,13 @@ JSON:"""
                     'predict', 'test', 'run', 'execute', 'find', 'answer', 'result', 'output',
                     'homework', 'problem', 'question', 'assignment', 'correlation', 'correlate'
                 ])
-                
+
+                # FIX v1.5.11: Skip auto-execute for research queries (archive_api)
+                # The code blocks in research responses are paper data, not executable analysis
+                is_research_query = 'archive_api' in tools_used
+                if is_research_query:
+                    is_analysis_query = False
+
                 if is_analysis_query and hasattr(response, 'response') and response.response:
                     # Extract Python code blocks from LLM response
                     code_block_pattern = r'```python\n(.*?)```'
@@ -8945,7 +9012,10 @@ Output ONLY the Python code wrapped in ```python ``` blocks."""
                     )
 
             # CRITICAL: Auto-execute Python code blocks in response
-            code_blocks = re.findall(r'```python\n(.*?)```', final_response, re.DOTALL)
+            # FIX v1.5.11: Skip auto-execute for research queries (archive_api)
+            # The code blocks in research responses are paper data, not executable analysis
+            is_research_query = 'archive_api' in tools_used
+            code_blocks = re.findall(r'```python\n(.*?)```', final_response, re.DOTALL) if not is_research_query else []
             if code_blocks:
                 for code in code_blocks:
                     if self.debug_mode:

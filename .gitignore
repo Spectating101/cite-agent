@@ -148,3 +148,24 @@ TEST_*.md
 test_data_*/
 test_*research*.py
 *.zip
+
+# Windows installers and batch files
+*.bat
+*.ps1
+*INSTALLER*.txt
+*INSTALLER*.md
+FEEDBACK_FORM.html
+
+# R artifacts
+.Rhistory
+*.RData
+
+# Deployment/Docker (local only)
+Procfile
+runtime.txt
+.slugignore
+
+# Build artifacts
+cite_agent.egg-info/
+dist/
+build/
