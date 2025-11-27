@@ -169,3 +169,49 @@ runtime.txt
 cite_agent.egg-info/
 dist/
 build/
+
+# Local development
+.claude/settings.local.json
+scripts/archive/
+scripts/build_*.sh
+scripts/build_*.py
+scripts/build_*.bat
+scripts/*_beta*.py
+scripts/check_temp_key.sh
+scripts/token_report.py
+scripts/security_audit.py
+scripts/autonomy_harness.py
+scripts/run_dashboard.py
+
+# Data files
+data/
+cite_agent/data/
+cite-agent-api/data/
+
+# Documentation (development/internal only)
+docs/playbooks/
+docs/DEV_NOTES*.md
+docs/BETA_*.md
+docs/*_REPORT.md
+docs/SECURE_PACKAGING_GUIDE.md
+docs/TEMP_API_KEY_SYSTEM.md
+
+# Deployment configs (local only)
+monitoring/
+deploy.sh
+dev_setup.sh
+docker-compose.yml
+.env.production.example
+
+# Beta/validation tests
+tests/beta_*.py
+tests/enhanced/
+tests/validation/
+tests/session_affirmation.py
+tests/verification_*.py
+tests/*_bug_fixes.py
+tests/test_cli_flow.sh
+tests/test_version_*.py
+
+# GitHub workflows (build-related)
+.github/workflows/build-installer*.yml
